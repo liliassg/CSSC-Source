@@ -1,0 +1,18 @@
+{
+  "project": "MyProject",
+  "version": "1.0.0",
+  "include": "/include",
+  "plugins": "/plugins",
+  "compiler": {
+    "standard": "c++17",
+    "optimization": "O3",
+    "flags": ["-Wall", "-pthread"]
+  },
+  "types": {
+    "common": ["int", "float", "double", "string"]
+  },
+  "threading": {
+    "enabled": true,
+    "max_workers": 8
+  }
+}

@@ -1,0 +1,2093 @@
+#include("x86_64.gui") g;
+#include("stdio") fs;
+#include("system") sysm;
+#include("cssc.ini") ini;
+
+#stack[int, 64] lnCount;
+#define(lnCount) {
+    #scanp(lnCount, string, 0) s;
+    #stack[int, 64] c = 0;
+    #stack[int, 32] seg = 0;
+    select (s) ?ch {
+        if (ch == "\n") { if (seg == 1) { c = c + 1; } seg = 0; } else { seg = 1; }
+        jump;
+    }
+    if (seg == 1) { c = c + 1; }
+    #stack[int, 64] r = c;
+    #delete[c];
+    #delete[seg];
+    return r;
+}
+
+#stack[string, 512] lnAtOut = "";
+#stack[int, 64] lnAt;
+#define(lnAt) {
+    #scanp(lnAt, string, 0) s;
+    #scanp(lnAt, int, 1) n;
+    #req[lnAtOut] lnAtOut;
+    lnAtOut = "";
+    #stack[string, 512] cur = "";
+    #stack[int, 64] idx = 0;
+    #stack[int, 32] done = 0;
+    select (s) ?ch {
+        if (done == 0) {
+            if (ch == "\n") {
+                if (cur != "") {
+                    if (idx == n) { lnAtOut = cur; done = 1; }
+                    idx = idx + 1;
+                }
+                cur = "";
+            } else {
+                cur += &ch;
+            }
+        }
+        jump;
+    }
+    if (done == 0) { if (cur != "") { if (idx == n) { lnAtOut = cur; } } }
+    #delete[cur];
+    #delete[idx];
+    #delete[done];
+    return 0;
+}
+
+#stack[string, 8192] projDir = fs::cwd();
+#stack[string, 8192] dataIni = "__WORKSPACE_DATA_INI__";
+#stack[string, 65536] ignoreSet = "";
+#stack[string, 65536] filterOut = "";
+#stack[string, 65536] lastDiags = "";
+#stack[string, 65536] rawDiags = "";
+#stack[string, 4096] identityOut = "";
+#stack[string, 512] clipOut = "";
+#stack[int, 32] semaBook = 0;
+#stack[int, 32] bookOpenGuard = 0;
+#stack[int, 32] bookSel = 0;
+
+#stack[int, 64] identityOf;
+#define(identityOf) {
+    #scanp(identityOf, string, 0) line;
+    #req[identityOut] identityOut;
+    identityOut = "";
+    #stack[int, 32] colons = 0;
+    select (line) ?ch {
+        if (colons >= 3) { identityOut += &ch; } else { if (ch == ":") { colons = colons + 1; } }
+        jump;
+    }
+    #delete[colons];
+    return 0;
+}
+
+#stack[int, 64] clipStr;
+#define(clipStr) {
+    #scanp(clipStr, string, 0) s;
+    #scanp(clipStr, int, 1) maxc;
+    #req[clipOut] clipOut;
+    clipOut = "";
+    #stack[int, 64] c = 0;
+    select (s) ?ch {
+        if (c < maxc) { clipOut += &ch; c = c + 1; }
+        jump;
+    }
+    #delete[c];
+    return 0;
+}
+
+#stack[int, 64] pkHsv;
+#define(pkHsv) {
+    #scanp(pkHsv, int, 0) h;
+    #scanp(pkHsv, int, 1) s;
+    #scanp(pkHsv, int, 2) v;
+    #stack[int, 32] reg = h / 60;
+    #stack[int, 32] rem = (h - reg * 60) * 255 / 60;
+    #stack[int, 32] pp = v * (255 - s) / 255;
+    #stack[int, 32] qq = v * (255 - s * rem / 255) / 255;
+    #stack[int, 32] tt = v * (255 - s * (255 - rem) / 255) / 255;
+    #stack[int, 32] rr = 0;
+    #stack[int, 32] gg = 0;
+    #stack[int, 32] bb = 0;
+    if (reg == 0) { rr = v; gg = tt; bb = pp; }
+    if (reg == 1) { rr = qq; gg = v; bb = pp; }
+    if (reg == 2) { rr = pp; gg = v; bb = tt; }
+    if (reg == 3) { rr = pp; gg = qq; bb = v; }
+    if (reg == 4) { rr = tt; gg = pp; bb = v; }
+    if (reg >= 5) { rr = v; gg = pp; bb = qq; }
+    #stack[int, 64] argb = 4278190080;
+    argb = argb + rr * 65536;
+    argb = argb + gg * 256;
+    argb = argb + bb;
+    #stack[int, 64] out = argb;
+    #delete[argb];
+    #delete[bb]; #delete[gg]; #delete[rr];
+    #delete[tt]; #delete[qq]; #delete[pp];
+    #delete[rem]; #delete[reg];
+    return out;
+}
+
+#stack[int, 64] pkNib;
+#define(pkNib) {
+    #scanp(pkNib, int, 0) nib;
+    #stack[string, 256] tbl = "0123456789ABCDEF";
+    #stack[string, 64] out = "";
+    #stack[int, 32] idx = 0;
+    select (tbl) ?ch {
+        if (idx == nib) { out += &ch; }
+        idx = idx + 1;
+        jump;
+    }
+    #delete[idx];
+    #delete[tbl];
+    return out;
+}
+
+#stack[string, 128] pkHexStr = "";
+#stack[int, 64] pkHexFmt;
+#define(pkHexFmt) {
+    #scanp(pkHexFmt, int, 0) argb;
+    #req[pkHexStr] pkHexStr;
+    #req[pkNib] pkNib;
+    pkHexStr = "0x";
+    #stack[int, 64] divv = 268435456;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        #stack[int, 32] nib = argb / divv % 16;
+        pkNib(nib) c;
+        pkHexStr = pkHexStr + c;
+        #delete[c];
+        #delete[nib];
+        if (divv == 1) { go = 0; }
+        if (go == 1) { divv = divv / 16; }
+    }
+    #delete[go];
+    #delete[divv];
+    return 0;
+}
+
+#stack[int, 64] pathIsCssc;
+#define(pathIsCssc) {
+    #scanp(pathIsCssc, string, 0) p;
+    #stack[int, 64] n = p.length();
+    #stack[int, 32] r = 0;
+    if (n >= 5) {
+        if (p[n - 5] == 46) { if (p[n - 4] == 99) { if (p[n - 3] == 115) { if (p[n - 2] == 115) { if (p[n - 1] == 99) { r = 1; } } } } }
+    }
+    #delete[n];
+    return r;
+}
+
+#stack[int, 64] setHas;
+#define(setHas) {
+    #scanp(setHas, string, 0) set;
+    #scanp(setHas, string, 1) item;
+    #stack[int, 32] found = 0;
+    #stack[string, 4096] cur = "";
+    select (set) ?ch {
+        if (ch == "\n") { if (cur == item) { found = 1; } cur = ""; } else { cur += &ch; }
+        jump;
+    }
+    if (cur == item) { found = 1; }
+    #stack[int, 32] r = found;
+    #delete[found];
+    #delete[cur];
+    return r;
+}
+
+#stack[int, 64] filterDiags;
+#define(filterDiags) {
+    #scanp(filterDiags, string, 0) raw;
+    #req[filterOut] filterOut;
+    #req[ignoreSet] ignoreSet;
+    #req[identityOut] identityOut;
+    #req[identityOf] identityOf;
+    #req[setHas] setHas;
+    filterOut = "";
+    #stack[string, 8] nl = "\n";
+    #stack[string, 4096] cur = "";
+    select (raw) ?ch {
+        if (ch == "\n") {
+            if (cur != "") {
+                identityOf(cur);
+                setHas(ignoreSet, identityOut) hit;
+                if (hit == 0) { filterOut = filterOut + cur; filterOut = filterOut + nl; }
+                #delete[hit];
+            }
+            cur = "";
+        } else { cur += &ch; }
+        jump;
+    }
+    #delete[nl];
+    #delete[cur];
+    return 0;
+}
+
+#stack[int, 64] loadIgnores;
+#define(loadIgnores) {
+    #req[ignoreSet] ignoreSet;
+    #req[dataIni] dataIni;
+    #req[projDir] projDir;
+    ignoreSet = "";
+    #stack[string, 8] nl = "\n";
+    #stack[string, 8] igp = "ig";
+    #stack[string, 4] emp = "";
+    #stack[int, 64] k = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        #stack[string, 64] key = igp + k;
+        #stack[string, 4096] val = ini::read(dataIni, projDir, key, emp);
+        if (val == "") { go = 0; } else {
+            ignoreSet = ignoreSet + val;
+            ignoreSet = ignoreSet + nl;
+            k = k + 1;
+        }
+        #delete[key];
+        #delete[val];
+    }
+    #delete[nl];
+    #delete[igp];
+    #delete[emp];
+    #delete[k];
+    #delete[go];
+    return 0;
+}
+
+#stack[int, 64] saveIgnores;
+#define(saveIgnores) {
+    #req[ignoreSet] ignoreSet;
+    #req[dataIni] dataIni;
+    #req[projDir] projDir;
+    #req[lnAtOut] lnAtOut;
+    #req[lnAt] lnAt;
+    #req[lnCount] lnCount;
+    #stack[string, 8] igp = "ig";
+    #stack[string, 4] emp = "";
+    #stack[int, 64] oldN = 0;
+    #stack[int, 32] cg = 1;
+    while (cg == 1) {
+        #stack[string, 64] ck = igp + oldN;
+        #stack[string, 4096] cv = ini::read(dataIni, projDir, ck, emp);
+        if (cv == "") { cg = 0; } else { oldN = oldN + 1; }
+        #delete[ck];
+        #delete[cv];
+    }
+    #delete[cg];
+    #stack[int, 64] n = lnCount(ignoreSet);
+    #stack[int, 64] k = 0;
+    while (k < n) {
+        lnAt(ignoreSet, k);
+        #stack[string, 64] key = igp + k;
+        ini::write(dataIni, projDir, key, lnAtOut);
+        k = k + 1;
+        #delete[key];
+    }
+    #delete[k];
+    #stack[int, 64] d = n;
+    while (d < oldN) {
+        #stack[string, 64] dk = igp + d;
+        ini::delete(dataIni, projDir, dk);
+        d = d + 1;
+        #delete[dk];
+    }
+    #delete[d];
+    #delete[n];
+    #delete[oldN];
+    #delete[igp];
+    #delete[emp];
+    return 0;
+}
+
+#stack[int, 64] addIgnore;
+#define(addIgnore) {
+    #scanp(addIgnore, string, 0) ident;
+    #req[ignoreSet] ignoreSet;
+    #req[setHas] setHas;
+    #req[saveIgnores] saveIgnores;
+    if (ident != "") {
+        setHas(ignoreSet, ident) has;
+        if (has == 0) {
+            #stack[string, 8] nl = "\n";
+            ignoreSet = ignoreSet + ident;
+            ignoreSet = ignoreSet + nl;
+            saveIgnores();
+            #delete[nl];
+        }
+        #delete[has];
+    }
+    return 0;
+}
+
+#stack[int, 64] addAllIgnores;
+#define(addAllIgnores) {
+    #scanp(addAllIgnores, string, 0) raw;
+    #req[identityOut] identityOut;
+    #req[identityOf] identityOf;
+    #req[addIgnore] addIgnore;
+    #stack[string, 4096] cur = "";
+    select (raw) ?ch {
+        if (ch == "\n") {
+            if (cur != "") { identityOf(cur); addIgnore(identityOut); }
+            cur = "";
+        } else { cur += &ch; }
+        jump;
+    }
+    #delete[cur];
+    return 0;
+}
+
+#stack[int, 64] removeIgnoreAt;
+#define(removeIgnoreAt) {
+    #scanp(removeIgnoreAt, int, 0) target;
+    #req[ignoreSet] ignoreSet;
+    #req[saveIgnores] saveIgnores;
+    #stack[string, 65536] rebuilt = "";
+    #stack[string, 8] nl = "\n";
+    #stack[string, 4096] cur = "";
+    #stack[int, 64] idx = 0;
+    select (ignoreSet) ?ch {
+        if (ch == "\n") {
+            if (cur != "") {
+                if (idx != target) { rebuilt = rebuilt + cur; rebuilt = rebuilt + nl; }
+                idx = idx + 1;
+            }
+            cur = "";
+        } else { cur += &ch; }
+        jump;
+    }
+    ignoreSet = rebuilt;
+    saveIgnores();
+    #delete[rebuilt];
+    #delete[nl];
+    #delete[cur];
+    #delete[idx];
+    return 0;
+}
+
+#stack[string, 9000] runExe = "";
+#stack[string, 9000] runExeE = "";
+#stack[int, 32] deriveExe;
+#define(deriveExe) {
+    #scanp(deriveExe, string, 0) p;
+    #req[runExe] runExe;
+    #req[runExeE] runExeE;
+    runExe = "";
+    #stack[string, 8] de = ".exe";
+    #stack[string, 9000] acc = "";
+    select (p) ?ch {
+        if (ch == ".") { runExe = acc; }
+        acc += &ch;
+        jump;
+    }
+    if (runExe == "") { runExe = acc; }
+    runExeE = runExe + de;
+    #delete[de];
+    #delete[acc];
+    return 0;
+}
+
+loadIgnores();
+#stack[string, 8192] curPath = "";
+#stack[int, 32] savedRev = 0;
+#stack[int, 32] tick = 0;
+#stack[int, 16] menuOpen = 0;
+#stack[int, 32] menuX = 0;
+#stack[int, 32] menuY = 0;
+#stack[string, 8192] menuPath = "";
+#stack[int, 32] menuKind = 0;
+#stack[string, 8192] newBase = "";
+#stack[string, 8192] renameSrc = "";
+#stack[int, 32] delIsDir = 0;
+#stack[string, 8192] dragSrc = "";
+#stack[string, 8192] assetDir = "__ASSET_DIR__";
+#stack[string, 32] icoClean = "/no_error.png";
+#stack[string, 32] icoWarn = "/warning.png";
+#stack[string, 32] icoError = "/critical_error.png";
+#stack[string, 32] icoLogo = "/cssc_ide_logo.png";
+#stack[int, 32] lspStatus = 0;
+#stack[string, 32] runVer = "CSSC6";
+#stack[string, 32] compileVer = "CSSC6";
+#stack[int, 32] verOverlay = 0;
+#stack[int, 32] verSel = 0;
+#stack[int, 32] f5pend = 0;
+#stack[int, 32] f5frames = 0;
+#stack[int, 32] f6pend = 0;
+#stack[int, 32] f6frames = 0;
+#stack[int, 32] f6DblWin = 0;
+#stack[int, 32] f6DblAlt = 0;
+#stack[string, 8] shSuf = " --sh";
+#stack[string, 8192] verListStr = "__CSSC_VERSIONS__";
+#stack[int, 32] embVis = 0;
+#stack[int, 64] embHandle = 0;
+#stack[string, 8192] embPortsStr = "";
+#stack[string, 64] embCurPort = "none";
+#stack[int, 32] embPortSel = 0;
+#stack[string, 16384] embMon = "";
+#stack[string, 1024] embInput = "";
+#stack[int, 32] embBaud = 115200;
+#stack[string, 32] flashPre = "build --flash --port ";
+#stack[string, 8] spc = " ";
+#stack[string, 8] comPre = "COM: ";
+#stack[string, 8] nl = "\n";
+#stack[int, 32] ctrlOverlay = 0;
+#stack[int, 32] ctrlOpenGuard = 0;
+#stack[int, 32] colorPicker = 0;
+#stack[int, 32] pkGuard = 0;
+#stack[int, 32] pkH = 210;
+#stack[int, 32] pkS = 200;
+#stack[int, 32] pkV = 255;
+#stack[int, 32] pkTarget = 0 - 1;
+
+#stack[int, 32] designerOpen = 0;
+#stack[int, 32] dsnGuard = 0;
+#stack[int, 32] dsnFromKind = 0 - 1;
+#stack[string, 640] dsnNames = "Identifiers\nKeywords\nTypes\nNamespaces ::\nFunction calls\nDirectives #\nStrings\nNumbers\nComments\nPunctuation\nCopy &\nReference *\nWhitespace\nFree block\nprivate: / public:\nGeneric < >\nLabels\nMutier %";
+#stack[string, 2048] controlsText = "F1   analyze: sticky marks + hover\nF2   hide the analyze marks\nF5   run  |  Alt+F5 run w/ args  |  hold: interp\nF6   compile  |  F6 F6 compile+run  |  hold: cc\nAlt + F6 F6   compile + run with args\nF9   introspect a module\nF11  toggle fullscreen\nCtrl+S         save file\nCtrl+B         toggle file tree\nCtrl+J         toggle terminal\nCtrl+Down      duplicate line (#scanp arg+1)\nCtrl+ +/-      zoom in / out\nCtrl+Alt+ +/-  reset zoom\nAlt+C          clear the console (terminal)\nCtrl+X         interrupt command (terminal)\nCtrl+C         copy selection (terminal/overlay)\nEsc            close this overlay\nRight-click file    Run / Rename / Delete\nRight-click folder  New / Rename / Delete\nDrag onto folder    move file/folder";
+#stack[string, 16] runPre = "run \"";
+#stack[string, 16] cmpPre = "build \"";
+#stack[string, 16] hsimPre = "hsim \"";
+#stack[string, 16] dbgPre = "pctrace \"";
+#stack[string, 24] stayPre = "pctrace --stay ";
+#stack[string, 24] dbgVer = "CSSC7 debugger";
+#stack[string, 8] endq = "\"";
+#stack[string, 8] slash = "/";
+#stack[string, 8] cmpO = " -o \"";
+#stack[string, 8] chainOp = " && \"";
+#stack[string, 32] introPre = "introspect ";
+#stack[string, 32] cmdModList = "module list";
+#stack[string, 8] cmdHelp = "help";
+#stack[int, 32] promptMode = 0;
+#stack[int, 32] browseMode = 0;
+#stack[string, 8192] findTerm = "";
+#stack[int, 32] treeVis = 1;
+#stack[int, 32] termVis = 1;
+#stack[int, 32] relayout = 1;
+#stack[int, 32] statY = 0;
+#stack[int, 32] contentX = 352;
+#stack[int, 32] contentBottom = 512;
+#stack[int, 32] termY = 522;
+#stack[int, 32] termH = 200;
+#stack[int, 32] termDrag = 0;
+#stack[string, 8192] semaExe = "__SEMA_EXE__";
+#stack[string, 8192] semaDiag = "__SEMA_DIAG__";
+#stack[string, 8192] semaComplete = "__SEMA_COMPLETE__";
+#stack[string, 8192] semaHover = "__SEMA_HOVER__";
+#stack[string, 8192] semaSig = "__SEMA_SIG__";
+#stack[string, 8192] semaTmp = "__IDE_TMP__";
+#stack[string, 8192] semaCmpTmp = "__IDE_CMP_TMP__";
+#stack[string, 8192] semaPath = "";
+#stack[int, 32] semaRev = 0 - 1;
+#stack[int, 32] semaLastRev = 0 - 1;
+#stack[int, 32] semaStable = 0;
+#stack[int, 32] semaForce = 0;
+#stack[int, 64] semaJob = 0;
+#stack[int, 32] semaJobKind = 0;
+#stack[string, 64] verText = "CSSC __CSSC_VERSION__";
+#stack[string, 8] verSep = "  ";
+#stack[string, 8] verRunL = "run ";
+#stack[string, 8] verBldL = "build ";
+#stack[string, 160] verBar = "";
+#stack[int, 32] verDirty = 1;
+
+g::Screen(__SCR_W__, __SCR_H__, 60) scr;
+scr.loadPalette();
+#stack[int, 32] W = scr.width();
+#stack[int, 32] H = scr.height();
+
+g::Tree(scr) tree;
+tree.setRect(16, 60, 320, 452);
+tree.setRoot(projDir);
+tree.setIconDir("__ASSET_DIR__");
+#stack[string, 8300] logoP = assetDir + icoLogo;
+scr.setIcon(logoP);
+#delete[logoP];
+tree.setFocus(1);
+scr.add(tree);
+
+g::Tabs(scr) tabs;
+tabs.setRect(352, 56, 852, 26);
+scr.add(tabs);
+
+g::Editor(scr) ed;
+ed.setRect(352, 86, 852, 426);
+ed.setText("Select a file on the left to edit it. Ctrl+S saves, right-click a file for Run / Compile, or use the menu bar.");
+ed.setFocus(0);
+scr.add(ed);
+
+g::Terminal(scr) term;
+term.setRect(16, 522, 1188, 200);
+term.setCwd(projDir);
+term.setFocus(0);
+scr.add(term);
+
+g::Menu(scr) bar;
+bar.setRect(0, 0, 1220, 30);
+#stack[int, 16] mFile = bar.addMenu("File");
+#stack[int, 16] mEdit = bar.addMenu("Edit");
+#stack[int, 16] mSel = bar.addMenu("Selection");
+#stack[int, 16] mView = bar.addMenu("View");
+#stack[int, 16] mRun = bar.addMenu("Run");
+#stack[int, 16] mTerm = bar.addMenu("Terminal");
+#stack[int, 16] mEmb = bar.addMenu("Embedded");
+#stack[int, 16] mHelp = bar.addMenu("Help");
+bar.addItem(mFile, "New File", 101);
+bar.addItem(mFile, "New Folder", 102);
+bar.addItem(mFile, "Open Folder", 105);
+bar.addItem(mFile, "Open File", 106);
+bar.addItem(mFile, "Save", 103);
+bar.addItem(mFile, "Refresh Tree", 104);
+bar.addItem(mEdit, "Undo", 211);
+bar.addItem(mEdit, "Redo", 212);
+bar.addItem(mSel, "Select All", 221);
+bar.addItem(mSel, "Search", 222);
+bar.addItem(mSel, "Search Replace", 223);
+bar.addItem(mView, "Focus Terminal", 302);
+bar.addItem(mView, "Semantic Book", 306);
+bar.addItem(mView, "Design", 310);
+bar.addItem(mRun, "Run File", 201);
+bar.addItem(mRun, "Build File", 202);
+bar.addItem(mRun, "HSim File", 203);
+bar.addItem(mTerm, "Clear", 301);
+bar.addItem(mTerm, "Focus", 302);
+bar.addItem(mEmb, "Panel (flash / console / scan)", 601);
+bar.addItem(mHelp, "Controls", 504);
+bar.addItem(mHelp, "CSSC Help", 501);
+bar.addItem(mHelp, "Introspect", 502);
+bar.addItem(mHelp, "Module List", 503);
+verBar = verText + verSep + verRunL + runVer + verSep + verBldL + compileVer;
+bar.setRightText(verBar);
+scr.add(bar);
+
+g::Prompt(scr) dlg;
+scr.add(dlg);
+
+g::Browser(scr) fb;
+fb.setIconDir("__ASSET_DIR__");
+scr.add(fb);
+
+g::TextBox(scr) embTb;
+embTb.setRect(360, 400, 400, 30);
+embTb.setScale(2);
+
+g::Debugger(scr) dbg;
+
+if (verListStr == "") { verListStr = "CSSC6"; }
+#stack[string, 4] nlSep = "\n";
+verListStr = verListStr + nlSep + dbgVer;
+#delete[nlSep];
+
+while (scr.isOpen() != 0) {
+    #stack[int, 32] hk = scr.hotkey();
+    if (hk == 1) { treeVis = 1 - treeVis; tree.setVisible(treeVis); relayout = 1; }
+    if (hk == 2) { termVis = 1 - termVis; term.setVisible(termVis); relayout = 1; }
+    if (hk == 3) { colorPicker = 1; pkGuard = 1; pkTarget = 0 - 1; }
+    #delete[hk];
+
+    #stack[int, 32] fk = scr.funcKey();
+    if (verOverlay != 0) { fk = 0; }
+    if (dbg.active() != 0) {
+        dbg.update();
+        if (dbg.focused() != 0) {
+            if (fk == 1) { dbg.handleKey(112); }
+            fk = 0;
+            #stack[int, 32] dbk = scr.pollKey();
+            #stack[int, 32] dbkg = 1;
+            while (dbkg == 1) {
+                if (dbk == 0) { dbkg = 0; }
+                if (dbkg == 1) { dbg.handleKey(dbk); dbk = scr.pollKey(); }
+            }
+            #delete[dbk];
+            #delete[dbkg];
+            #stack[int, 32] dbc = scr.pollChar();
+            #stack[int, 32] dbcg = 1;
+            while (dbcg == 1) {
+                if (dbc == 0) { dbcg = 0; }
+                if (dbcg == 1) { dbg.handleChar(dbc); dbc = scr.pollChar(); }
+            }
+            #delete[dbc];
+            #delete[dbcg];
+        }
+    }
+    if (fk == 11) {
+        scr.toggleFullscreen();
+        W = scr.width();
+        H = scr.height();
+        relayout = 1;
+    }
+    if (fk == 5) { f5pend = 1; f5frames = 0; }
+    if (fk == 6) { f6pend = 1; f6frames = 0; }
+    if (fk == 9) {
+        dlg.open("Introspect module:");
+        promptMode = 3;
+    }
+    if (fk == 1) {
+        if (curPath != "") { if (pathIsCssc(curPath) == 1) {
+            if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+            fs::write(semaTmp, ed.text());
+            #stack[string, 9000] diagCmd = "\"" + semaDiag + "\" \"" + semaTmp + "\" \"" + projDir + "\"";
+            #stack[string, 65536] diagOut = sysm::capture(diagCmd);
+            rawDiags = diagOut;
+            filterDiags(diagOut);
+            diagOut = filterOut;
+            lastDiags = diagOut;
+            #stack[string, 9000] hdr = "[analyze] " + curPath;
+            term.write(hdr);
+            #delete[hdr];
+            if (diagOut == "") {
+                term.write("no issues found");
+            }
+            if (diagOut != "") {
+                #stack[string, 64] sp2 = "  ";
+                #stack[string, 64] colon = ":";
+                #stack[string, 128] fL = "";
+                #stack[string, 128] fC = "";
+                #stack[string, 64] fS = "";
+                #stack[string, 8192] fMsg = "";
+                #stack[string, 64] sev = "";
+                #stack[string, 8192] outL = "";
+                #stack[int, 32] fld = 0;
+                select (diagOut) ?ch {
+                    if (ch == "\n") {
+                        if (fL != "") {
+                            sev = "note";
+                            if (fS == "1") { sev = "error"; }
+                            if (fS == "2") { sev = "warn"; }
+                            outL = sp2 + fL + colon + fC + sp2 + sev + sp2 + fMsg;
+                            term.write(outL);
+                        }
+                        fL = ""; fC = ""; fS = ""; fMsg = ""; fld = 0;
+                        jump;
+                    }
+                    if (ch == ":") {
+                        if (fld < 4) { fld = fld + 1; jump; }
+                    }
+                    if (fld == 0) { fL += &ch; }
+                    if (fld == 1) { fC += &ch; }
+                    if (fld == 2) { fS += &ch; }
+                    if (fld == 4) { fMsg += &ch; }
+                    jump;
+                }
+                if (fL != "") {
+                    sev = "note";
+                    if (fS == "1") { sev = "error"; }
+                    if (fS == "2") { sev = "warn"; }
+                    outL = sp2 + fL + colon + fC + sp2 + sev + sp2 + fMsg;
+                    term.write(outL);
+                }
+                #delete[sp2]; #delete[colon]; #delete[fL]; #delete[fC]; #delete[fS];
+                #delete[fMsg]; #delete[sev]; #delete[outL]; #delete[fld];
+            }
+            ed.setStickyDiag(diagOut);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[diagCmd];
+            #delete[diagOut];
+        } }
+        semaForce = 1;
+        semaRev = 0 - 1;
+    }
+    if (fk == 2) {
+        ed.clearStickyDiag();
+    }
+    #delete[fk];
+
+    if (f5pend != 0) {
+        if (scr.fkeyDown(5) != 0) {
+            f5frames = f5frames + 1;
+            if (f5frames >= 16) { verOverlay = 5; verSel = 0; f5pend = 0; }
+        }
+        if (scr.fkeyDown(5) == 0) {
+            f5pend = 0;
+            if (curPath != "") {
+                if (ed.revision() != savedRev) { fs::write(curPath, ed.text()); savedRev = ed.revision(); }
+                if (scr.altDown() != 0) {
+                    if (runVer == dbgVer) {
+                        dlg.open("Debug --stay ms (blank = full speed):");
+                        promptMode = 20;
+                    } else {
+                        if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+                        dlg.open("Run args (interpreted):");
+                        promptMode = 10;
+                    }
+                } else {
+                    if (runVer == dbgVer) {
+                        #stack[string, 9000] dcmd = dbgPre + curPath + endq;
+                        dbg.start(dcmd, curPath);
+                        #delete[dcmd];
+                    } else {
+                        if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+                        #stack[string, 9000] f5c = runPre + curPath + endq;
+                        if (runVer != "CSSC6") { f5c = f5c + shSuf; }
+                        term.run(f5c);
+                        term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+                        #delete[f5c];
+                    }
+                }
+            }
+        }
+    }
+    if (f6pend != 0) {
+        if (scr.fkeyDown(6) != 0) {
+            f6frames = f6frames + 1;
+            if (f6frames >= 16) { verOverlay = 6; verSel = 0; f6pend = 0; f6DblWin = 0; }
+        }
+        if (scr.fkeyDown(6) == 0) {
+            f6pend = 0;
+            if (curPath != "") {
+                if (ed.revision() != savedRev) { fs::write(curPath, ed.text()); savedRev = ed.revision(); }
+                if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+                if (f6DblWin > 0) {
+                    f6DblWin = 0;
+                    #stack[int, 32] cAlt = f6DblAlt;
+                    if (scr.altDown() != 0) { cAlt = 1; }
+                    if (cAlt != 0) {
+                        dlg.open("Run args (compiled):");
+                        promptMode = 11;
+                    } else {
+                        deriveExe(curPath);
+                        #stack[string, 9000] f6x = cmpPre + curPath + endq + cmpO + runExe + endq;
+                        if (compileVer != "CSSC6") { f6x = f6x + shSuf; }
+                        f6x = f6x + chainOp + runExeE + endq;
+                        term.run(f6x);
+                        term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+                        #delete[f6x];
+                    }
+                    #delete[cAlt];
+                } else {
+                    f6DblWin = 14;
+                    f6DblAlt = 0;
+                    if (scr.altDown() != 0) { f6DblAlt = 1; }
+                }
+            }
+        }
+    }
+    if (f6DblWin > 0) {
+        if (f6pend == 0) {
+            f6DblWin = f6DblWin - 1;
+            if (f6DblWin == 0) {
+                if (curPath != "") {
+                    #stack[string, 9000] f6c = cmpPre + curPath + endq;
+                    if (compileVer != "CSSC6") { f6c = f6c + shSuf; }
+                    term.run(f6c);
+                    term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+                    #delete[f6c];
+                }
+            }
+        }
+    }
+    if (verOverlay != 0) {
+        #stack[int, 32] ok = scr.pollKey();
+        #stack[int, 32] okg = 1;
+        while (okg == 1) {
+            if (ok == 0) { okg = 0; }
+            if (okg == 1) {
+                if (ok == 38) { if (verSel > 0) { verSel = verSel - 1; } }
+                if (ok == 40) { #stack[int, 32] vc = lnCount(verListStr); if (verSel < vc - 1) { verSel = verSel + 1; } #delete[vc]; }
+                ok = scr.pollKey();
+            }
+        }
+        #delete[ok];
+        #delete[okg];
+        #stack[int, 32] oc = scr.pollChar();
+        #stack[int, 32] ocg = 1;
+        while (ocg == 1) {
+            if (oc == 0) { ocg = 0; }
+            if (ocg == 1) {
+                if (oc == 13) {
+                    lnAt(verListStr, verSel);
+                    if (verOverlay == 5) { runVer = lnAtOut; }
+                    if (verOverlay == 6) { compileVer = lnAtOut; }
+                    verDirty = 1;
+                    verOverlay = 0;
+                }
+                if (oc == 27) { verOverlay = 0; }
+                oc = scr.pollChar();
+            }
+        }
+        #delete[oc];
+        #delete[ocg];
+    }
+
+    if (ctrlOverlay != 0) {
+        #stack[int, 32] cc = scr.pollChar();
+        #stack[int, 32] ccg = 1;
+        while (ccg == 1) {
+            if (cc == 0) { ccg = 0; }
+            if (ccg == 1) {
+                if (cc == 27) { ctrlOverlay = 0; }
+                if (cc == 3) { scr.clipboardSet(controlsText); }
+                cc = scr.pollChar();
+            }
+        }
+        #delete[cc];
+        #delete[ccg];
+    }
+
+    if (semaBook != 0) {
+        #stack[int, 32] bc = scr.pollChar();
+        #stack[int, 32] bcg = 1;
+        while (bcg == 1) {
+            if (bc == 0) { bcg = 0; }
+            if (bcg == 1) {
+                if (bc == 27) { semaBook = 0; }
+                bc = scr.pollChar();
+            }
+        }
+        #delete[bc];
+        #delete[bcg];
+    }
+
+    if (colorPicker != 0) {
+        #stack[int, 32] pc = scr.pollChar();
+        #stack[int, 32] pcg = 1;
+        while (pcg == 1) {
+            if (pc == 0) { pcg = 0; }
+            if (pcg == 1) {
+                if (pc == 27) { colorPicker = 0; }
+                if (pc == 13) {
+                    #stack[int, 64] pkArgb = pkHsv(pkH, pkS, pkV);
+                    pkHexFmt(pkArgb);
+                    ed.insert(pkHexStr);
+                    colorPicker = 0;
+                    #delete[pkArgb];
+                }
+                pc = scr.pollChar();
+            }
+        }
+        #delete[pc];
+        #delete[pcg];
+    }
+
+    if (termVis != 0) {
+        #stack[int, 32] my = scr.mouseY();
+        #stack[int, 32] mdown = scr.mouseDown();
+        if (termDrag == 0) {
+            if (scr.mouseClicked() != 0) {
+                #stack[int, 32] onEdge = 0;
+                if (my >= termY - 5) { if (my <= termY + 5) { onEdge = 1; } }
+                if (onEdge != 0) { termDrag = 1; }
+                #delete[onEdge];
+            }
+        }
+        if (termDrag != 0) {
+            if (mdown == 0) { termDrag = 0; }
+            if (mdown != 0) {
+                #stack[int, 32] nh = statY - 6 - my;
+                if (nh < 200) { nh = 200; }
+                #stack[int, 32] maxh = statY - 120;
+                if (nh > maxh) { nh = maxh; }
+                if (nh != termH) { termH = nh; relayout = 1; }
+                #delete[nh];
+                #delete[maxh];
+            }
+        }
+        #delete[my];
+        #delete[mdown];
+    }
+
+    if (relayout != 0) {
+        statY = H - 34;
+        contentX = 16;
+        if (treeVis != 0) { contentX = 352; }
+        #stack[int, 32] contentW = W - contentX - 16;
+        termY = statY - termH - 6;
+        contentBottom = statY - 8;
+        if (termVis != 0) { contentBottom = termY - 8; }
+        bar.setRect(0, 0, W, 30);
+        tree.setRect(16, 60, 320, contentBottom - 60);
+        tabs.setRect(contentX, 56, contentW, 26);
+        ed.setRect(contentX, 86, contentW, contentBottom - 86);
+        term.setRect(16, termY, W - 32, termH);
+        relayout = 0;
+        #delete[contentW];
+    }
+
+    scr.clear(0xFF0B0910);
+    scr.fillRect(0, 30, W, 24, 0xFF141019);
+    scr.drawText(12, 34, projDir, 0xFF8A94A6, 2);
+    scr.fillRect(0, statY, W, 34, 0xFF1A1424);
+    if (curPath != "") {
+        #stack[string, 8300] siP = assetDir + icoClean;
+        if (lspStatus == 1) { siP = assetDir + icoWarn; }
+        if (lspStatus == 2) { siP = assetDir + icoError; }
+        scr.drawIcon(siP, 16, statY + 4, 2);
+        scr.drawText(42, statY + 8, curPath, 0xFFC74DE0, 2);
+        #delete[siP];
+    }
+
+    #stack[int, 32] modalOn = colorPicker;
+    if (designerOpen != 0) { modalOn = 1; }
+    scr.setModal(modalOn);
+    #delete[modalOn];
+    #stack[int, 32] hit = scr.update();
+    if (dbg.active() != 0) { dbg.click(scr.mouseX(), scr.mouseY(), scr.mouseClicked()); }
+    #stack[int, 32] barAct = bar.action();
+
+    if (barAct == 103) {
+        if (curPath != "" && ed.revision() != savedRev) {
+            fs::write(curPath, ed.text());
+            savedRev = ed.revision();
+        }
+    }
+    if (barAct == 104) { tree.refresh(); }
+    if (barAct == 211) { ed.undo(); }
+    if (barAct == 212) { ed.redo(); }
+    if (barAct == 221) { ed.selectAll(); ed.setFocus(1); tree.setFocus(0); term.setFocus(0); }
+    if (barAct == 301) { term.clear(); }
+    if (barAct == 302) { term.setFocus(1); tree.setFocus(0); ed.setFocus(0); }
+    if (barAct == 306) { semaBook = 1; bookOpenGuard = 1; bookSel = 0; }
+    if (barAct == 501) { term.run(cmdHelp); term.setFocus(1); tree.setFocus(0); ed.setFocus(0); }
+    if (barAct == 503) { term.run(cmdModList); term.setFocus(1); tree.setFocus(0); ed.setFocus(0); }
+    if (barAct == 504) { ctrlOverlay = 1; ctrlOpenGuard = 1; }
+    if (barAct == 601) {
+        embVis = 1 - embVis;
+        if (embVis == 1) {
+            embPortsStr = sysm::comScan();
+            embPortSel = 0;
+            embCurPort = "none";
+            if (lnCount(embPortsStr) > 0) { lnAt(embPortsStr, 0); embCurPort = lnAtOut; }
+            ed.setFocus(0); tree.setFocus(0); term.setFocus(0); embTb.setFocus(1);
+        }
+        if (embVis == 0) { embTb.setFocus(0); ed.setFocus(1); }
+        relayout = 1;
+    }
+    if (barAct == 101) { newBase = projDir; dlg.open("New file name:"); promptMode = 1; }
+    if (barAct == 102) { newBase = projDir; dlg.open("New folder name:"); promptMode = 2; }
+    if (barAct == 105) { fb.open(projDir, 1); browseMode = 1; }
+    if (barAct == 106) { fb.open(projDir, 0); browseMode = 2; }
+    if (barAct == 310) { designerOpen = 1; dsnGuard = 1; dsnFromKind = 0 - 1; }
+    if (barAct == 502) { dlg.open("Introspect module:"); promptMode = 3; }
+    if (barAct == 222) { dlg.open("Search:"); promptMode = 4; }
+    if (barAct == 223) { dlg.open("Replace all - find:"); promptMode = 5; }
+    if (barAct == 201) {
+        if (curPath != "") {
+            #stack[string, 9000] rc = runPre + curPath + endq;
+            term.run(rc);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[rc];
+        }
+    }
+    if (barAct == 202) {
+        if (curPath != "") {
+            #stack[string, 9000] bc = cmpPre + curPath + endq;
+            term.run(bc);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[bc];
+        }
+    }
+    if (barAct == 203) {
+        if (curPath != "") {
+            #stack[string, 9000] hc = hsimPre + curPath + endq;
+            term.run(hc);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[hc];
+        }
+    }
+
+    #stack[int, 32] pres = dlg.result();
+    if (pres == 1) {
+        #stack[int, 32] pm = promptMode;
+        if (pm == 1) {
+            #stack[string, 9000] npb = projDir;
+            if (newBase != "") { npb = newBase; }
+            #stack[string, 9000] np = npb + slash + dlg.text();
+            fs::createfile(np);
+            tree.refresh();
+            #delete[np];
+            #delete[npb];
+            newBase = "";
+            promptMode = 0;
+        }
+        if (pm == 2) {
+            #stack[string, 9000] ndb = projDir;
+            if (newBase != "") { ndb = newBase; }
+            #stack[string, 9000] nd = ndb + slash + dlg.text();
+            fs::createdir(nd);
+            tree.refresh();
+            #delete[nd];
+            #delete[ndb];
+            newBase = "";
+            promptMode = 0;
+        }
+        if (pm == 7) {
+            #stack[string, 9000] pfx = "";
+            #stack[string, 9000] acc = "";
+            select (renameSrc) ?ch {
+                acc += &ch;
+                if (ch == slash) { pfx = acc; }
+                jump;
+            }
+            #stack[string, 9000] rdst = pfx + dlg.text();
+            fs::move(renameSrc, rdst);
+            tree.refresh();
+            #delete[pfx];
+            #delete[acc];
+            #delete[rdst];
+            promptMode = 0;
+        }
+        if (pm == 8) {
+            if (dlg.text() == "yes") {
+                if (delIsDir != 0) { fs::removedir(menuPath); }
+                if (delIsDir == 0) { fs::removefile(menuPath); }
+                tree.refresh();
+            }
+            promptMode = 0;
+        }
+        if (pm == 3) {
+            #stack[string, 9000] ic = introPre + dlg.text();
+            term.run(ic);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[ic];
+            promptMode = 0;
+        }
+        if (pm == 4) {
+            ed.search(dlg.text());
+            ed.setFocus(1); tree.setFocus(0); term.setFocus(0);
+            promptMode = 0;
+        }
+        if (pm == 5) {
+            findTerm = dlg.text();
+            dlg.open("Replace all - with:");
+            promptMode = 6;
+        }
+        if (pm == 6) {
+            ed.replaceAll(findTerm, dlg.text());
+            ed.clearSearch();
+            ed.setFocus(1); tree.setFocus(0); term.setFocus(0);
+            promptMode = 0;
+        }
+        if (pm == 10) {
+            #stack[string, 9000] rxi = runPre + curPath + endq + spc + dlg.text();
+            if (runVer != "CSSC6") { rxi = rxi + shSuf; }
+            term.run(rxi);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[rxi];
+            promptMode = 0;
+        }
+        if (pm == 11) {
+            deriveExe(curPath);
+            #stack[string, 9000] rxc = cmpPre + curPath + endq + cmpO + runExe + endq;
+            if (compileVer != "CSSC6") { rxc = rxc + shSuf; }
+            rxc = rxc + chainOp + runExeE + endq + spc + dlg.text();
+            term.run(rxc);
+            term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+            #delete[rxc];
+            promptMode = 0;
+        }
+        if (pm == 20) {
+            if (curPath != "") {
+                if (ed.revision() != savedRev) { fs::write(curPath, ed.text()); savedRev = ed.revision(); }
+                #stack[string, 9000] dsc = dbgPre + curPath + endq;
+                if (dlg.text() != "") {
+                    dsc = stayPre + dlg.text() + spc + endq + curPath + endq;
+                }
+                dbg.start(dsc, curPath);
+                #delete[dsc];
+            }
+            promptMode = 0;
+        }
+        #delete[pm];
+    }
+    #delete[pres];
+
+    #stack[int, 32] fbres = fb.result();
+    if (fbres == 1) {
+        if (browseMode == 1) {
+            projDir = fb.chosen();
+            tree.setRoot(projDir);
+            term.setCwd(projDir);
+            curPath = "";
+        }
+        if (browseMode == 2) {
+            if (curPath != "" && ed.revision() != savedRev) {
+                fs::write(curPath, ed.text());
+            }
+            curPath = fb.chosen();
+            ed.setText(fs::read(curPath));
+            ed.setLanguageForPath(curPath);
+            savedRev = ed.revision();
+            tabs.add(curPath);
+        }
+        browseMode = 0;
+    }
+    #delete[fbres];
+
+    #stack[int, 32] tabClick = tabs.clicked();
+    if (tabClick != 0) {
+        if (curPath != "" && ed.revision() != savedRev) {
+            fs::write(curPath, ed.text());
+        }
+        tabs.setActive(tabClick);
+        curPath = tabs.activePath();
+        ed.setText(fs::read(curPath));
+        ed.setLanguageForPath(curPath);
+        savedRev = ed.revision();
+        ed.setFocus(1); tree.setFocus(0); term.setFocus(0);
+    }
+    #delete[tabClick];
+
+    #stack[int, 32] tabClose = tabs.closeRequested();
+    if (tabClose != 0) {
+        #stack[string, 9000] closePath = tabs.pathOf(tabClose);
+        if (closePath == curPath && ed.revision() != savedRev) {
+            fs::write(curPath, ed.text());
+        }
+        tabs.remove(tabClose);
+        if (tabs.count() != 0) {
+            curPath = tabs.activePath();
+            ed.setText(fs::read(curPath));
+            ed.setLanguageForPath(curPath);
+            savedRev = ed.revision();
+        } else {
+            curPath = "";
+            ed.setText("");
+        }
+        #delete[closePath];
+    }
+    #delete[tabClose];
+
+    if (menuOpen == 1) {
+        if (scr.mouseClicked() != 0) {
+            #stack[int, 32] mrow = 0 - 1;
+            if (scr.mouseX() >= menuX) {
+                if (scr.mouseX() < menuX + 210) {
+                    if (scr.mouseY() >= menuY) { mrow = (scr.mouseY() - menuY) / 34; }
+                }
+            }
+            if (menuKind == 0) {
+                if (mrow == 0) {
+                    #stack[string, 9000] rc = endq + menuPath + endq;
+                    if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+                    term.run(rc);
+                    term.setFocus(1); tree.setFocus(0); ed.setFocus(0);
+                    #delete[rc];
+                }
+                if (mrow == 1) { renameSrc = menuPath; dlg.open("Rename to:"); promptMode = 7; }
+                if (mrow == 2) { delIsDir = 0; dlg.open("Type yes + Enter to delete:"); promptMode = 8; }
+            }
+            if (menuKind == 1) {
+                if (mrow == 0) { newBase = menuPath; dlg.open("New file name:"); promptMode = 1; }
+                if (mrow == 1) { newBase = menuPath; dlg.open("New folder name:"); promptMode = 2; }
+                if (mrow == 2) { renameSrc = menuPath; dlg.open("Rename to:"); promptMode = 7; }
+                if (mrow == 3) { delIsDir = 1; dlg.open("Type yes + Enter to delete:"); promptMode = 8; }
+            }
+            if (menuKind == 2) {
+                if (mrow == 0) { newBase = projDir; dlg.open("New file name:"); promptMode = 1; }
+                if (mrow == 1) { newBase = projDir; dlg.open("New folder name:"); promptMode = 2; }
+            }
+            #delete[mrow];
+            menuOpen = 0;
+        }
+    }
+
+    if (menuOpen == 0 && bar.isOpen() == 0 && barAct == 0 && embVis == 0) {
+        if (scr.mouseDown() != 0) {
+            if (termVis != 0 && scr.mouseY() >= termY) {
+                tree.setFocus(0); ed.setFocus(0); term.setFocus(1);
+            }
+            if (treeVis != 0 && scr.mouseY() >= 60 && scr.mouseY() < contentBottom && scr.mouseX() < contentX) {
+                tree.setFocus(1); ed.setFocus(0); term.setFocus(0);
+            }
+            if (scr.mouseY() >= 86 && scr.mouseY() < contentBottom && scr.mouseX() >= contentX) {
+                tree.setFocus(0); ed.setFocus(1); term.setFocus(0);
+            }
+        }
+        if (hit != 0) {
+            if (curPath != "" && ed.revision() != savedRev) {
+                fs::write(curPath, ed.text());
+            }
+            curPath = tree.selectedPath();
+            ed.setText(fs::read(curPath));
+            ed.setLanguageForPath(curPath);
+            savedRev = ed.revision();
+            tabs.add(curPath);
+        }
+        #stack[int, 32] rc = tree.rightClicked();
+        if (rc != 0) {
+            menuOpen = 1;
+            menuPath = tree.selectedPath();
+            menuX = scr.mouseX();
+            menuY = scr.mouseY();
+            if (tree.selectedIsDir() == 0) { menuKind = 0; }
+            if (tree.selectedIsDir() != 0) { menuKind = 1; newBase = menuPath; }
+        }
+        if (rc == 0) {
+            if (scr.mouseRight() != 0) {
+                if (treeVis != 0) {
+                    if (scr.mouseX() >= 16) {
+                        if (scr.mouseX() < contentX) {
+                            if (scr.mouseY() >= 60) {
+                                if (scr.mouseY() < contentBottom) {
+                                    menuOpen = 1; menuKind = 2; newBase = projDir;
+                                    menuX = scr.mouseX(); menuY = scr.mouseY();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #delete[rc];
+    }
+
+    #stack[int, 32] dropOk = tree.dropReady();
+    if (dropOk != 0) {
+        #stack[string, 9000] dsrc = tree.dropSrc();
+        #stack[string, 9000] ddst = tree.dropDst();
+        #stack[string, 9000] base = "";
+        select (dsrc) ?ch {
+            if (ch == slash) { base = ""; } else { base += &ch; }
+            jump;
+        }
+        #stack[string, 9000] finalDst = ddst + slash + base;
+        fs::move(dsrc, finalDst);
+        tree.refresh();
+        #delete[dsrc];
+        #delete[ddst];
+        #delete[base];
+        #delete[finalDst];
+    }
+    #delete[dropOk];
+
+    if (ed.saveRequested() != 0) {
+        if (curPath != "" && ed.revision() != savedRev) {
+            fs::write(curPath, ed.text());
+            savedRev = ed.revision();
+        }
+    }
+
+    tick = tick + 1;
+    if (tick > 45) {
+        tick = 0;
+        if (curPath != "" && ed.revision() != savedRev) {
+            fs::write(curPath, ed.text());
+            savedRev = ed.revision();
+        }
+        tree.refresh();
+    }
+
+    if (curPath != semaPath) {
+        semaPath = curPath;
+        ed.setOwnership("");
+        semaRev = 0 - 1;
+        semaLastRev = 0 - 1;
+        semaStable = 0;
+        semaForce = 1;
+    }
+    if (curPath != "") {
+        #stack[int, 32] curRev = ed.revision();
+        if (curRev != semaLastRev) {
+            semaLastRev = curRev;
+            semaStable = 0;
+        }
+        if (curRev == semaLastRev) {
+            semaStable = semaStable + 1;
+        }
+        #stack[int, 32] doSema = 0;
+        if (semaStable >= 25) { doSema = 1; }
+        if (semaForce == 1) { doSema = 1; }
+        if (pathIsCssc(curPath) == 0) { doSema = 0; }
+
+        if (doSema == 1) {
+            if (semaJob == 0) {
+                if (semaLastRev != semaRev) {
+                    semaRev = semaLastRev;
+                    semaForce = 0;
+                    fs::write(semaTmp, ed.text());
+                    #stack[string, 9000] semaCmd = "\"" + semaExe + "\" \"" + semaTmp + "\"";
+                    semaJob = sysm::captureAsync(semaCmd);
+                    semaJobKind = 0;
+                    #delete[semaCmd];
+                }
+            }
+        }
+        #delete[doSema];
+        #delete[curRev];
+    }
+    if (semaJob != 0) {
+        if (sysm::capturePoll(semaJob) == 1) {
+            #stack[string, 65536] jres = sysm::captureTake(semaJob);
+            semaJob = 0;
+            if (semaJobKind == 0) {
+                ed.setOwnership(jres);
+                #stack[string, 9000] dgCmd = "\"" + semaDiag + "\" \"" + semaTmp + "\" \"" + projDir + "\"";
+                semaJob = sysm::captureAsync(dgCmd);
+                semaJobKind = 1;
+                #delete[dgCmd];
+            } else {
+                rawDiags = jres;
+                filterDiags(jres);
+                jres = filterOut;
+                lastDiags = jres;
+                ed.setDiagnostics(jres);
+
+                lspStatus = 0;
+                #stack[int, 32] lsFld = 0;
+                #stack[string, 8] lsSev = "";
+                select (jres) ?lc {
+                    if (lc == "\n") {
+                        if (lsSev == "1") { lspStatus = 2; }
+                        if (lsSev == "2") { if (lspStatus < 1) { lspStatus = 1; } }
+                        lsFld = 0; lsSev = "";
+                        jump;
+                    }
+                    if (lc == ":") { if (lsFld < 4) { lsFld = lsFld + 1; } jump; }
+                    if (lsFld == 2) { lsSev += &lc; }
+                    jump;
+                }
+                if (lsSev == "1") { lspStatus = 2; }
+                if (lsSev == "2") { if (lspStatus < 1) { lspStatus = 1; } }
+                #delete[lsFld];
+                #delete[lsSev];
+            }
+            #delete[jres];
+        }
+    }
+
+    #stack[int, 32] wantCmp = ed.completeReq();
+    if (wantCmp == 1) {
+        fs::write(semaCmpTmp, ed.completionQuery());
+        #stack[string, 9000] cmpCmd = "\"" + semaComplete + "\" \"" + semaCmpTmp + "\"";
+        #stack[string, 65536] cmpOut = sysm::capture(cmpCmd);
+        ed.setCompletions(cmpOut);
+        #delete[cmpCmd];
+        #delete[cmpOut];
+    }
+    #delete[wantCmp];
+
+    #stack[int, 32] wantHov = ed.hoverReq();
+    if (wantHov == 1) {
+        fs::write(semaCmpTmp, ed.hoverQuery());
+        #stack[string, 9000] hovCmd = "\"" + semaHover + "\" \"" + semaCmpTmp + "\"";
+        #stack[string, 65536] hovOut = sysm::capture(hovCmd);
+        ed.setHover(hovOut);
+        #delete[hovCmd];
+        #delete[hovOut];
+    }
+    #delete[wantHov];
+
+    #stack[int, 32] wantSig = ed.sigReq();
+    if (wantSig == 1) {
+        fs::write(semaCmpTmp, ed.sigQuery());
+        #stack[string, 9000] sigCmd = "\"" + semaSig + "\" \"" + semaCmpTmp + "\"";
+        #stack[string, 65536] sigOut = sysm::capture(sigCmd);
+        ed.setSignature(sigOut);
+        #delete[sigCmd];
+        #delete[sigOut];
+    }
+    #delete[wantSig];
+
+    if (verDirty != 0) {
+        verBar = verText + verSep + verRunL + runVer + verSep + verBldL + compileVer;
+        bar.setRightText(verBar);
+        verDirty = 0;
+    }
+
+    ed.setIpLine(dbg.ipLine());
+    scr.render();
+
+    if (embVis != 0) {
+        #stack[int, 32] px = contentX;
+        #stack[int, 32] py = 86;
+        #stack[int, 32] pw = W - px - 16;
+        #stack[int, 32] ph = contentBottom - 86;
+        if (embHandle != 0) {
+            #stack[string, 4096] sr = sysm::comRead(embHandle);
+            if (sr != "") { embMon += sr; }
+            #delete[sr];
+        }
+        scr.fillRect(px, py, pw, ph, 0xF00B0F18);
+        scr.drawRect(px, py, pw, ph, 0xC0C74DE0);
+        #stack[int, 32] by = py + 6;
+        #stack[int, 32] np = lnCount(embPortsStr);
+        #stack[string, 96] comLbl = comPre + embCurPort;
+        scr.fillRect(px + 8, by, 200, 26, 0x30C74DE0);
+        scr.drawText(px + 16, by + 6, comLbl, 0xFFE6E2F0, 2);
+        scr.fillRect(px + 214, by, 80, 26, 0x304DE0C7);
+        scr.drawText(px + 226, by + 6, "Scan", 0xFF5FE0A0, 2);
+        #stack[string, 16] connLbl = "Connect";
+        if (embHandle != 0) { connLbl = "Disconnect"; }
+        scr.fillRect(px + 300, by, 160, 26, 0x304DE0C7);
+        scr.drawText(px + 312, by + 6, connLbl, 0xFF9FE8FF, 2);
+        scr.fillRect(px + 468, by, 90, 26, 0x30FF5FB0);
+        scr.drawText(px + 480, by + 6, "Flash", 0xFFFF8FC0, 2);
+        #stack[int, 32] monY = py + 40;
+        #stack[int, 32] monH = ph - 84;
+        scr.fillRect(px + 8, monY, pw - 16, monH, 0xC0060910);
+        #stack[int, 32] visLines = monH / 20;
+        #stack[int, 32] totLines = 1;
+        select (embMon) ?mch { if (mch == "\n") { totLines = totLines + 1; } jump; }
+        #stack[int, 32] skipL = 0;
+        if (totLines > visLines) { skipL = totLines - visLines; }
+        #stack[int, 32] curL = 0;
+        #stack[int, 32] drawnY = monY + 4;
+        #stack[string, 512] mline = "";
+        #stack[int, 32] mlineC = 0;
+        #stack[int, 32] monMaxc = (pw - 28) / 16;
+        if (monMaxc < 4) { monMaxc = 4; }
+        select (embMon) ?mc2 {
+            if (mc2 == "\n") {
+                if (curL >= skipL) { scr.drawText(px + 14, drawnY, mline, 0xFFB8E0C8, 2); drawnY = drawnY + 20; }
+                curL = curL + 1;
+                mline = "";
+                mlineC = 0;
+            } else {
+                if (mlineC < monMaxc) { mline += &mc2; mlineC = mlineC + 1; }
+            }
+            jump;
+        }
+        if (curL >= skipL) { scr.drawText(px + 14, drawnY, mline, 0xFFB8E0C8, 2); }
+        #delete[monMaxc];
+        #delete[mlineC];
+        #delete[mline];
+        embTb.setRect(px + 8, py + ph - 34, pw - 110, 28);
+        embTb.update(scr);
+        embTb.draw();
+        scr.fillRect(px + pw - 96, py + ph - 34, 88, 28, 0x304DE0C7);
+        scr.drawText(px + pw - 84, py + ph - 28, "Send", 0xFF5FE0A0, 2);
+        if (scr.mouseClicked() != 0) {
+            #stack[int, 32] mx = scr.mouseX();
+            #stack[int, 32] myy = scr.mouseY();
+            #stack[int, 32] onRow = 0;
+            if (myy >= by) { if (myy < by + 26) { onRow = 1; } }
+            if (onRow == 1) {
+                if (mx >= px + 8) { if (mx < px + 208) {
+                    if (np > 0) {
+                        embPortSel = embPortSel + 1;
+                        if (embPortSel >= np) { embPortSel = 0; }
+                        lnAt(embPortsStr, embPortSel); embCurPort = lnAtOut;
+                    }
+                } }
+                if (mx >= px + 214) { if (mx < px + 294) {
+                    embPortsStr = sysm::comScan();
+                    embPortSel = 0;
+                    embCurPort = "none";
+                    if (lnCount(embPortsStr) > 0) { lnAt(embPortsStr, 0); embCurPort = lnAtOut; }
+                } }
+                if (mx >= px + 300) { if (mx < px + 460) {
+                    if (embHandle == 0) {
+                        if (np > 0) { embMon = ""; embHandle = sysm::comOpen(embCurPort, embBaud); }
+                    } else {
+                        sysm::comClose(embHandle); embHandle = 0;
+                    }
+                } }
+                if (mx >= px + 468) { if (mx < px + 558) {
+                    if (curPath != "") {
+                        if (np > 0) {
+                            if (termVis == 0) { termVis = 1; term.setVisible(1); relayout = 1; }
+                            #stack[string, 9000] fc = flashPre + embCurPort + spc + endq + curPath + endq;
+                            term.run(fc);
+                            #delete[fc];
+                        }
+                    }
+                } }
+            }
+            #stack[int, 32] onSend = 0;
+            if (mx >= px + pw - 96) { if (mx < px + pw - 8) { if (myy >= py + ph - 34) { if (myy < py + ph - 6) { onSend = 1; } } } }
+            if (onSend == 1) {
+                if (embHandle != 0) {
+                    #stack[string, 1024] tbt = embTb.text();
+                    #stack[string, 1100] sline = tbt + nl;
+                    sysm::comWrite(embHandle, sline);
+                    embMon += sline;
+                    embTb.setText("");
+                    #delete[tbt];
+                    #delete[sline];
+                }
+            }
+            #delete[onSend];
+            #delete[mx];
+            #delete[myy];
+            #delete[onRow];
+        }
+        #delete[comLbl];
+        #delete[connLbl];
+        #delete[np];
+        #delete[visLines];
+        #delete[totLines];
+        #delete[skipL];
+        #delete[curL];
+        #delete[drawnY];
+        #delete[monY];
+        #delete[monH];
+        #delete[by];
+        #delete[px];
+        #delete[py];
+        #delete[pw];
+        #delete[ph];
+    }
+
+    if (termVis != 0) {
+        #stack[int, 32] splitCol = 0xFF2A2440;
+        if (termDrag != 0) { splitCol = 0xFFC74DE0; }
+        scr.fillRect(16, termY - 3, W - 32, 2, splitCol);
+        #delete[splitCol];
+    }
+
+    if (menuOpen == 1) {
+        #stack[int, 32] nrows = 3;
+        if (menuKind == 1) { nrows = 4; }
+        if (menuKind == 2) { nrows = 2; }
+        #stack[int, 32] mh = nrows * 34;
+        scr.fillRect(menuX, menuY, 210, mh, 0xF01A2230);
+        scr.drawRect(menuX, menuY, 210, mh, 0xC0C74DE0);
+        if (menuKind == 0) {
+            scr.drawText(menuX + 14, menuY + 9, "Run", 0xFF5FE0A0, 2);
+            scr.drawText(menuX + 14, menuY + 43, "Rename", 0xFFC8D2E0, 2);
+            scr.drawText(menuX + 14, menuY + 77, "Delete", 0xFFFF6A8A, 2);
+        }
+        if (menuKind == 1) {
+            scr.drawText(menuX + 14, menuY + 9, "New File", 0xFF5FE0A0, 2);
+            scr.drawText(menuX + 14, menuY + 43, "New Folder", 0xFF5FE0A0, 2);
+            scr.drawText(menuX + 14, menuY + 77, "Rename", 0xFFC8D2E0, 2);
+            scr.drawText(menuX + 14, menuY + 111, "Delete", 0xFFFF6A8A, 2);
+        }
+        if (menuKind == 2) {
+            scr.drawText(menuX + 14, menuY + 9, "New File", 0xFF5FE0A0, 2);
+            scr.drawText(menuX + 14, menuY + 43, "New Folder", 0xFF5FE0A0, 2);
+        }
+        #delete[nrows];
+        #delete[mh];
+    }
+
+    if (verOverlay != 0) {
+        #stack[int, 32] vn = lnCount(verListStr);
+        #stack[int, 32] bw = 300;
+        #stack[int, 32] bh = vn * 30 + 44;
+        #stack[int, 32] bx = (W - bw) / 2;
+        #stack[int, 32] by = 90;
+        scr.fillRect(bx, by, bw, bh, 0xF01A2230);
+        scr.drawRect(bx, by, bw, bh, 0xC0C74DE0);
+        if (verOverlay == 5) { scr.drawText(bx + 14, by + 10, "Select interpreter", 0xFF9FE8FF, 2); }
+        if (verOverlay == 6) { scr.drawText(bx + 14, by + 10, "Select compiler", 0xFF9FE8FF, 2); }
+        #stack[string, 32] verActive = "";
+        if (verOverlay == 5) { verActive = runVer; }
+        if (verOverlay == 6) { verActive = compileVer; }
+        #stack[int, 32] vi = 0;
+        #stack[string, 128] vname = "";
+        select (verListStr) ?vlc {
+            if (vlc == "\n") {
+                if (vname != "") {
+                    #stack[int, 32] ry = by + 40 + vi * 30;
+                    if (vname == verActive) { scr.fillRect(bx + 6, ry - 4, bw - 12, 28, 0x304DE0C7); }
+                    if (vi == verSel) { scr.fillRect(bx + 6, ry - 4, bw - 12, 28, 0x50C74DE0); }
+                    scr.drawText(bx + 18, ry, vname, 0xFFE6E2F0, 2);
+                    #delete[ry];
+                    vi = vi + 1;
+                }
+                vname = "";
+            } else {
+                vname += &vlc;
+            }
+            jump;
+        }
+        if (vname != "") {
+            #stack[int, 32] ryl = by + 40 + vi * 30;
+            if (vname == verActive) { scr.fillRect(bx + 6, ryl - 4, bw - 12, 28, 0x304DE0C7); }
+            if (vi == verSel) { scr.fillRect(bx + 6, ryl - 4, bw - 12, 28, 0x50C74DE0); }
+            scr.drawText(bx + 18, ryl, vname, 0xFFE6E2F0, 2);
+            #delete[ryl];
+        }
+        #delete[vname];
+        #delete[vi];
+        #delete[verActive];
+        if (scr.mouseClicked() != 0) {
+            #stack[int, 32] inBox = 0;
+            if (scr.mouseX() >= bx) {
+                if (scr.mouseX() < bx + bw) {
+                    if (scr.mouseY() >= by) {
+                        if (scr.mouseY() < by + bh) { inBox = 1; }
+                    }
+                }
+            }
+            if (inBox == 0) { verOverlay = 0; }
+            if (inBox == 1) {
+                #stack[int, 32] crow = (scr.mouseY() - by - 36) / 30;
+                if (crow >= 0) {
+                    if (crow < vn) {
+                        verSel = crow;
+                        lnAt(verListStr, crow);
+                        if (verOverlay == 5) { runVer = lnAtOut; }
+                        if (verOverlay == 6) { compileVer = lnAtOut; }
+                        verDirty = 1;
+                        verOverlay = 0;
+                    }
+                }
+                #delete[crow];
+            }
+            #delete[inBox];
+        }
+        #delete[vn];
+        #delete[bw];
+        #delete[bh];
+        #delete[bx];
+        #delete[by];
+    }
+
+    if (ctrlOverlay != 0) {
+        #stack[int, 32] cbw = 820;
+        #stack[int, 32] cbh = 560;
+        #stack[int, 32] cbx = (W - cbw) / 2;
+        #stack[int, 32] cby = (H - cbh) / 2;
+        scr.fillRect(cbx, cby, cbw, cbh, 0xFC0B1018);
+        scr.drawRect(cbx, cby, cbw, cbh, 0xC0C74DE0);
+        scr.drawText(cbx + 18, cby + 12, "Controls", 0xFF9FE8FF, 2);
+        scr.drawText(cbx + cbw - 360, cby + 12, "Ctrl+C copy   Esc / click-out close", 0xFF8A94A6, 2);
+        #stack[int, 32] cly = cby + 48;
+        #stack[string, 512] cline = "";
+        #stack[int, 32] ccol = 0;
+        select (controlsText) ?cch {
+            if (cch == "\n") {
+                scr.drawText(cbx + 18, cly, cline, 0xFFE6E2F0, 2);
+                cly = cly + 24;
+                cline = "";
+                ccol = 0;
+            } else {
+                if (ccol < 49) { cline += &cch; ccol = ccol + 1; }
+            }
+            jump;
+        }
+        scr.drawText(cbx + 18, cly, cline, 0xFFE6E2F0, 2);
+        #delete[ccol];
+        #delete[cline];
+        #delete[cly];
+        if (scr.mouseClicked() != 0) {
+            if (ctrlOpenGuard == 0) {
+                #stack[int, 32] inb = 0;
+                if (scr.mouseX() >= cbx) {
+                    if (scr.mouseX() < cbx + cbw) {
+                        if (scr.mouseY() >= cby) {
+                            if (scr.mouseY() < cby + cbh) { inb = 1; }
+                        }
+                    }
+                }
+                if (inb == 0) { ctrlOverlay = 0; }
+                #delete[inb];
+            }
+        }
+        ctrlOpenGuard = 0;
+        #delete[cbw];
+        #delete[cbh];
+        #delete[cbx];
+        #delete[cby];
+    }
+
+    if (semaBook != 0) {
+        #stack[int, 32] bw = 920;
+        #stack[int, 32] bh = 620;
+        #stack[int, 32] bx = (W - bw) / 2;
+        #stack[int, 32] by = (H - bh) / 2;
+        scr.fillRect(bx, by, bw, bh, 0xFC0B1018);
+        scr.drawRect(bx, by, bw, bh, 0xC0C74DE0);
+        scr.drawText(bx + 18, by + 12, "Semantic Book", 0xFF9FE8FF, 2);
+        scr.drawText(bx + bw - 300, by + 12, "Esc / click-out close", 0xFF8A94A6, 2);
+        scr.drawText(bx + 18, by + 40, projDir, 0xFF7C8698, 2);
+        #stack[int, 32] abx = bx + 18;
+        #stack[int, 32] aby = by + 72;
+        #stack[int, 32] abw = 340;
+        #stack[int, 32] abh = 30;
+        scr.fillRect(abx, aby, abw, abh, 0xFF1F2A3A);
+        scr.drawRect(abx, aby, abw, abh, 0xC0C74DE0);
+        scr.drawText(abx + 12, aby + 8, "Add all current errors", 0xFFCFE8FF, 2);
+        scr.drawText(bx + 18, by + 118, "Ignored (click a row to remove):", 0xFF8A94A6, 2);
+        #stack[int, 32] listY = by + 148;
+        #stack[int, 32] rowH = 26;
+        #stack[int, 64] cnt = lnCount(ignoreSet);
+        if (cnt == 0) {
+            scr.drawText(bx + 18, listY, "(no ignores for this project)", 0xFF6B7486, 2);
+        }
+        #stack[int, 64] li = 0;
+        while (li < cnt) {
+            lnAt(ignoreSet, li);
+            clipStr(lnAtOut, 54);
+            #stack[int, 64] ry = listY + li * rowH;
+            scr.drawText(bx + 18, ry, clipOut, 0xFFE6E2F0, 2);
+            li = li + 1;
+            #delete[ry];
+        }
+        #delete[li];
+        if (scr.mouseClicked() != 0) {
+            if (bookOpenGuard == 0) {
+                #stack[int, 32] mx = scr.mouseX();
+                #stack[int, 32] my = scr.mouseY();
+                #stack[int, 32] onBtn = 0;
+                if (mx >= abx) { if (mx < abx + abw) { if (my >= aby) { if (my < aby + abh) { onBtn = 1; } } } }
+                #stack[int, 32] inBox = 0;
+                if (mx >= bx) { if (mx < bx + bw) { if (my >= by) { if (my < by + bh) { inBox = 1; } } } }
+                if (onBtn == 1) {
+                    addAllIgnores(rawDiags);
+                    filterDiags(rawDiags);
+                    ed.setDiagnostics(filterOut);
+                    ed.setStickyDiag(filterOut);
+                    semaForce = 1;
+                } else {
+                    #stack[int, 32] onRow = 0;
+                    if (my >= listY) {
+                        #stack[int, 64] row = (my - listY) / rowH;
+                        if (row < cnt) {
+                            removeIgnoreAt(row);
+                            filterDiags(rawDiags);
+                            ed.setDiagnostics(filterOut);
+                            ed.setStickyDiag(filterOut);
+                            semaForce = 1;
+                            onRow = 1;
+                        }
+                        #delete[row];
+                    }
+                    if (onRow == 0) { if (inBox == 0) { semaBook = 0; } }
+                    #delete[onRow];
+                }
+                #delete[mx];
+                #delete[my];
+                #delete[onBtn];
+                #delete[inBox];
+            }
+        }
+        bookOpenGuard = 0;
+        #delete[cnt];
+        #delete[bw];
+        #delete[bh];
+        #delete[bx];
+        #delete[by];
+        #delete[abx];
+        #delete[aby];
+        #delete[abw];
+        #delete[abh];
+        #delete[listY];
+        #delete[rowH];
+    }
+
+    if (designerOpen != 0) {
+        #stack[int, 32] dcount = scr.syntaxCount();
+        #stack[int, 32] dw = 470;
+        #stack[int, 32] dh = 96 + dcount * 26;
+        #stack[int, 32] dx = (W - dw) / 2;
+        #stack[int, 32] dy = (H - dh) / 2;
+        if (dy < 10) { dy = 10; }
+        scr.fillRect(dx, dy, dw, dh, 0xFC0B1018);
+        scr.drawRect(dx, dy, dw, dh, 0xC0C74DE0);
+        scr.drawText(dx + 18, dy + 12, "Syntax Colour Designer", 0xFF9FE8FF, 2);
+        if (dsnFromKind >= 0) { scr.drawText(dx + 18, dy + 36, "Pick a source: left-click any colour to copy it here  (right-click = cancel)", 0xFFE5C07B, 1); }
+        if (dsnFromKind < 0)  { scr.drawText(dx + 18, dy + 36, "Left-click a swatch to edit  -  Right-click to copy a colour from another", 0xFF8A94A6, 1); }
+        #stack[int, 32] dmx = scr.mouseX();
+        #stack[int, 32] dmy = scr.mouseY();
+        #stack[int, 32] hoverK = 0 - 1;
+        #stack[int, 32] rowY = dy + 56;
+        #stack[int, 32] k = 0;
+        while (k < dcount) {
+            #stack[int, 32] ry = rowY + k * 26;
+            lnAt(dsnNames, k);
+            scr.drawText(dx + 22, ry + 4, lnAtOut, 0xFFE6E2F0, 1);
+            #stack[int, 64] kc = scr.syntaxColor(k);
+            #stack[int, 32] swx = dx + dw - 96;
+            scr.fillRect(swx, ry, 66, 20, kc);
+            scr.drawRect(swx, ry, 66, 20, 0x80FFFFFF);
+            if (k == dsnFromKind) { scr.drawRect(dx + 14, ry - 2, dw - 28, 24, 0xFFE5C07B); }
+            #stack[int, 32] onRow = 0;
+            if (dmx >= dx + 14) { if (dmx < dx + dw - 14) { if (dmy >= ry - 2) { if (dmy < ry + 22) { onRow = 1; } } } }
+            if (onRow == 1) { hoverK = k; scr.drawRect(dx + 14, ry - 2, dw - 28, 24, 0x40C74DE0); }
+            #delete[onRow];
+            #delete[swx];
+            #delete[kc];
+            #delete[ry];
+            k = k + 1;
+        }
+        #delete[k];
+        #stack[int, 32] sby = dy + dh - 40;
+        #stack[int, 32] sbx = dx + dw - 210;
+        scr.fillRect(sbx, sby, 92, 28, 0x60C74DE0);
+        scr.drawRect(sbx, sby, 92, 28, 0xC0C74DE0);
+        scr.drawText(sbx + 24, sby + 7, "Save", 0xFFFFFFFF, 2);
+        #stack[int, 32] cbx = dx + dw - 108;
+        scr.fillRect(cbx, sby, 92, 28, 0x40FFFFFF);
+        scr.drawRect(cbx, sby, 92, 28, 0x80FFFFFF);
+        scr.drawText(cbx + 22, sby + 7, "Close", 0xFFE6E2F0, 2);
+        #stack[int, 32] dDo = 1;
+        if (dsnGuard == 1) { dsnGuard = 0; dDo = 0; }
+        if (colorPicker != 0) { dDo = 0; }
+        if (dDo == 1) {
+            if (scr.mouseRight() != 0) {
+                if (hoverK >= 0) { dsnFromKind = hoverK; } else { dsnFromKind = 0 - 1; }
+            }
+            if (scr.mouseClicked() != 0) {
+                #stack[int, 32] onSave = 0;
+                if (dmx >= sbx) { if (dmx < sbx + 92) { if (dmy >= sby) { if (dmy < sby + 28) { onSave = 1; } } } }
+                #stack[int, 32] onClose = 0;
+                if (dmx >= cbx) { if (dmx < cbx + 92) { if (dmy >= sby) { if (dmy < sby + 28) { onClose = 1; } } } }
+                if (onSave == 1) { scr.savePalette(); designerOpen = 0; dsnFromKind = 0 - 1; }
+                if (onClose == 1) { designerOpen = 0; dsnFromKind = 0 - 1; }
+                if (onSave == 0) { if (onClose == 0) { if (hoverK >= 0) {
+                    if (dsnFromKind >= 0) {
+                        #stack[int, 64] srcC = scr.syntaxColor(hoverK);
+                        scr.setSyntaxColor(dsnFromKind, srcC);
+                        dsnFromKind = 0 - 1;
+                        #delete[srcC];
+                    }
+                    if (dsnFromKind < 0) { pkTarget = hoverK; colorPicker = 1; pkGuard = 1; }
+                } } }
+                #delete[onClose];
+                #delete[onSave];
+            }
+        }
+        #delete[dDo];
+        #delete[hoverK];
+        #delete[dmx];
+        #delete[dmy];
+        #delete[rowY];
+        #delete[sby];
+        #delete[sbx];
+        #delete[cbx];
+        #delete[dx];
+        #delete[dy];
+        #delete[dw];
+        #delete[dh];
+        #delete[dcount];
+    }
+    if (colorPicker != 0) {
+        #stack[int, 32] pbw = 380;
+        #stack[int, 32] pbh = 340;
+        #stack[int, 32] pbx = (W - pbw) / 2;
+        #stack[int, 32] pby = (H - pbh) / 2;
+        scr.fillRect(pbx, pby, pbw, pbh, 0xFC0B1018);
+        scr.drawRect(pbx, pby, pbw, pbh, 0xC0C74DE0);
+        scr.drawText(pbx + 18, pby + 12, "Color Picker", 0xFF9FE8FF, 2);
+        scr.drawText(pbx + pbw - 248, pby + 16, "Enter insert  Esc close", 0xFF8A94A6, 1);
+        #stack[int, 32] svx = pbx + 20;
+        #stack[int, 32] svy = pby + 46;
+        #stack[int, 32] svw = 224;
+        #stack[int, 32] svh = 176;
+        #stack[int, 32] yy = 0;
+        while (yy < svh) {
+            #stack[int, 32] vv = 255 - yy * 255 / svh;
+            #stack[int, 32] xx = 0;
+            while (xx < svw) {
+                #stack[int, 32] ss = xx * 255 / svw;
+                #stack[int, 64] cc = pkHsv(pkH, ss, vv);
+                scr.fillRect(svx + xx, svy + yy, 8, 8, cc);
+                #delete[cc];
+                #delete[ss];
+                xx = xx + 8;
+            }
+            #delete[xx];
+            #delete[vv];
+            yy = yy + 8;
+        }
+        #delete[yy];
+        scr.drawRect(svx, svy, svw, svh, 0x80FFFFFF);
+        #stack[int, 32] hbx = svx + svw + 14;
+        #stack[int, 32] hbw = 22;
+        #stack[int, 32] hyy = 0;
+        while (hyy < svh) {
+            #stack[int, 32] hh = hyy * 359 / svh;
+            #stack[int, 64] hc = pkHsv(hh, 255, 255);
+            scr.fillRect(hbx, svy + hyy, hbw, 8, hc);
+            #delete[hc];
+            #delete[hh];
+            hyy = hyy + 8;
+        }
+        #delete[hyy];
+        scr.drawRect(hbx, svy, hbw, svh, 0x80FFFFFF);
+        #stack[int, 32] mkx = svx + pkS * svw / 255;
+        #stack[int, 32] mky = svy + (255 - pkV) * svh / 255;
+        scr.drawRect(mkx - 4, mky - 4, 9, 9, 0xFFFFFFFF);
+        scr.drawRect(mkx - 3, mky - 3, 7, 7, 0xFF000000);
+        #stack[int, 32] hmy = svy + pkH * svh / 359;
+        scr.drawRect(hbx - 2, hmy - 2, hbw + 4, 5, 0xFFFFFFFF);
+        #delete[mkx];
+        #delete[mky];
+        #delete[hmy];
+        #stack[int, 64] cur = pkHsv(pkH, pkS, pkV);
+        #stack[int, 32] prx = pbx + 20;
+        #stack[int, 32] pry = svy + svh + 16;
+        scr.fillRect(prx, pry, 64, 34, cur);
+        scr.drawRect(prx, pry, 64, 34, 0xFFFFFFFF);
+        pkHexFmt(cur);
+        scr.drawText(prx + 78, pry + 2, pkHexStr, 0xFFE6E2F0, 2);
+        #stack[int, 32] rr2 = cur / 65536 % 256;
+        #stack[int, 32] gg2 = cur / 256 % 256;
+        #stack[int, 32] bb2 = cur % 256;
+        #stack[string, 8] pkSep = ", ";
+        #stack[string, 8] pkEnd = ")";
+        #stack[string, 256] rgbStr = "rgb(";
+        rgbStr = rgbStr + rr2;
+        rgbStr = rgbStr + pkSep;
+        rgbStr = rgbStr + gg2;
+        rgbStr = rgbStr + pkSep;
+        rgbStr = rgbStr + bb2;
+        rgbStr = rgbStr + pkEnd;
+        scr.drawText(prx + 78, pry + 20, rgbStr, 0xFF9FE8FF, 1);
+        #delete[rgbStr];
+        #delete[pkEnd];
+        #delete[pkSep];
+        #delete[rr2];
+        #delete[gg2];
+        #delete[bb2];
+        #delete[cur];
+        #stack[int, 32] ibx = pbx + pbw - 140;
+        #stack[int, 32] iby = pby + pbh - 42;
+        scr.fillRect(ibx, iby, 120, 30, 0x60C74DE0);
+        scr.drawRect(ibx, iby, 120, 30, 0xC0C74DE0);
+        if (pkTarget >= 0) { scr.drawText(ibx + 26, iby + 8, "Apply", 0xFFFFFFFF, 2); }
+        if (pkTarget < 0)  { scr.drawText(ibx + 22, iby + 8, "Insert", 0xFFFFFFFF, 2); }
+        #stack[int, 32] pkDoMouse = 1;
+        if (pkGuard == 1) { pkGuard = 0; pkDoMouse = 0; }
+        if (pkDoMouse == 1) {
+            #stack[int, 32] mx = scr.mouseX();
+            #stack[int, 32] my = scr.mouseY();
+            if (scr.mouseDown() != 0) {
+                if (mx >= svx) { if (mx < svx + svw) { if (my >= svy) { if (my < svy + svh) {
+                    pkS = (mx - svx) * 255 / svw;
+                    pkV = 255 - (my - svy) * 255 / svh;
+                    if (pkS > 255) { pkS = 255; }
+                    if (pkV < 0) { pkV = 0; }
+                } } } }
+                if (mx >= hbx) { if (mx < hbx + hbw) { if (my >= svy) { if (my < svy + svh) {
+                    pkH = (my - svy) * 359 / svh;
+                    if (pkH > 359) { pkH = 359; }
+                } } } }
+            }
+            if (scr.mouseClicked() != 0) {
+                #stack[int, 32] onIns = 0;
+                if (mx >= ibx) { if (mx < ibx + 120) { if (my >= iby) { if (my < iby + 30) { onIns = 1; } } } }
+                #stack[int, 32] inPanel = 0;
+                if (mx >= pbx) { if (mx < pbx + pbw) { if (my >= pby) { if (my < pby + pbh) { inPanel = 1; } } } }
+                if (onIns == 1) {
+                    #stack[int, 64] ia = pkHsv(pkH, pkS, pkV);
+                    #stack[int, 32] wasTgt = 0;
+                    if (pkTarget >= 0) { scr.setSyntaxColor(pkTarget, ia); pkTarget = 0 - 1; wasTgt = 1; }
+                    if (wasTgt == 0) { pkHexFmt(ia); ed.insert(pkHexStr); }
+                    colorPicker = 0;
+                    #delete[wasTgt];
+                    #delete[ia];
+                }
+                if (onIns == 0) { if (inPanel == 0) { colorPicker = 0; } }
+                #delete[onIns];
+                #delete[inPanel];
+            }
+            #delete[mx];
+            #delete[my];
+        }
+        #delete[pkDoMouse];
+        #delete[svx];
+        #delete[svy];
+        #delete[svw];
+        #delete[svh];
+        #delete[hbx];
+        #delete[hbw];
+        #delete[prx];
+        #delete[pry];
+        #delete[ibx];
+        #delete[iby];
+        #delete[pbx];
+        #delete[pby];
+        #delete[pbw];
+        #delete[pbh];
+    }
+
+    if (dbg.active() != 0) { dbg.draw(); }
+    scr.present();
+    #delete[hit];
+    #delete[barAct];
+}
+
+#delete[projDir];
+#delete[curPath];
+#delete[menuPath];
+#delete[runPre];
+#delete[cmpPre];
+#delete[hsimPre];
+#delete[endq];
+#delete[slash];
+#delete[cmpO];
+#delete[chainOp];
+#delete[runExe];
+#delete[runExeE];
+#delete[introPre];
+#delete[cmdModList];
+#delete[cmdHelp];
+#delete[promptMode];
+#delete[browseMode];
+#delete[findTerm];
+#delete[treeVis];
+#delete[termVis];
+#delete[relayout];
+#delete[statY];
+#delete[contentX];
+#delete[contentBottom];
+#delete[termY];
+#delete[W];
+#delete[H];
+#delete[savedRev];
+#delete[tick];
+#delete[menuOpen];
+#delete[menuX];
+#delete[menuY];
+#delete[menuKind];
+#delete[newBase];
+#delete[renameSrc];
+#delete[delIsDir];
+#delete[dragSrc];
+#delete[assetDir];
+#delete[icoClean];
+#delete[icoWarn];
+#delete[icoError];
+#delete[icoLogo];
+#delete[lspStatus];
+#delete[runVer];
+#delete[compileVer];
+#delete[verOverlay];
+#delete[verSel];
+#delete[f5pend];
+#delete[f5frames];
+#delete[f6pend];
+#delete[f6frames];
+#delete[f6DblWin];
+#delete[f6DblAlt];
+#delete[shSuf];
+#delete[lnAtOut];
+#delete[verListStr];
+#delete[ctrlOverlay];
+#delete[ctrlOpenGuard];
+#delete[controlsText];
+#delete[embVis];
+if (embHandle != 0) { sysm::comClose(embHandle); embHandle = 0; }
+#delete[embHandle];
+#delete[embPortsStr];
+#delete[embCurPort];
+#delete[embPortSel];
+#delete[embMon];
+#delete[embInput];
+#delete[embBaud];
+#delete[flashPre];
+#delete[spc];
+#delete[comPre];
+#delete[nl];
+#delete[mEmb];
+#delete[mFile];
+#delete[mEdit];
+#delete[mSel];
+#delete[mView];
+#delete[mRun];
+#delete[mTerm];
+#delete[mHelp];
+#delete[semaExe];
+#delete[semaDiag];
+#delete[semaComplete];
+#delete[semaHover];
+#delete[semaSig];
+#delete[semaTmp];
+#delete[semaCmpTmp];
+#delete[semaPath];
+#delete[semaRev];
+#delete[semaLastRev];
+#delete[semaStable];
+#delete[semaForce];
+#delete[semaJob];
+#delete[semaJobKind];
+#delete[verText];
+#delete[verSep];
+#delete[verRunL];
+#delete[verBldL];
+#delete[verBar];
+#delete[verDirty];
+#delete[termH];
+#delete[termDrag];
+
+#free[sysm];
+#free[fs];
+#free[ini];
+#free[g];

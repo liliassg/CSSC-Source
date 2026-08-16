@@ -1,0 +1,9 @@
+[14:42:21.753] cssc-build: start  videodriver.cssc
+[14:42:21.753] cssc-build: parse  videodriver.cssc (88 lines, 2352 bytes)
+[14:42:21.753] [INFO] Compiling videodriver.cssc for target 'esp8266'...
+[14:42:21.753] [INFO] Using legacy C-codegen pipeline (try `cssc native` for the v6 LLVM-IR backend).
+[14:42:21.766] cssc-build: lexed  445 tokens, 14 top-level nodes (2.6 ms)
+[14:42:21.766] cssc-build: tier   all nodes static (Tier 1+2), single binary output
+[14:42:21.766] cssc-build: codegen  321 lines C generated (0.5 ms)
+[14:42:21.766] cssc-build: codegen  4 compiled function(s)
+[14:42:21.766] [INFO] Generated 321 lines of C (0 ms).

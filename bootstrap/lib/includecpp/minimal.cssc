@@ -1,0 +1,3 @@
+cssc::to_int(1.2) x;
+cssc::outln(x);
+#delete[x];

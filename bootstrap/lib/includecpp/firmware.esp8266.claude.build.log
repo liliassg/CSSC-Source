@@ -1,0 +1,6 @@
+[09:37:41.321] cssc-build: start  claude_videodemo.cssc
+[09:37:41.321] cssc-build: parse  claude_videodemo.cssc (146 lines, 5350 bytes)
+[09:37:41.331] cssc-build: lexed  463 tokens, 15 top-level nodes (2.7 ms)
+[09:37:41.331] cssc-build: tier   all nodes static (Tier 1+2), single binary output
+[09:37:41.331] cssc-build: codegen  329 lines C generated (0.5 ms)
+[09:37:41.332] cssc-build: codegen  4 compiled function(s)

@@ -1,0 +1,1193 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "CSSC",
+    "scopeName": "source.cssc",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#sector-block" },
+        { "include": "#directives" },
+        { "include": "#define-directives" },
+        { "include": "#include-directive" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#builtin-functions" },
+        { "include": "#namespace-call" },
+        { "include": "#arrow-access" },
+        { "include": "#method-calls" },
+        { "include": "#dot-property" },
+        { "include": "#keywords" },
+        { "include": "#builtin-namespace" },
+        { "include": "#operators" },
+        { "include": "#function-calls" },
+        { "include": "#punctuation" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "comment": "//* bold comment",
+                    "name": "comment.line.bold.cssc",
+                    "match": "//\\*.*$"
+                },
+                {
+                    "comment": "//~ italic/curvy comment",
+                    "name": "comment.line.italic.cssc",
+                    "match": "//~.*$"
+                },
+                {
+                    "comment": "//! red/important comment",
+                    "name": "comment.line.important.cssc",
+                    "match": "//!.*$"
+                },
+                {
+                    "comment": "//? blue/question comment",
+                    "name": "comment.line.question.cssc",
+                    "match": "//\\?.*$"
+                },
+                {
+                    "comment": "/// gray/doc comment",
+                    "name": "comment.line.doc.cssc",
+                    "match": "///.*$"
+                },
+                {
+                    "comment": "//d — LSP docstring: rendered in hover as markdown with \\r<R>g<G>b<B> / \\c0-3 colours",
+                    "name": "comment.line.docstring.cssc",
+                    "match": "//d\\b.*$"
+                },
+                {
+                    "name": "comment.line.double-slash.cssc",
+                    "match": "//.*$"
+                },
+                {
+                    "name": "comment.block.cssc",
+                    "begin": "/\\*",
+                    "end": "\\*/",
+                    "captures": {
+                        "0": { "name": "punctuation.definition.comment.cssc" }
+                    }
+                }
+            ]
+        },
+        "directives": {
+            "patterns": [
+                {
+                    "comment": "#REQUIRE[path] varName",
+                    "name": "meta.directive.require.cssc",
+                    "match": "(#)(REQUIRE)(\\[)([^\\]]*)(\\])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "string.unquoted.directive-arg.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#VARIABLE[type] or VARIABLE[type] with extended type support",
+                    "name": "meta.directive.variable.cssc",
+                    "match": "(#?)(VARIABLE)(\\[)([a-zA-Z_][a-zA-Z0-9_<>, ]*)(\\])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#OUTPUT[path]",
+                    "name": "meta.directive.output.cssc",
+                    "match": "(#)(OUTPUT)(\\[)([^\\]]*)(\\])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "string.unquoted.directive-arg.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#EXIT[code]",
+                    "name": "meta.directive.exit.cssc",
+                    "match": "(#)(EXIT)(\\[)?([^\\]]*)(\\])?",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "constant.numeric.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#memory[var] addr_var — get memory address",
+                    "name": "meta.directive.memory.cssc",
+                    "match": "(#)(memory)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#adress[var] addr_var — native address-of primitive (one 'd'; canonical form of #memory)",
+                    "name": "meta.directive.adress.cssc",
+                    "match": "(#)(adress)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#reflect[address] var — resolve address back to value",
+                    "name": "meta.directive.reflect.cssc",
+                    "match": "(#)(reflect)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#size[var] or #size(var) size_var — get byte size in memory",
+                    "name": "meta.directive.size.cssc",
+                    "match": "(#)(size)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#capacity[var] cap_var — get allocated size in bits",
+                    "name": "meta.directive.capacity.cssc",
+                    "match": "(#)(capacity)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#delete[var] or #delete[Object->member] — remove variable from memory",
+                    "name": "meta.directive.delete.cssc",
+                    "match": "(#)(delete)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*(?:->[a-zA-Z_][a-zA-Z0-9_]*)?)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#delmember[target] or #delmember[target[i]] — soft wipe (release content, keep container)",
+                    "name": "meta.directive.delmember.cssc",
+                    "match": "(#)(delmember)(\\[)([a-zA-Z_][a-zA-Z0-9_]*(?:->[a-zA-Z_][a-zA-Z0-9_]*)?)(\\[[^\\]]*\\])?(\\])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "meta.embedded.expression.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#free[sector] or #free[Object->member] — free sector/object and run destructor",
+                    "name": "meta.directive.free.cssc",
+                    "match": "(#)(free)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*(?:->[a-zA-Z_][a-zA-Z0-9_]*)?)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#reserve[label] — initialize deferred sector declared with ?label",
+                    "name": "meta.directive.reserve.cssc",
+                    "match": "(#)(reserve)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#stack/#auto[type] Object->member — directive with object member target",
+                    "name": "meta.directive.objectmember.cssc",
+                    "match": "(#)(stack|auto|heap|thread)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)(?:\\s*,\\s*(-?[a-zA-Z0-9_.:]+))?([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)(->)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "entity.name.type.sector.cssc" },
+                        "8": { "name": "punctuation.separator.arrow.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#stack[type, bits] var = val — stack allocation (supports generics, namespaced types)",
+                    "name": "meta.directive.stack.cssc",
+                    "match": "(#)(stack)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)(?:\\s*,\\s*(-?[a-zA-Z0-9_.:]+))?([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#auto[type] var = val — auto-sized stack allocation (manual delete, auto-grows)",
+                    "name": "meta.directive.auto.cssc",
+                    "match": "(#)(auto)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#iterator[type, source] name — C++ style iterator bound to container",
+                    "name": "meta.directive.iterator.cssc",
+                    "match": "(#)(iterator)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "variable.other.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#heap[type, bits] var = val — heap allocation (auto-destructed, supports generics, namespaced types)",
+                    "name": "meta.directive.heap.cssc",
+                    "match": "(#)(heap)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)(?:\\s*,\\s*(-?[a-zA-Z0-9_.:]+))?([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#resize[var, bits_or_var] — resize allocation",
+                    "name": "meta.directive.resize.cssc",
+                    "match": "(#)(resize)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#cast[source, target] — convert binary/type",
+                    "name": "meta.directive.cast.cssc",
+                    "match": "(#)(cast)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "variable.other.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#peekstack[var, typeResult, index, amount] result — peek into collection (stack alloc, needs #delete)",
+                    "name": "meta.directive.peekstack.cssc",
+                    "match": "(#)(peekstack)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "entity.name.type.cssc" },
+                        "6": { "name": "constant.numeric.cssc" },
+                        "7": { "name": "constant.numeric.cssc" },
+                        "8": { "name": "punctuation.section.brackets.end.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#peekheap[var, typeResult, index, amount] result — peek into collection (heap alloc, auto-managed)",
+                    "name": "meta.directive.peekheap.cssc",
+                    "match": "(#)(peekheap)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "entity.name.type.cssc" },
+                        "6": { "name": "constant.numeric.cssc" },
+                        "7": { "name": "constant.numeric.cssc" },
+                        "8": { "name": "punctuation.section.brackets.end.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#stdout(txt) — print plain text to stdout console with auto newline",
+                    "name": "meta.directive.stdout.cssc",
+                    "match": "(#)(stdout)(\\()([^)]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#sysout(value) — return value to CSSL caller",
+                    "name": "meta.directive.sysout.cssc",
+                    "match": "(#)(sysout)(\\()([^)]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#sysarg[type, index] var — extract system argument as stack variable",
+                    "name": "meta.directive.sysarg.cssc",
+                    "match": "(#)(sysarg)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#req[sector->member] *localVar — require sector member",
+                    "name": "meta.directive.req.sector.cssc",
+                    "match": "(#)(req)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)(->)([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([*&]?)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.sector.cssc" },
+                        "5": { "name": "punctuation.separator.arrow.cssc" },
+                        "6": { "name": "variable.other.cssc" },
+                        "7": { "name": "punctuation.section.brackets.end.cssc" },
+                        "8": { "name": "keyword.operator.dereference.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#req[globalVar] localVar — require global scope variable (copy). #req[globalVar] *localVar — as reference",
+                    "name": "meta.directive.req.cssc",
+                    "match": "(#)(req)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])\\s*([*&]?)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "keyword.operator.dereference.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#reallocate[var, type, region, size?] newvar — move var to different memory region",
+                    "name": "meta.directive.reallocate.cssc",
+                    "match": "(#)(reallocate)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*(stack|heap)(?:\\s*,\\s*(-?[a-zA-Z0-9_.:]+))?([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "entity.name.type.cssc" },
+                        "6": { "name": "keyword.control.cssc" },
+                        "7": { "name": "constant.numeric.cssc" },
+                        "8": { "name": "punctuation.section.brackets.end.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#matrix[width, height] var — create 2D pixel matrix",
+                    "name": "meta.directive.matrix.cssc",
+                    "match": "(#)(matrix)([\\[\\(])(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "constant.numeric.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#video[width, height, fps] var — create video context",
+                    "name": "meta.directive.video.cssc",
+                    "match": "(#)(video)([\\[\\(])(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "constant.numeric.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "constant.numeric.cssc" },
+                        "7": { "name": "punctuation.section.brackets.end.cssc" },
+                        "8": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#framebuffer[width, height] var — create pixel buffer",
+                    "name": "meta.directive.framebuffer.cssc",
+                    "match": "(#)(framebuffer)([\\[\\(])(-?[a-zA-Z0-9_.:]+)\\s*,\\s*(-?[a-zA-Z0-9_.:]+)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "constant.numeric.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#thread[type, bits] var — declare thread-callable variable",
+                    "name": "meta.directive.thread.cssc",
+                    "match": "(#)(thread)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)(?:\\s*,\\s*(-?[a-zA-Z0-9_.:]+))?([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "constant.numeric.cssc" },
+                        "6": { "name": "punctuation.section.brackets.end.cssc" },
+                        "7": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#daemon[var] — start function as background daemon thread",
+                    "name": "meta.directive.daemon.cssc",
+                    "match": "(#)(daemon)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#killdaemon[var] — stop a daemon thread",
+                    "name": "meta.directive.killdaemon.cssc",
+                    "match": "(#)(killdaemon)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#tlisten[var] { body } — watch variable for changes",
+                    "name": "meta.directive.tlisten.cssc",
+                    "match": "(#)(tlisten)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#load[\"path\"] var — load external CSSC module",
+                    "name": "meta.directive.load.cssc",
+                    "match": "(#)(load)([\\[\\(])(\"[^\"]*\")([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "string.quoted.double.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.cssc" }
+                    }
+                },
+                {
+                    "comment": "#depend['path.obj'] alias — depend on an isolated .obj package",
+                    "name": "meta.directive.depend.cssc",
+                    "match": "(#)(depend)([\\[\\(])((?:\"[^\"]*\")|(?:'[^']*'))([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "string.quoted.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.cssc" }
+                    }
+                },
+                {
+                    "comment": "#console[w, h] name — native Win32 kernel console (requires #include('sys.console'))",
+                    "name": "meta.directive.console.cssc",
+                    "match": "(#)(console)([\\[\\(])([^\\]\\)]*)([\\]\\)])\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "meta.directive.console-params.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#DEFINE name; — transpiler-only hint declaring a foreign-API namespace",
+                    "name": "meta.directive.DEFINE.cssc",
+                    "match": "(#)(DEFINE)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.cssc" },
+                        "3": { "name": "entity.name.namespace.cssc" }
+                    }
+                },
+                {
+                    "comment": "#raii 0xNN method() — dispatch into hex-addressed scope",
+                    "name": "meta.directive.raii.cssc",
+                    "match": "(#)(raii)\\s+(0[xX][0-9a-fA-F]+)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.cssc" },
+                        "3": { "name": "constant.numeric.hex.cssc" },
+                        "4": { "name": "entity.name.function.cssc" }
+                    }
+                },
+                {
+                    "comment": "0xNN { ... } — hex-addressed persistent scope declaration",
+                    "name": "meta.hex-scope.cssc",
+                    "match": "^\\s*(0[xX][0-9a-fA-F]+)\\s*(?=\\{)",
+                    "captures": {
+                        "1": { "name": "constant.numeric.hex.cssc" }
+                    }
+                },
+                {
+                    "comment": "#unload[var] — unload a loaded module",
+                    "name": "meta.directive.unload.cssc",
+                    "match": "(#)(unload)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#panic('message') or #panic[\"message\"] — throw artificial runtime error",
+                    "name": "meta.directive.panic.cssc",
+                    "match": "(#)(panic)([\\[\\(])([^\\]\\)]*?)([\\]\\)])",
+                    "captures": {
+                        "1": { "name": "keyword.control.panic.cssc" },
+                        "2": { "name": "keyword.control.panic.cssc" },
+                        "3": { "name": "keyword.control.panic.cssc" },
+                        "4": { "name": "string.unquoted.cssc" },
+                        "5": { "name": "keyword.control.panic.cssc" }
+                    }
+                },
+                {
+                    "comment": "#redefine(funcVar) +<pos> { ... } — inject/overwrite function body",
+                    "name": "meta.directive.redefine.cssc",
+                    "match": "(#)(redefine)([\\[\\(])([a-zA-Z_][a-zA-Z0-9_]*)([\\]\\)])(?:\\s*(\\+)(<)([0-9]+)(>))?",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "support.function.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" },
+                        "6": { "name": "keyword.operator.cssc" },
+                        "7": { "name": "punctuation.section.brackets.begin.cssc" },
+                        "8": { "name": "constant.numeric.cssc" },
+                        "9": { "name": "punctuation.section.brackets.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "alias!property.sub — method introspection access",
+                    "name": "meta.introspection.cssc",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)(!)([a-zA-Z_][a-zA-Z0-9_.]*)",
+                    "captures": {
+                        "1": { "name": "variable.other.cssc" },
+                        "2": { "name": "keyword.operator.introspect.cssc" },
+                        "3": { "name": "support.type.property-name.cssc" }
+                    }
+                }
+            ]
+        },
+        "define-directives": {
+            "patterns": [
+                {
+                    "comment": "#define(sector->member) { ... } - sector member callback",
+                    "name": "meta.directive.define.sector.cssc",
+                    "match": "(#)(define)(\\()([a-zA-Z_][a-zA-Z0-9_]*)(->)([a-zA-Z_][a-zA-Z0-9_]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "entity.name.type.sector.cssc" },
+                        "5": { "name": "punctuation.separator.arrow.cssc" },
+                        "6": { "name": "support.function.cssc" },
+                        "7": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#define(varName) { ... } - basic callback",
+                    "name": "meta.directive.define.cssc",
+                    "match": "(#)(define)(\\()([a-zA-Z_][a-zA-Z0-9_]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.other.declaration.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#interrupt(name) { ... } - CCOS hardware ISR handler",
+                    "name": "meta.directive.interrupt.cssc",
+                    "match": "(#)(interrupt)(\\()([a-zA-Z_][a-zA-Z0-9_]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.other.declaration.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#cdefine(func, p1, p2, ...) { ... } - callback with params",
+                    "name": "meta.directive.cdefine.cssc",
+                    "match": "(#)(cdefine)(\\()([^)]*)(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.parameter.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" }
+                    }
+                },
+                {
+                    "comment": "#fvar(type) funcName - function variable (supports generics)",
+                    "name": "meta.directive.fvar.cssc",
+                    "match": "(#)(fvar)(\\()([a-zA-Z_][a-zA-Z0-9_<>,.: ]*)(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" },
+                        "6": { "name": "entity.name.function.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#param(type) paramName - parameter declaration (supports generics, namespaced, *ref)",
+                    "name": "meta.directive.param.cssc",
+                    "match": "(#)(param)(\\()(\\*?)([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "keyword.operator.dereference.cssc" },
+                        "5": { "name": "entity.name.type.cssc" },
+                        "6": { "name": "punctuation.section.parens.end.cssc" },
+                        "7": { "name": "variable.parameter.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#qvar(type, expr) varName - quick variable from expression (supports generics, namespaced, *ref)",
+                    "name": "meta.directive.qvar.cssc",
+                    "match": "(#)(qvar)(\\()(\\*?)([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*([^)]*)(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "keyword.operator.dereference.cssc" },
+                        "5": { "name": "entity.name.type.cssc" },
+                        "6": { "name": "source.cssc" },
+                        "7": { "name": "punctuation.section.parens.end.cssc" },
+                        "8": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "#scanp(source, type, pos) varName - scan parameter from #define call (supports generics, namespaced, *ref)",
+                    "name": "meta.directive.scanp.cssc",
+                    "match": "(#)(scanp)(\\()([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*(\\*?)([a-zA-Z_][a-zA-Z0-9_.:]*(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\\s*,\\s*(\\d+)(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "variable.other.cssc" },
+                        "5": { "name": "keyword.operator.dereference.cssc" },
+                        "6": { "name": "entity.name.type.cssc" },
+                        "7": { "name": "constant.numeric.cssc" },
+                        "8": { "name": "punctuation.section.parens.end.cssc" },
+                        "9": { "name": "variable.other.declaration.cssc" }
+                    }
+                }
+            ]
+        },
+        "include-directive": {
+            "patterns": [
+                {
+                    "comment": "#include(\"module\") varName",
+                    "name": "meta.directive.include.cssc",
+                    "match": "(#)(include)(\\()([\"'][^\"']*[\"'])(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)?",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.directive.cssc" },
+                        "2": { "name": "keyword.control.import.cssc" },
+                        "3": { "name": "punctuation.section.parens.begin.cssc" },
+                        "4": { "name": "string.quoted.module-name.cssc" },
+                        "5": { "name": "punctuation.section.parens.end.cssc" },
+                        "6": { "name": "variable.other.declaration.cssc" }
+                    }
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.cssc",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.cssc",
+                            "match": "\\\\[nrt\\\\\"'0]"
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.cssc",
+                    "begin": "'",
+                    "end": "'",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.cssc",
+                            "match": "\\\\[nrt\\\\\"'0]"
+                        }
+                    ]
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.hex.cssc",
+                    "match": "\\b0[xX][0-9a-fA-F]+\\b"
+                },
+                {
+                    "name": "constant.numeric.float.cssc",
+                    "match": "\\b\\d+\\.\\d+\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.cssc",
+                    "match": "\\b\\d+\\b"
+                }
+            ]
+        },
+        "builtin-functions": {
+            "comment": "Known CSSC builtin functions - blue in Dark+",
+            "patterns": [
+                {
+                    "comment": "cssc::builtin(...) - namespace=cyan, ::=op, func=blue",
+                    "match": "(cssc)(::)(out|outln|cout|in|input|exit|sleep|type|typeof|len|toString|toInt|toFloat|toBool|getIndex|format|range|abs|min|max|round|floor|ceil|sqrt|pow|random|randint|time|timestamp|env|cwd|platform|readFile|writeFile|fileExists|listDir|joinPath|basename|dirname|isAbsolute|pathResolve|run|exec|system|shell|pid|args|outb|outw|outl|inb|inw|inl|poke8|poke16|poke32|poke64|peek8|peek16|peek32|peek64|memfill32|memcopy|alloc|readCs|fontRow|shl|shr|band|bor|bxor|hlt|cli|sti|pause|lgdt|lidt|ltr|readCr0|readCr2|readCr3|readCr4|writeCr0|writeCr3|writeCr4|invlpg|rdmsr|wrmsr|rdtsc|fbAddr|fbWidth|fbHeight|fbPitch|fbBpp|hhdmOffset|memmapCount|memmapBase|memmapLength|memmapType|memUsable|heapUsed|framesFree|framesTotal)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "support.class.builtin.cssc" },
+                        "2": { "name": "keyword.operator.namespace.cssc" },
+                        "3": { "name": "support.function.builtin.cssc" }
+                    }
+                },
+                {
+                    "comment": "cssc::anything_else(...) - namespace=cyan, ::=op, func=blue",
+                    "match": "(cssc)(::)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "support.class.builtin.cssc" },
+                        "2": { "name": "keyword.operator.namespace.cssc" },
+                        "3": { "name": "support.function.cssc" }
+                    }
+                },
+                {
+                    "comment": "cssc::property - namespace=cyan, ::=op, property=white",
+                    "match": "(cssc)(::)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "support.class.builtin.cssc" },
+                        "2": { "name": "keyword.operator.namespace.cssc" },
+                        "3": { "name": "variable.other.property.cssc" }
+                    }
+                }
+            ]
+        },
+        "namespace-call": {
+            "patterns": [
+                {
+                    "comment": "ns::func() - namespace=cyan-ish, func=blue",
+                    "name": "meta.namespace-call.cssc",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)(::)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "entity.name.namespace.cssc" },
+                        "2": { "name": "keyword.operator.namespace.cssc" },
+                        "3": { "name": "support.function.cssc" }
+                    }
+                },
+                {
+                    "comment": "ns::member - namespace access without call",
+                    "name": "meta.namespace-access.cssc",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)(::)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "entity.name.namespace.cssc" },
+                        "2": { "name": "keyword.operator.namespace.cssc" },
+                        "3": { "name": "variable.other.member.cssc" }
+                    }
+                }
+            ]
+        },
+        "arrow-access": {
+            "patterns": [
+                {
+                    "comment": "Object->method() — Object teal, arrow gray, method blue",
+                    "name": "meta.arrow-call.cssc",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)(->)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "entity.name.type.sector.cssc" },
+                        "2": { "name": "punctuation.separator.arrow.cssc" },
+                        "3": { "name": "support.function.cssc" }
+                    }
+                },
+                {
+                    "comment": "Object->property — Object teal, arrow gray, property cyan",
+                    "name": "meta.arrow-access.cssc",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)(->)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "entity.name.type.sector.cssc" },
+                        "2": { "name": "punctuation.separator.arrow.cssc" },
+                        "3": { "name": "support.type.property-name.cssc" }
+                    }
+                }
+            ]
+        },
+        "method-calls": {
+            "comment": ".method() calls - blue for method name",
+            "patterns": [
+                {
+                    "match": "(\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.cssc" },
+                        "2": { "name": "support.function.cssc" }
+                    }
+                }
+            ]
+        },
+        "dot-property": {
+            "comment": ".property access - white/default for property name",
+            "patterns": [
+                {
+                    "match": "(\\.)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.cssc" },
+                        "2": { "name": "variable.other.property.cssc" }
+                    }
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.cssc",
+                    "match": "\\b(if|else|for|while|break|continue|return|jump|destruct|mirror|call|select)\\b"
+                },
+                {
+                    "name": "constant.language.cssc",
+                    "match": "\\b(true|false|null|none|True|False|None)\\b"
+                },
+                {
+                    "comment": "Type keywords - when used standalone (not in VARIABLE[])",
+                    "name": "entity.name.type.cssc",
+                    "match": "\\b(int|float|string|str|array|list|map|dict|bool|boolean|var|void)\\b"
+                },
+                {
+                    "comment": "new keyword",
+                    "name": "keyword.operator.new.cssc",
+                    "match": "\\bnew\\b"
+                },
+                {
+                    "comment": "class/namespace keyword",
+                    "name": "storage.type.class.cssc",
+                    "match": "\\b(class|namespace)\\b"
+                }
+            ]
+        },
+        "sector-block": {
+            "patterns": [
+                {
+                    "comment": "sector Name<type: param, ...> ?label { — declaration with generics + optional deferred label",
+                    "match": "\\b(sector)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(<)",
+                    "captures": {
+                        "1": { "name": "storage.type.sector.cssc" },
+                        "2": { "name": "entity.name.type.sector.cssc" },
+                        "3": { "name": "punctuation.definition.generic.begin.cssc" }
+                    }
+                },
+                {
+                    "comment": "sector generic params: outerVar, *innerName or outerVar, innerName",
+                    "match": "(?<=<|,)\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*,\\s*(\\*?)([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": { "name": "variable.other.source.cssc" },
+                        "2": { "name": "keyword.operator.reference.cssc" },
+                        "3": { "name": "variable.parameter.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "sector generic closing > with optional ?label",
+                    "match": "(>)\\s*(?:(\\?)([a-zA-Z_][a-zA-Z0-9_]*)\\s*)?(?=\\{)",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.generic.end.cssc" },
+                        "2": { "name": "keyword.operator.deferred.cssc" },
+                        "3": { "name": "variable.other.deferred-label.cssc" }
+                    }
+                },
+                {
+                    "comment": "sector Name ?label { — simple declaration with optional deferred label",
+                    "match": "\\b(sector)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:(\\?)([a-zA-Z_][a-zA-Z0-9_]*)\\s*)?(?=\\{)",
+                    "captures": {
+                        "1": { "name": "storage.type.sector.cssc" },
+                        "2": { "name": "entity.name.type.sector.cssc" },
+                        "3": { "name": "keyword.operator.deferred.cssc" },
+                        "4": { "name": "variable.other.deferred-label.cssc" }
+                    }
+                },
+                {
+                    "comment": "} free { — sector destructor",
+                    "match": "\\b(free)\\s*(?=\\{)",
+                    "captures": {
+                        "1": { "name": "storage.type.sector.free.cssc" }
+                    }
+                },
+                {
+                    "comment": "private: access modifier",
+                    "match": "^\\s*(private)\\s*(:)",
+                    "captures": {
+                        "1": { "name": "storage.modifier.access.cssc" },
+                        "2": { "name": "storage.modifier.access.cssc" }
+                    }
+                },
+                {
+                    "comment": "object Name<params> { — object declaration with generics",
+                    "match": "\\b(object)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(<)",
+                    "captures": {
+                        "1": { "name": "storage.type.sector.cssc" },
+                        "2": { "name": "entity.name.type.sector.cssc" },
+                        "3": { "name": "punctuation.definition.generic.begin.cssc" }
+                    }
+                },
+                {
+                    "comment": "object Name { — object declaration without generics",
+                    "match": "\\b(object)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\{)",
+                    "captures": {
+                        "1": { "name": "storage.type.sector.cssc" },
+                        "2": { "name": "entity.name.type.sector.cssc" }
+                    }
+                },
+                {
+                    "comment": "method Name<type, *params...> ?alias { — method declaration with multi-params",
+                    "match": "\\b(method)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(<)([^>]*)(>)\\s*(?:(\\?)([a-zA-Z_][a-zA-Z0-9_]*))?\\s*(?=\\{)",
+                    "captures": {
+                        "1": { "name": "storage.type.method.cssc" },
+                        "2": { "name": "entity.name.type.method.cssc" },
+                        "3": { "name": "punctuation.definition.generic.begin.cssc" },
+                        "4": { "name": "entity.name.type.cssc" },
+                        "5": { "name": "punctuation.definition.generic.end.cssc" },
+                        "6": { "name": "keyword.operator.deferred.cssc" },
+                        "7": { "name": "variable.other.deferred-label.cssc" }
+                    }
+                },
+                {
+                    "comment": "method params: *varName inside <> — star-prefixed scope injection",
+                    "match": "(\\*)([a-zA-Z_][a-zA-Z0-9_]*)(?=[,>])",
+                    "captures": {
+                        "1": { "name": "keyword.operator.reference.cssc" },
+                        "2": { "name": "variable.parameter.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "} do { — method do block",
+                    "match": "\\b(do)\\s*(?=\\{)",
+                    "captures": {
+                        "1": { "name": "storage.type.method.do.cssc" }
+                    }
+                },
+                {
+                    "comment": "MethodName ! sector/object/directive — method application operator",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s+(!)\\s+(?=#|\\bsector\\b|\\bobject\\b)",
+                    "captures": {
+                        "1": { "name": "entity.name.type.method.cssc" },
+                        "2": { "name": "keyword.operator.apply.cssc" }
+                    }
+                },
+                {
+                    "comment": "call labelname<args> capture; or call labelname(args) capture;",
+                    "match": "\\b(call)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(?:\\([^)]*\\)|<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>))?(?:\\s+([a-zA-Z_][a-zA-Z0-9_]*))?\\s*;",
+                    "captures": {
+                        "1": { "name": "keyword.control.cssc" },
+                        "2": { "name": "entity.name.label.cssc" },
+                        "3": { "name": "variable.other.declaration.cssc" }
+                    }
+                },
+                {
+                    "comment": "label<params>: — instruction label with parameters inside object",
+                    "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)(<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?\\s*(:)\\s*$",
+                    "captures": {
+                        "1": { "name": "entity.name.label.cssc" },
+                        "2": { "name": "variable.parameter.cssc" },
+                        "3": { "name": "punctuation.separator.label.cssc" }
+                    }
+                },
+                {
+                    "comment": "public: access modifier",
+                    "match": "^\\s*(public)\\s*(:)",
+                    "captures": {
+                        "1": { "name": "storage.modifier.access.cssc" },
+                        "2": { "name": "storage.modifier.access.cssc" }
+                    }
+                }
+            ]
+        },
+        "builtin-namespace": {
+            "patterns": [
+                {
+                    "name": "support.class.builtin.cssc",
+                    "match": "\\b(cssc)(?=::)"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.increment.cssc",
+                    "match": "\\+\\+|--"
+                },
+                {
+                    "name": "keyword.operator.compound-assignment.cssc",
+                    "match": "\\+=|-=|\\*=|/="
+                },
+                {
+                    "name": "keyword.operator.comparison.cssc",
+                    "match": "==|!=|<=|>=|<|>"
+                },
+                {
+                    "name": "keyword.operator.logical.cssc",
+                    "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.arithmetic.cssc",
+                    "match": "[+\\-*/%]"
+                },
+                {
+                    "name": "keyword.operator.assignment.cssc",
+                    "match": "="
+                },
+                {
+                    "comment": "return &var — copy-return operator (grey)",
+                    "name": "keyword.operator.copy-return.cssc",
+                    "match": "(?<=\\breturn\\s)(&)(?=[a-zA-Z_])",
+                    "captures": {
+                        "1": { "name": "keyword.operator.copy-return.cssc" }
+                    }
+                }
+            ]
+        },
+        "function-calls": {
+            "comment": "Generic function call: funcName(...) - blue",
+            "patterns": [
+                {
+                    "name": "meta.function-call.cssc",
+                    "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": { "name": "support.function.cssc" }
+                    }
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "name": "punctuation.terminator.cssc",
+                    "match": ";"
+                },
+                {
+                    "name": "punctuation.separator.cssc",
+                    "match": ","
+                },
+                {
+                    "name": "punctuation.section.braces.begin.cssc",
+                    "match": "\\{"
+                },
+                {
+                    "name": "punctuation.section.braces.end.cssc",
+                    "match": "\\}"
+                },
+                {
+                    "name": "punctuation.section.parens.begin.cssc",
+                    "match": "\\("
+                },
+                {
+                    "name": "punctuation.section.parens.end.cssc",
+                    "match": "\\)"
+                },
+                {
+                    "name": "punctuation.section.brackets.begin.cssc",
+                    "match": "\\["
+                },
+                {
+                    "name": "punctuation.section.brackets.end.cssc",
+                    "match": "\\]"
+                }
+            ]
+        }
+    }
+}

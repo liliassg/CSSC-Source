@@ -1,0 +1,51 @@
+CSSCTrainer ist ein Simulationsspiel. Es ist auf Strategie und Fortschritt ausgerichtet, um CSSC und seine toolchain als game kennenzulernen
+
+
+Du fängst auf einer 9x9 Karte an, du hast zu beginn zufällig irgendwo 3 1x1 große quellen von Eisen, Gold und Kupfer
+Du startest bei 0, 0 und kannst dich mit codes bewwegen
+
+um alles zu programmieren hast du einen editor in dem du mehere dateien und ordner erstellen kannst, um CSSC zu programmieren
+Das Spielprinzip ist: Erkunden, Minen, Craften, Erfinden, Erschaffen. Durch gesammelte Erfahrungsstufen erllangt man Level, die einen Module freischalten
+
+Siehe dir CSSC im top_dir an, Das Game besteht aus einer nativen windows fenster, mit dem gesammten spielfeld im screen, den Editor ruft man übder die Sidebar ab
+Auch ALLES 1:1 CSSC identisch, sowhol semantisch, als auch funktionable, nutze das REALE bestehende CSSC CIR usw, sowie LSP und eigene extras zur einschränkungn von modulen und den hinzufügen von custom modulen für das game
+
+Start des Games:
+
+
+Wenn du das erste mal anfängst bist du in der 9x9 box, du öffnest den Editor und siehst:
+
+main.cssc
+ct::Player() _player;
+_player.spawn();
+while (true) {
+    _player.move(ct::Y(1)); // or _player.move({0, 1}) or _player.move(ct::Y(-1)) or _player.move({0, -1}). Moving out of arena instant kills player
+    if (_player.can_move(ct::Y(1))) {
+    ... 
+    }
+
+}
+
+WICHTIG! Sobald der code endet, wird alles gestoppt, der spiler wird immer zerstört, sodass jeder code immer mit ct::Player() _player und _player.spawn() beginnen muss
+
+Folgende Module + Erkörung und Level
+
+#include('sense') sense;  // Fügt "Sinne" hinzu, diese Können genutzt werden um Spieler besser zu koodinieren, Ab Level 1
+
+#include('sense') sense;
+#include('ore.iron') ironore;
+ct::Player() _player;
+_player.spawn();
+sense::Feeling() feel;
+while (true) {
+    if (feel.near(_player, ironore)) {
+        feel.get_x(_player, ironore) x;
+        feel.get_y(_player, ironore) y;
+        fictionalfunc.moveX(&x);
+        fictionalfunc.moveY(&y);
+        fictionalfunc.executeTask('mine', ironore, 200);
+        #delete[x];
+        #delete[y];
+    }
+}
+

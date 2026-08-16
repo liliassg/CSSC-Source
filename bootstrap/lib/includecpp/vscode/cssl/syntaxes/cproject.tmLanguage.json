@@ -1,0 +1,100 @@
+{
+    "$schema": "https://raw.githubusercontent.com/nicolo-ribaudo/vscode-textmate-languageservice/main/out/schemas/tmLanguage.json",
+    "name": "CSSC Project",
+    "scopeName": "source.cproject",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#assignments" },
+        { "include": "#booleans" },
+        { "include": "#numbers" },
+        { "include": "#brackets" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.cproject",
+                    "match": "//.*$"
+                },
+                {
+                    "name": "comment.line.hash.cproject",
+                    "match": "#.*$"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.cproject",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.cproject",
+                            "match": "\\\\."
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.cproject",
+                    "begin": "'",
+                    "end": "'",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.cproject",
+                            "match": "\\\\."
+                        }
+                    ]
+                }
+            ]
+        },
+        "assignments": {
+            "patterns": [
+                {
+                    "match": "^\\s*(\\w+(?:\\.\\w+)*)\\s*(\\+?=)",
+                    "captures": {
+                        "1": { "name": "variable.other.property.cproject" },
+                        "2": { "name": "keyword.operator.assignment.cproject" }
+                    }
+                }
+            ]
+        },
+        "booleans": {
+            "patterns": [
+                {
+                    "name": "constant.language.boolean.cproject",
+                    "match": "\\b(true|false)\\b"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.cproject",
+                    "match": "\\b\\d+(\\.\\d+)?\\b"
+                }
+            ]
+        },
+        "brackets": {
+            "patterns": [
+                {
+                    "name": "punctuation.definition.array.begin.cproject",
+                    "match": "\\["
+                },
+                {
+                    "name": "punctuation.definition.array.end.cproject",
+                    "match": "\\]"
+                },
+                {
+                    "name": "punctuation.definition.dict.begin.cproject",
+                    "match": "\\{"
+                },
+                {
+                    "name": "punctuation.definition.dict.end.cproject",
+                    "match": "\\}"
+                }
+            ]
+        }
+    }
+}

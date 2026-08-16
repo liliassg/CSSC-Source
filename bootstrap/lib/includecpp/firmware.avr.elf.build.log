@@ -1,0 +1,9 @@
+[16:43:59.654] cssc-build: start  videodriver.cssc
+[16:43:59.654] cssc-build: parse  videodriver.cssc (89 lines, 2353 bytes)
+[16:43:59.654] [INFO] Compiling videodriver.cssc for target 'arduino'...
+[16:43:59.654] [INFO] Using legacy C-codegen pipeline (try `cssc native` for the v6 LLVM-IR backend).
+[16:43:59.667] cssc-build: lexed  445 tokens, 14 top-level nodes (2.0 ms)
+[16:43:59.667] cssc-build: tier   all nodes static (Tier 1+2), single binary output
+[16:43:59.667] cssc-build: codegen  321 lines C generated (0.4 ms)
+[16:43:59.667] cssc-build: codegen  4 compiled function(s)
+[16:43:59.667] [INFO] Generated 321 lines of C (0 ms).

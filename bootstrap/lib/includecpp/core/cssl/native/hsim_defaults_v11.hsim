@@ -1,0 +1,35 @@
+.Blink11 : esp8266 {
+    Chip(chipset=esp8266, pins=16, pin_config=[0=GND]) e0
+    .SetEntry(e0)
+    Pin(e0, 14) p14
+    Pin(e0, 0)  gnd
+    Led(colour=red) red0
+    Transistor(220) t0
+    .Connect(p14, t0)
+    .Connect(t0, red0)
+    .Connect(red0, gnd)
+}
+
+.Trio : esp8266 {
+    Chip(chipset=esp8266, pins=16, pin_config=[0=GND]) e0
+    .SetEntry(e0)
+    Pin(e0, 14) p14
+    Pin(e0, 12) p12
+    Pin(e0, 13) p13
+    Pin(e0, 0)  gnd
+    Led(colour=red)   ledR
+    Led(colour=green) ledG
+    Led(colour=blue)  ledB
+    Transistor(220) tR
+    Transistor(220) tG
+    Transistor(220) tB
+    .Connect(p14, tR)
+    .Connect(tR, ledR)
+    .Connect(ledR, gnd)
+    .Connect(p12, tG)
+    .Connect(tG, ledG)
+    .Connect(ledG, gnd)
+    .Connect(p13, tB)
+    .Connect(tB, ledB)
+    .Connect(ledB, gnd)
+}

@@ -1,0 +1,586 @@
+{
+    "name": "cssl",
+    "displayName": "CSSL Language",
+    "description": "Professional IDE support for CSSL scripts with IntelliSense, real-time diagnostics, autocomplete, and syntax highlighting",
+    "version": "2.0.0",
+    "publisher": "IncludeCPP",
+    "icon": "images/cssl.png",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.75.0",
+        "@types/node": "^18.0.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Snippets",
+        "Debuggers"
+    ],
+    "keywords": [
+        "cssl",
+        "script",
+        "includecpp",
+        "c++",
+        "python",
+        "run"
+    ],
+    "activationEvents": [
+        "onLanguage:cssl",
+        "onLanguage:cssc",
+        "onLanguage:cproject"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "cssl",
+                "aliases": ["CSSL", "cssl"],
+                "extensions": [".cssl"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./images/cssl.png",
+                    "dark": "./images/cssl.png"
+                }
+            },
+            {
+                "id": "cssl-mod",
+                "aliases": ["CSSL Module", "cssl-mod"],
+                "extensions": [".cssl-mod"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./images/cssl_mod.png",
+                    "dark": "./images/cssl_mod.png"
+                }
+            },
+            {
+                "id": "cssl-pl",
+                "aliases": ["CSSL Payload", "cssl-pl"],
+                "extensions": [".cssl-pl"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./images/cssl_pl.png",
+                    "dark": "./images/cssl_pl.png"
+                }
+            },
+            {
+                "id": "cp",
+                "aliases": ["IncludeCPP Plugin", "cp"],
+                "extensions": [".cp"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./images/cssl.png",
+                    "dark": "./images/cssl.png"
+                }
+            },
+            {
+                "id": "cssc",
+                "aliases": ["CSSC", "Control Specified Source Compiling", "cssc"],
+                "extensions": [".cssc"],
+                "configuration": "./cssc-language-configuration.json",
+                "icon": {
+                    "light": "./images/cssc_dll.png",
+                    "dark": "./images/cssc_dll.png"
+                }
+            },
+            {
+                "id": "cproject",
+                "aliases": ["CSSC Project", "cproject"],
+                "extensions": [".cproject"],
+                "filenames": ["cssc.cproject"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./images/cssc_ini.png",
+                    "dark": "./images/cssc_ini.png"
+                }
+            },
+            {
+                "id": "hsim",
+                "aliases": ["CSSC HSim Scenario", "hsim"],
+                "extensions": [".hsim"],
+                "configuration": "./hsim-language-configuration.json",
+                "icon": {
+                    "light": "./images/cssc_dll.png",
+                    "dark": "./images/cssc_dll.png"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "cssl",
+                "scopeName": "source.cssl",
+                "path": "./syntaxes/cssl.tmLanguage.json"
+            },
+            {
+                "language": "cssl-mod",
+                "scopeName": "source.cssl",
+                "path": "./syntaxes/cssl.tmLanguage.json"
+            },
+            {
+                "language": "cssl-pl",
+                "scopeName": "source.cssl",
+                "path": "./syntaxes/cssl.tmLanguage.json"
+            },
+            {
+                "language": "cp",
+                "scopeName": "source.cssl",
+                "path": "./syntaxes/cssl.tmLanguage.json"
+            },
+            {
+                "language": "cssc",
+                "scopeName": "source.cssc",
+                "path": "./syntaxes/cssc.tmLanguage.json"
+            },
+            {
+                "language": "cproject",
+                "scopeName": "source.cproject",
+                "path": "./syntaxes/cproject.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "cssl",
+                "path": "./snippets/cssl.snippets.json"
+            },
+            {
+                "language": "cssl-mod",
+                "path": "./snippets/cssl.snippets.json"
+            },
+            {
+                "language": "cssl-pl",
+                "path": "./snippets/cssl.snippets.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "cssl.runFile",
+                "title": "Run CSSL File",
+                "icon": "$(play)",
+                "enablement": "resourceExtname == .cssl"
+            },
+            {
+                "command": "cssl.restartServer",
+                "title": "CSSL: Restart Language Server"
+            }
+        ],
+        "menus": {
+            "editor/title/run": [
+                {
+                    "command": "cssl.runFile",
+                    "when": "resourceExtname == .cssl",
+                    "group": "navigation"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "cssl.runFile",
+                    "when": "resourceExtname == .cssl",
+                    "group": "1_run"
+                }
+            ]
+        },
+        "keybindings": [
+            {
+                "command": "cssl.runFile",
+                "key": "f5",
+                "when": "resourceExtname == .cssl && !inDebugMode"
+            },
+            {
+                "command": "cssl.runFile",
+                "key": "ctrl+f5",
+                "when": "resourceExtname == .cssl"
+            }
+        ],
+        "taskDefinitions": [
+            {
+                "type": "cssl",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "The CSSL file to run"
+                    }
+                }
+            }
+        ],
+        "configuration": {
+            "title": "CSSL",
+            "properties": {
+                "cssl.pythonPath": {
+                    "type": "string",
+                    "default": "python",
+                    "description": "Path to Python executable (auto-detects python3 on Linux/macOS)"
+                },
+                "cssl.showOutput": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show output panel when running CSSL files"
+                },
+                "cssl.runInTerminal": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Run CSSL files in integrated terminal (supports colors). Set to false to use plain output panel."
+                },
+                "cssl.languageServer.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable the CSSL language server for IntelliSense, diagnostics, and autocomplete"
+                },
+                "cssl.languageServer.trace": {
+                    "type": "string",
+                    "enum": ["off", "messages", "verbose"],
+                    "default": "off",
+                    "description": "Trace communication between VS Code and the language server"
+                },
+                "cssl.diagnostics.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable real-time error and warning diagnostics"
+                },
+                "cssl.diagnostics.undefinedVariables": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show warnings for undefined variables"
+                },
+                "cssl.diagnostics.unusedVariables": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show info for unused variables"
+                },
+                "cssl.diagnostics.invalidPointers": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show warnings for pointer references (?x) targeting undefined variables"
+                }
+            }
+        },
+        "semanticTokenScopes": [
+            {
+                "language": "cssl",
+                "scopes": {
+                    "variable.typed": ["variable.other.typed.cssl"]
+                }
+            },
+            {
+                "language": "cssc",
+                "scopes": {
+                    "function": ["entity.name.function.cssc"]
+                }
+            }
+        ],
+        "configurationDefaults": {
+            "editor.semanticHighlighting.enabled": true,
+            "editor.semanticTokenColorCustomizations": {
+                "enabled": true,
+                "rules": {}
+            },
+            "editor.tokenColorCustomizations": {
+                "textMateRules": [
+                    {
+                        "scope": "storage.modifier.cssl",
+                        "settings": {
+                            "fontStyle": "italic"
+                        }
+                    },
+                    {
+                        "scope": "storage.modifier.extends.cssl",
+                        "settings": {
+                            "fontStyle": "italic"
+                        }
+                    },
+                    {
+                        "scope": "storage.modifier.overwrites.cssl",
+                        "settings": {
+                            "fontStyle": "italic"
+                        }
+                    },
+                    {
+                        "scope": "support.type.cssl",
+                        "settings": {
+                            "foreground": "#C586C0"
+                        }
+                    },
+                    {
+                        "scope": "support.type.async.cssl",
+                        "settings": {
+                            "foreground": "#C586C0"
+                        }
+                    },
+                    {
+                        "scope": "variable.other.pointer.cssl",
+                        "settings": {
+                            "foreground": "#DA70D6"
+                        }
+                    },
+                    {
+                        "scope": "constant.other.symbol.snapshot.cssl",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "constant.numeric.hex.address.cssl",
+                        "settings": {
+                            "foreground": "#FFA500"
+                        }
+                    },
+                    {
+                        "scope": "variable.other.instance.cssl",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "support.function.cssl",
+                        "settings": {
+                            "foreground": "#569CD6"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.function.cssl",
+                        "settings": {
+                            "foreground": "#569CD6"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.definition.directive.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "keyword.control.import.cssc",
+                        "settings": {
+                            "foreground": "#C586C0"
+                        }
+                    },
+                    {
+                        "scope": "variable.other.declaration.cssc",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "variable.other.cssc",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "variable.parameter.cssc",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "variable.parameter.declaration.cssc",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.section.brackets.begin.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.section.brackets.end.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.section.parens.begin.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.section.parens.end.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.dereference.cssc",
+                        "settings": {
+                            "foreground": "#C586C0"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.type.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "support.function.cssc",
+                        "settings": {
+                            "foreground": "#569CD6"
+                        }
+                    },
+                    {
+                        "scope": "support.function.builtin.cssc",
+                        "settings": {
+                            "foreground": "#569CD6"
+                        }
+                    },
+                    {
+                        "scope": "support.class.builtin.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.arrow.cssc",
+                        "settings": {}
+                    },
+                    {
+                        "scope": "constant.numeric.cssc",
+                        "settings": {
+                            "foreground": "#D19A66"
+                        }
+                    },
+                    {
+                        "scope": "comment.line.bold.cssc",
+                        "settings": {
+                            "foreground": "#6A9955",
+                            "fontStyle": "bold"
+                        }
+                    },
+                    {
+                        "scope": "comment.line.italic.cssc",
+                        "settings": {
+                            "foreground": "#6A9955",
+                            "fontStyle": "italic"
+                        }
+                    },
+                    {
+                        "scope": "comment.line.important.cssc",
+                        "settings": {
+                            "foreground": "#F44747",
+                            "fontStyle": ""
+                        }
+                    },
+                    {
+                        "scope": "comment.line.question.cssc",
+                        "settings": {
+                            "foreground": "#569CD6",
+                            "fontStyle": ""
+                        }
+                    },
+                    {
+                        "scope": "comment.line.doc.cssc",
+                        "settings": {
+                            "foreground": "#585858",
+                            "fontStyle": ""
+                        }
+                    },
+                    {
+                        "scope": "comment.line.docstring.cssc",
+                        "settings": {
+                            "foreground": "#6A9955",
+                            "fontStyle": "italic"
+                        }
+                    },
+                    {
+                        "scope": "storage.type.sector.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.type.sector.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "storage.type.sector.free.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "storage.modifier.access.cssc",
+                        "settings": {
+                            "foreground": "#B0B0B0"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.label.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.separator.label.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.copy-return.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "punctuation.separator.arrow.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "storage.type.method.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.type.method.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "storage.type.method.do.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.apply.cssc",
+                        "settings": {
+                            "foreground": "#4EC9B0",
+                            "fontStyle": "bold"
+                        }
+                    },
+                    {
+                        "scope": "keyword.control.panic.cssc",
+                        "settings": {
+                            "foreground": "#F44747",
+                            "fontStyle": "bold"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.introspect.cssc",
+                        "settings": {
+                            "foreground": "#808080"
+                        }
+                    },
+                    {
+                        "scope": "support.type.property-name.cssc",
+                        "settings": {
+                            "foreground": "#9CDCFE"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

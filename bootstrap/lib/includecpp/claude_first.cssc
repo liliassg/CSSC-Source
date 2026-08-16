@@ -1,0 +1,39 @@
+
+
+object Thermostat<int: cold_below, int: hot_above> {
+    #stack[int, 32] Thermostat->lo = cold_below;
+    #stack[int, 32] Thermostat->hi = hot_above;
+
+    classify<int: temp>:
+        if (temp < Thermostat->lo) {
+            #stack[string, 64] cold_lbl = "COLD";
+            mirror cold_lbl;
+        }
+        if (temp > Thermostat->hi) {
+            #stack[string, 64] hot_lbl = "HOT";
+            mirror hot_lbl;
+        }
+        #stack[string, 64] warm_lbl = "WARM";
+        mirror warm_lbl;
+} free {
+    #delete[Thermostat->lo];
+    #delete[Thermostat->hi];
+};
+
+Thermostat(15, 26) t;
+
+#stack[array<int>, 256] readings = {8, 18, 22, 31, 14, 27};
+#stack[string, 64] arrow = " -> ";
+
+for (int i = 0; i < 6; i += 1) {
+    #stack[int, 32] r = readings[i];
+    t.classify(r) verdict;
+    #stack[string, 128] line = "T=" + r + arrow + verdict;
+    cssc::outln(line);
+    #delete[line];
+    #delete[r];
+}
+
+#delete[arrow];
+#delete[readings];
+#free[t];

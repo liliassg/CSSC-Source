@@ -1,0 +1,84 @@
+
+
+#include('gipeo') gipeo;
+#include('tft')   tft;
+
+#DEFINE W 128;
+#DEFINE H 160;
+
+#spi[0, 14, 13]         bus;
+bus.begin(40000000);
+#tft["st7735", W, H]    display;
+
+object HelloDriver<*display, *tft> {
+    #stack[string, 256] HelloDriver->greet = "Hallo Oma";
+    #stack[int, 32]     HelloDriver->frame = 0;
+    #stack[int, 32]     HelloDriver->box_x = 0;
+    #stack[int, 32]     HelloDriver->box_y = 96;
+    #stack[int, 32]     HelloDriver->dir   = 3;
+
+    boot:
+        display.begin();
+        display.fill(tft::BLACK);
+
+        display.text(10, 24, HelloDriver->greet, tft::WHITE, 2);
+
+        #stack[string, 64] sub = "ST7735 / CSSC 6";
+        display.text(10, 52, sub, tft::WHITE, 1);
+        #delete[sub];
+
+        display.line(0, 70, (W - 1), 70, tft::WHITE);
+        display.show();
+
+        cssc::sleep(2000);
+
+    tick:
+
+        display.fillrect(0, HelloDriver->box_y, W, 16, tft::BLACK);
+        display.fillrect(HelloDriver->box_x, HelloDriver->box_y, 16, 16, tft::WHITE);
+
+        HelloDriver->box_x += HelloDriver->dir;
+        if (HelloDriver->box_x > (W - 16)) { HelloDriver->dir = -3; }
+        if (HelloDriver->box_x < 0)        { HelloDriver->dir =  3; }
+
+        display.fillrect(0, 144, W, 10, tft::BLACK);
+        #stack[string, 128] flabel = "frame " + HelloDriver->frame;
+        display.text(4, 144, flabel, tft::WHITE, 1);
+        #delete[flabel];
+
+        display.show();
+        HelloDriver->frame += 1;
+
+        mirror HelloDriver->frame;
+
+} free {
+    display.fill(tft::BLACK);
+    #stack[string, 64] bye = "tschuess";
+    display.text(20, 76, bye, tft::WHITE, 2);
+    display.show();
+    #delete[bye];
+
+    #delete[HelloDriver->greet];
+    #delete[HelloDriver->frame];
+    #delete[HelloDriver->box_x];
+    #delete[HelloDriver->box_y];
+    #delete[HelloDriver->dir];
+}
+
+HelloDriver() hd;
+hd.boot();
+
+while (true) {
+    hd.tick() r;
+    #delete[r];
+    cssc::sleep(25);
+}
+
+#delete[hd];
+#delete[display];
+#delete[bus];
+
+#free[gipeo];
+#free[tft];
+#delete[W];
+#delete[H];

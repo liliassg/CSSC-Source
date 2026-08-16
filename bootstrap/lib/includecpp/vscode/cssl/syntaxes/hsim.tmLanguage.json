@@ -1,0 +1,84 @@
+{
+    "scopeName": "source.hsim",
+    "name": "CSSC HSim Scenario",
+    "fileTypes": ["hsim"],
+    "patterns": [
+        {"include": "#comments"},
+        {"include": "#preset-header"},
+        {"include": "#actions"},
+        {"include": "#constructors"},
+        {"include": "#kwargs"},
+        {"include": "#numbers"},
+        {"include": "#strings"},
+        {"include": "#legacy-decl"},
+        {"include": "#identifiers"}
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.hsim",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "preset-header": {
+            "match": "^(\\.)([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": {"name": "punctuation.definition.preset.hsim"},
+                "2": {"name": "entity.name.type.preset.hsim"},
+                "3": {"name": "keyword.operator.preset.hsim"},
+                "4": {"name": "support.class.chipset.hsim"}
+            }
+        },
+        "actions": {
+            "match": "(\\.)(SetEntry|SetScript|Connect|High|Low)\\b",
+            "captures": {
+                "1": {"name": "punctuation.definition.function.hsim"},
+                "2": {"name": "entity.name.function.action.hsim"}
+            }
+        },
+        "constructors": {
+            "match": "\\b(Chip|Pin|Led|Transistor)\\b",
+            "name": "support.class.constructor.hsim"
+        },
+        "kwargs": {
+            "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
+            "captures": {
+                "1": {"name": "variable.parameter.keyword.hsim"},
+                "2": {"name": "keyword.operator.assignment.hsim"}
+            }
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.float.hsim",
+                    "match": "-?\\b\\d+\\.\\d+\\b"
+                },
+                {
+                    "name": "constant.numeric.int.hsim",
+                    "match": "-?\\b\\d+\\b"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.hsim",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {"name": "constant.character.escape.hsim", "match": "\\\\."}
+            ]
+        },
+        "legacy-decl": {
+            "match": "^\\s*(\\.)(esp8266|esp32|esp32s3|arduino|pin|led|i2c|spi|uart|Microcontroller)\\b",
+            "captures": {
+                "1": {"name": "punctuation.definition.directive.hsim"},
+                "2": {"name": "support.class.legacy.hsim"}
+            }
+        },
+        "identifiers": {
+            "name": "variable.other.hsim",
+            "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+    }
+}

@@ -1,0 +1,118 @@
+.Blink : esp8266 {
+    .esp8266 m0
+    .pin, m0, 14
+    .led, led0
+    configure m0->14 {
+        if el m0->14 {
+            el led0
+            out "led0 lit"
+        }
+        if nel m0->14 {
+            nel led0
+            out "led0 dark"
+        }
+    }
+}
+
+.Standard : esp8266 {
+    .esp8266 m0
+    .pin, m0, 16
+    .pin, m0, 17
+    .pin, m0, 18
+    .led, led0
+    .led, led1
+    configure m0->16 {
+        el led0
+        out "Pin 16 HIGH"
+    }
+    configure m0->17 {
+        el led1
+        out "Pin 17 HIGH"
+    }
+    configure m0->18 {
+        nel led0
+        sleep 200
+        nel led1
+    }
+}
+
+.Reciver : esp8266 {
+    .esp8266 m0
+    .esp8266 m1
+    .pin, m0, 16
+    .pin, m0, 17
+    .pin, m0, 18
+    .pin, m1, 16
+    .pin, m1, 17
+    .pin, m1, 18
+    .pin, m1, 0
+    .led, led0
+    configure m0->16 {
+        el m1->16
+    }
+    configure m0->17 {
+        el m1->17
+    }
+    configure m0->18 {
+        el m1->18
+    }
+    if el m1->16 {
+        nel m1->16
+        el m1->0
+        out "Recived 1 Bit"
+    }
+    if el m1->17 {
+        if el m1->0 {
+            out "!!!"
+            nel m1->0
+        }
+        nel m1->17
+        out "Recived 1 Bit"
+    }
+    if el m1->18 {
+        nel m1->18
+        out "Recived 1 Bit"
+    }
+}
+
+.Dual : esp8266 {
+    .esp8266 m0
+    .pin, m0, 14
+    .pin, m0, 12
+    .led, ledA
+    .led, ledB
+    configure m0->14 {
+        if el m0->14 {
+            el ledA
+            out "ledA on"
+        }
+        if nel m0->14 {
+            nel ledA
+            out "ledA off"
+        }
+    }
+    configure m0->12 {
+        if el m0->12 {
+            el ledB
+            out "ledB on"
+        }
+        if nel m0->12 {
+            nel ledB
+            out "ledB off"
+        }
+    }
+}
+
+.Quiet : esp8266 {
+    .esp8266 m0
+    .pin, m0, 0
+    .pin, m0, 2
+    .pin, m0, 4
+    .pin, m0, 5
+    .pin, m0, 12
+    .pin, m0, 13
+    .pin, m0, 14
+    .pin, m0, 15
+    .pin, m0, 16
+    .led, led0
+}

@@ -1,0 +1,10 @@
+[19:01:59.400] cssc-build: start  C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\videodriver.cssc
+[19:01:59.400] cssc-build: parse  videodriver.cssc (87 lines, 2410 bytes)
+[19:01:59.400] [INFO] Compiling videodriver.cssc for target 'esp8266'...
+[19:01:59.400] [INFO] Using legacy C-codegen pipeline (try `cssc native` for the v6 LLVM-IR backend).
+[19:01:59.413] cssc-build: lexed  450 tokens, 16 top-level nodes (2.3 ms)
+[19:01:59.413] cssc-build: tier   all nodes static (Tier 1+2), single binary output
+[19:01:59.414] cssc-build: codegen  324 lines C generated (0.7 ms)
+[19:01:59.414] cssc-build: codegen  4 compiled function(s)
+[19:01:59.414] [INFO] Generated 324 lines of C (1 ms).
+[19:01:59.415] cssc-build: debug  saved C source to C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\videodriver.c

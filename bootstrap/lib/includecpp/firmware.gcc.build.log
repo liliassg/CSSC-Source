@@ -1,0 +1,17 @@
+[01:09:45.977] cssc-build: start  videodriver.cssc
+[01:09:45.978] cssc-build: parse  videodriver.cssc (89 lines, 2353 bytes)
+[01:09:45.978] [INFO] Compiling videodriver.cssc...
+[01:09:45.978] [INFO] Using legacy C-codegen pipeline (try `cssc native` for the v6 LLVM-IR backend).
+[01:09:45.990] cssc-build: lexed  445 tokens, 14 top-level nodes (2.1 ms)
+[01:09:45.990] cssc-build: tier   all nodes static (Tier 1+2), single binary output
+[01:09:45.990] cssc-build: codegen  321 lines C generated (0.4 ms)
+[01:09:45.990] cssc-build: codegen  4 compiled function(s)
+[01:09:45.990] [INFO] Generated 321 lines of C (0 ms).
+[01:09:45.993] cssc-build: compile  gcc.EXE -O2 -> firmware.gcc.exe
+[01:09:45.993] cssc-build: compile  cmd: C:\msys64\mingw64\bin\gcc.EXE -O2 -ffunction-sections -fdata-sections -DCSSC_RUNTIME_EXPORTS -IC:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native C:\Users\hatte\AppData\Local\Temp\tmpiyvcr9ll.c C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native\cssc_runtime.c C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native\cssc_allocwatcher.c C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native\cssc_gipeo.c C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native\cssc_tft.c C:\Users\hatte\Desktop\Python\Vsram\pypi\IncludeCPP\includecpp\core\cssl\native\cssc_http.c -o firmware.gcc.exe -Wl,--gc-sections -lgdi32 -luser32 -lkernel32 -lwinmm -lwinhttp
+[01:09:45.993] [INFO] Compiling C with gcc.EXE (-O2)...
+[01:09:53.166] cssc-build: link   firmware.gcc.exe (740,474 bytes, 7171 ms)
+[01:09:53.166] cssc-build: done   videodriver.cssc -> firmware.gcc.exe in 7177 ms
+[01:09:53.166] cssc-build: log    saved to firmware.gcc.build.log
+[01:09:53.166] [INFO] Linked firmware.gcc.exe (740,474 bytes).
+[01:09:53.166] [DONE] Done. Built firmware.gcc.exe in 7.18s.

@@ -1,0 +1,9 @@
+#include("cssc.sidepackagetools") sd;
+#stack[binary, 9128] bin = {
+    "@entry -> .9", "@end -> .0",
+    "9: call 3, 4, 6, 0", "0: exit, %d",
+    "3: out, hello world", "4: take, %3; push %5",
+    "6: take, %5; double; out; push, %0 0"
+
+}
+sd::install(bin);

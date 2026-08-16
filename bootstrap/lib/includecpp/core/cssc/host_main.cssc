@@ -1,0 +1,13 @@
+
+
+ciInit();
+keyBufAddr = cssc::alloc(256);
+keyHead = 0;
+fsNames = cssc::alloc(512);
+fsLens = cssc::alloc(64);
+fsData = cssc::alloc(64);
+fsSizes = cssc::alloc(64);
+fsCount = 0;
+#stack[int, 64] hbuf = cssc::alloc(65536);
+#stack[int, 64] hn = cssc::hostRead(hbuf, 60000);
+ciRun(hbuf, hn);
