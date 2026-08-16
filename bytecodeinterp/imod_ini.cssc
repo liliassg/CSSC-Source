@@ -1,0 +1,783 @@
+// ============================================================================
+//  INI module -- REAL, backed by CCFS. cssc_ini.c parity: case-sensitive,
+//  ';'/'#' inline comments, \r-tolerant, isspace trim, first-match-wins read,
+//  default-on-miss, key=value (no spaces) writes. Spec section 4.
+// ============================================================================
+
+// isspace: space \t \n \v \f \r.
+#define(ciIniWs) {
+    #scanp(ciIniWs, int, 0) c;
+    #stack[int, 32] w = 0;
+    if (c == 32) { w = 1; }
+    if (c == 9) { w = 1; }
+    if (c == 10) { w = 1; }
+    if (c == 11) { w = 1; }
+    if (c == 12) { w = 1; }
+    if (c == 13) { w = 1; }
+    return w;
+}
+
+// section header match on the trimmed line [ts,te): skip leading spaces, require
+// '[', take to first ']', exact case-sensitive length compare against sctP/sctL.
+#define(ciIniSectMatch) {
+    #scanp(ciIniSectMatch, int, 0) buf;
+    #scanp(ciIniSectMatch, int, 1) ts;
+    #scanp(ciIniSectMatch, int, 2) te;
+    #scanp(ciIniSectMatch, int, 3) sctP;
+    #scanp(ciIniSectMatch, int, 4) sctL;
+    #stack[int, 32] ok = 0;
+    #stack[int, 64] p = ts;
+    #stack[int, 32] sk = 1;
+    while (sk == 1) {
+        sk = 0;
+        if (p < te) { if (cssc::peek8(buf + p) == 32) { p = p + 1; sk = 1; } }
+    }
+    #delete[sk];
+    if (p < te) {
+        if (cssc::peek8(buf + p) == 91) {
+            p = p + 1;
+            #stack[int, 64] ns = p;
+            #stack[int, 32] fin = 0;
+            while (fin == 0) {
+                if (p >= te) { fin = 1; }
+                if (fin == 0) { if (cssc::peek8(buf + p) == 93) { fin = 1; } }
+                if (fin == 0) { p = p + 1; }
+            }
+            #delete[fin];
+            #stack[int, 64] nl = p - ns;
+            if (nl == sctL) {
+                ok = 1;
+                #stack[int, 64] j = 0;
+                while (j < nl) {
+                    if (cssc::peek8(buf + ns + j) != cssc::peek8(sctP + j)) { ok = 0; }
+                    j = j + 1;
+                }
+                #delete[j];
+            }
+            #delete[nl];
+            #delete[ns];
+        }
+    }
+    #delete[p];
+    return ok;
+}
+
+// line scan for read/hasKey: on the FIRST matching key in the matching section,
+// copy the trimmed value into ciIniVal (len -> ciIniValLen) and return 1.
+#define(ciIniLookup) {
+    #scanp(ciIniLookup, int, 0) buf;
+    #scanp(ciIniLookup, int, 1) len;
+    #scanp(ciIniLookup, int, 2) sctP;
+    #scanp(ciIniLookup, int, 3) sctL;
+    #scanp(ciIniLookup, int, 4) keyP;
+    #scanp(ciIniLookup, int, 5) keyL;
+    #req[ciIniWs] ciIniWs;
+    #req[ciIniSectMatch] ciIniSectMatch;
+    #req[ciIniVal] ciIniVal;
+    #req[ciIniValLen] ciIniValLen;
+    #stack[int, 64] pos = 0;
+    #stack[int, 32] inSect = 0;
+    #stack[int, 32] hit = 0;
+    while (pos < len) {
+        if (hit == 1) { pos = len; }
+        if (hit == 0) {
+            #stack[int, 64] ls = pos;
+            #stack[int, 64] le = pos;
+            #stack[int, 32] fe = 0;
+            while (fe == 0) {
+                if (le >= len) { fe = 1; }
+                if (fe == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + le);
+                    if (ch == 10) { fe = 1; }
+                    if (ch == 0) { fe = 1; }
+                    #delete[ch];
+                }
+                if (fe == 0) { le = le + 1; }
+            }
+            #delete[fe];
+            #stack[int, 64] ce = ls;
+            #stack[int, 32] fc = 0;
+            while (fc == 0) {
+                if (ce >= le) { fc = 1; }
+                if (fc == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + ce);
+                    if (ch == 59) { fc = 1; }
+                    if (ch == 35) { fc = 1; }
+                    #delete[ch];
+                }
+                if (fc == 0) { ce = ce + 1; }
+            }
+            #delete[fc];
+            #stack[int, 64] ts = ls;
+            #stack[int, 64] te = ce;
+            #stack[int, 32] t1 = 1;
+            while (t1 == 1) {
+                t1 = 0;
+                if (ts < te) { ciIniWs(cssc::peek8(buf + ts)) w; if (w == 1) { ts = ts + 1; t1 = 1; } #delete[w]; }
+            }
+            #stack[int, 32] t2 = 1;
+            while (t2 == 1) {
+                t2 = 0;
+                if (te > ts) { ciIniWs(cssc::peek8(buf + te - 1)) w; if (w == 1) { te = te - 1; t2 = 1; } #delete[w]; }
+            }
+            #delete[t1];
+            #delete[t2];
+            if (te > ts) {
+                #stack[int, 64] first = cssc::peek8(buf + ts);
+                if (first == 91) {
+                    ciIniSectMatch(buf, ts, te, sctP, sctL) sm;
+                    inSect = sm;
+                    #delete[sm];
+                }
+                if (first != 91) {
+                    if (inSect == 1) {
+                        #stack[int, 64] eq = ts;
+                        #stack[int, 32] fq = 0;
+                        while (fq == 0) {
+                            if (eq >= te) { fq = 1; }
+                            if (fq == 0) { if (cssc::peek8(buf + eq) == 61) { fq = 1; } }
+                            if (fq == 0) { eq = eq + 1; }
+                        }
+                        #delete[fq];
+                        if (eq < te) {
+                            #stack[int, 64] ke = eq;
+                            #stack[int, 32] kt = 1;
+                            while (kt == 1) {
+                                kt = 0;
+                                if (ke > ts) { ciIniWs(cssc::peek8(buf + ke - 1)) w; if (w == 1) { ke = ke - 1; kt = 1; } #delete[w]; }
+                            }
+                            #delete[kt];
+                            #stack[int, 64] kl2 = ke - ts;
+                            #stack[int, 32] km = 0;
+                            if (kl2 == keyL) {
+                                km = 1;
+                                #stack[int, 64] j = 0;
+                                while (j < kl2) {
+                                    if (cssc::peek8(buf + ts + j) != cssc::peek8(keyP + j)) { km = 0; }
+                                    j = j + 1;
+                                }
+                                #delete[j];
+                            }
+                            if (km == 1) {
+                                #stack[int, 64] vs = eq + 1;
+                                #stack[int, 32] vsk = 1;
+                                while (vsk == 1) {
+                                    vsk = 0;
+                                    if (vs < te) {
+                                        #stack[int, 64] c = cssc::peek8(buf + vs);
+                                        if (c == 32) { vs = vs + 1; vsk = 1; }
+                                        if (c == 9) { vs = vs + 1; vsk = 1; }
+                                        #delete[c];
+                                    }
+                                }
+                                #delete[vsk];
+                                #stack[int, 64] ve = te;
+                                #stack[int, 32] vt = 1;
+                                while (vt == 1) {
+                                    vt = 0;
+                                    if (ve > vs) { ciIniWs(cssc::peek8(buf + ve - 1)) w; if (w == 1) { ve = ve - 1; vt = 1; } #delete[w]; }
+                                }
+                                #delete[vt];
+                                #stack[int, 64] vl = ve - vs;
+                                if (vl > 1023) { vl = 1023; }
+                                #stack[int, 64] j = 0;
+                                while (j < vl) {
+                                    cssc::poke8(ciIniVal + j, cssc::peek8(buf + vs + j));
+                                    j = j + 1;
+                                }
+                                #delete[j];
+                                ciIniValLen = vl;
+                                hit = 1;
+                                #delete[vs];
+                                #delete[ve];
+                                #delete[vl];
+                            }
+                            #delete[km];
+                            #delete[kl2];
+                            #delete[ke];
+                        }
+                        #delete[eq];
+                    }
+                }
+                #delete[first];
+            }
+            #delete[ts];
+            #delete[te];
+            #delete[ce];
+            pos = le;
+            if (pos < len) { if (cssc::peek8(buf + pos) == 10) { pos = pos + 1; } }
+            #delete[ls];
+            #delete[le];
+        }
+    }
+    #delete[pos];
+    #delete[inSect];
+    return hit;
+}
+
+// emit n verbatim bytes from src to ciIniOut+off; returns new offset.
+#define(ciIniPut) {
+    #scanp(ciIniPut, int, 0) off;
+    #scanp(ciIniPut, int, 1) src;
+    #scanp(ciIniPut, int, 2) n;
+    #req[ciIniOut] ciIniOut;
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        cssc::poke8(ciIniOut + off + i, cssc::peek8(src + i));
+        i = i + 1;
+    }
+    #delete[i];
+    return off + n;
+}
+
+// emit "key=value" (no spaces) + optional '\n' to ciIniOut+off; new offset.
+#define(ciIniEmitKV) {
+    #scanp(ciIniEmitKV, int, 0) off;
+    #scanp(ciIniEmitKV, int, 1) keyP;
+    #scanp(ciIniEmitKV, int, 2) keyL;
+    #scanp(ciIniEmitKV, int, 3) valP;
+    #scanp(ciIniEmitKV, int, 4) valL;
+    #scanp(ciIniEmitKV, int, 5) addNL;
+    #req[ciIniOut] ciIniOut;
+    #stack[int, 64] o = off;
+    #stack[int, 64] i = 0;
+    while (i < keyL) {
+        cssc::poke8(ciIniOut + o, cssc::peek8(keyP + i));
+        o = o + 1;
+        i = i + 1;
+    }
+    #delete[i];
+    cssc::poke8(ciIniOut + o, 61);
+    o = o + 1;
+    #stack[int, 64] j = 0;
+    while (j < valL) {
+        cssc::poke8(ciIniOut + o, cssc::peek8(valP + j));
+        o = o + 1;
+        j = j + 1;
+    }
+    #delete[j];
+    if (addNL == 1) {
+        cssc::poke8(ciIniOut + o, 10);
+        o = o + 1;
+    }
+    return o;
+}
+
+// write(path,section,key,value): byte-preserving rewrite. Overwrite an existing
+// key in the section; else insert before the next header; else append the
+// section and/or key at EOF (leading '\n' only if the file didn't end in one).
+// Returns 1 on store success, 0 on failure. Spec section 4.4.
+// does the ini text contain a `[section]` header? Same line-scan/trim rules as
+// ciIniLookup (comments after ; or # stripped, surrounding whitespace ignored),
+// but it only ever looks at section headers.
+#stack[int, 64] ciIniHasSection;
+#define(ciIniHasSection) {
+    #scanp(ciIniHasSection, int, 0) buf;
+    #scanp(ciIniHasSection, int, 1) len;
+    #scanp(ciIniHasSection, int, 2) sctP;
+    #scanp(ciIniHasSection, int, 3) sctL;
+    #req[ciIniWs] ciIniWs;
+    #req[ciIniSectMatch] ciIniSectMatch;
+    #stack[int, 64] pos = 0;
+    #stack[int, 32] hit = 0;
+    while (pos < len) {
+        if (hit == 1) { pos = len; }
+        if (hit == 0) {
+            #stack[int, 64] ls = pos;
+            #stack[int, 64] le = pos;
+            #stack[int, 32] fe = 0;
+            while (fe == 0) {
+                if (le >= len) { fe = 1; }
+                if (fe == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + le);
+                    if (ch == 10) { fe = 1; }
+                    if (ch == 0) { fe = 1; }
+                    #delete[ch];
+                }
+                if (fe == 0) { le = le + 1; }
+            }
+            #delete[fe];
+            #stack[int, 64] ce = ls;                 // strip a trailing comment
+            #stack[int, 32] fc = 0;
+            while (fc == 0) {
+                if (ce >= le) { fc = 1; }
+                if (fc == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + ce);
+                    if (ch == 59) { fc = 1; }
+                    if (ch == 35) { fc = 1; }
+                    #delete[ch];
+                }
+                if (fc == 0) { ce = ce + 1; }
+            }
+            #delete[fc];
+            #stack[int, 64] ts = ls;                 // trim both ends
+            #stack[int, 64] te = ce;
+            #stack[int, 32] t1 = 1;
+            while (t1 == 1) {
+                t1 = 0;
+                if (ts < te) { ciIniWs(cssc::peek8(buf + ts)) w; if (w == 1) { ts = ts + 1; t1 = 1; } #delete[w]; }
+            }
+            #stack[int, 32] t2 = 1;
+            while (t2 == 1) {
+                t2 = 0;
+                if (te > ts) { ciIniWs(cssc::peek8(buf + te - 1)) w; if (w == 1) { te = te - 1; t2 = 1; } #delete[w]; }
+            }
+            #delete[t1];
+            #delete[t2];
+            if (te > ts) {
+                if (cssc::peek8(buf + ts) == 91) {   // '[' -> a section header
+                    ciIniSectMatch(buf, ts, te, sctP, sctL) sm;
+                    if (sm == 1) { hit = 1; }
+                    #delete[sm];
+                }
+            }
+            #delete[te];
+            #delete[ts];
+            #delete[ce];
+            #delete[ls];
+            pos = le + 1;
+            #delete[le];
+        }
+    }
+    #stack[int, 32] r = hit;
+    #delete[hit];
+    #delete[pos];
+    return r;
+}
+
+// append a `[section]` header to an ini file (creating the file if needed).
+// Returns 1 if the section exists afterwards, 0 on failure. Idempotent: an
+// already-present section is left untouched.
+#stack[int, 64] ciIniAddSection;
+#define(ciIniAddSection) {
+    #scanp(ciIniAddSection, int, 0) pathStr;
+    #scanp(ciIniAddSection, int, 1) sectStr;
+    #req[fsFind] fsFind;
+    #req[fsIdx] fsIdx;
+    #req[fsCreate] fsCreate;
+    #req[fsReadPtr] fsReadPtr;
+    #req[fsReadLen] fsReadLen;
+    #req[fsStore] fsStore;
+    #req[ciIniHasSection] ciIniHasSection;
+    #stack[int, 64] sctP = sectStr + 8;
+    #stack[int, 64] sctL = cssc::peek32(sectStr + 4);
+    fsCreate(pathStr + 8, cssc::peek32(pathStr + 4));
+    #stack[int, 64] r = 0;
+    if (fsIdx >= 0) {
+        #stack[int, 64] idx = fsIdx;
+        fsReadPtr(idx) bp;
+        fsReadLen(idx) bl;
+        ciIniHasSection(bp, bl, sctP, sctL) has;
+        if (has == 1) { r = 1; }
+        if (has == 0) {
+            // old content + optional separating newline + "[sect]\n"
+            #stack[int, 64] nb = cssc::alloc(bl + sctL + 4);
+            #stack[int, 64] w = 0;
+            while (w < bl) { cssc::poke8(nb + w, cssc::peek8(bp + w)); w = w + 1; }
+            if (bl > 0) {
+                if (cssc::peek8(bp + bl - 1) != 10) { cssc::poke8(nb + w, 10); w = w + 1; }
+            }
+            cssc::poke8(nb + w, 91); w = w + 1;              // '['
+            #stack[int, 64] j = 0;
+            while (j < sctL) { cssc::poke8(nb + w, cssc::peek8(sctP + j)); w = w + 1; j = j + 1; }
+            #delete[j];
+            cssc::poke8(nb + w, 93); w = w + 1;              // ']'
+            cssc::poke8(nb + w, 10); w = w + 1;              // '\n'
+            fsStore(idx, nb, w);
+            cssc::free(nb);
+            r = 1;
+            #delete[w];
+            #delete[nb];
+        }
+        #delete[has];
+        #delete[bp];
+        #delete[bl];
+        #delete[idx];
+    }
+    #delete[sctL];
+    #delete[sctP];
+    return r;
+}
+
+#define(ciIniWriteKey) {
+    #scanp(ciIniWriteKey, int, 0) pathStr;
+    #scanp(ciIniWriteKey, int, 1) sectStr;
+    #scanp(ciIniWriteKey, int, 2) keyStr;
+    #scanp(ciIniWriteKey, int, 3) valStr;
+    #req[fsFind] fsFind;
+    #req[fsIdx] fsIdx;
+    #req[fsCreate] fsCreate;
+    #req[fsReadPtr] fsReadPtr;
+    #req[fsReadLen] fsReadLen;
+    #req[fsStore] fsStore;
+    #req[ciIniWs] ciIniWs;
+    #req[ciIniSectMatch] ciIniSectMatch;
+    #req[ciIniPut] ciIniPut;
+    #req[ciIniEmitKV] ciIniEmitKV;
+    #req[ciIniOut] ciIniOut;
+    #stack[int, 64] sctP = sectStr + 8;
+    #stack[int, 64] sctL = cssc::peek32(sectStr + 4);
+    #stack[int, 64] keyP = keyStr + 8;
+    #stack[int, 64] keyL = cssc::peek32(keyStr + 4);
+    #stack[int, 64] valP = 0;
+    #stack[int, 64] valL = 0;
+    if (valStr != 0) { valP = valStr + 8; valL = cssc::peek32(valStr + 4); }
+    fsFind(pathStr + 8, cssc::peek32(pathStr + 4));
+    #stack[int, 64] idx = fsIdx;
+    if (idx < 0) {
+        fsCreate(pathStr + 8, cssc::peek32(pathStr + 4));
+        idx = fsIdx;
+    }
+    #stack[int, 64] buf = 0;
+    #stack[int, 64] len = 0;
+    if (idx >= 0) {
+        fsReadPtr(idx) bp;
+        buf = bp;
+        #delete[bp];
+        fsReadLen(idx) bl;
+        len = bl;
+        #delete[bl];
+    }
+    #stack[int, 64] op = 0;
+    #stack[int, 32] inTarget = 0;
+    #stack[int, 32] wroteKey = 0;
+    #stack[int, 32] sawTarget = 0;
+    #stack[int, 64] pos = 0;
+    while (pos < len) {
+        #stack[int, 64] ls = pos;
+        #stack[int, 64] le = pos;
+        #stack[int, 32] fe = 0;
+        while (fe == 0) {
+            if (le >= len) { fe = 1; }
+            if (fe == 0) {
+                #stack[int, 64] ch = cssc::peek8(buf + le);
+                if (ch == 10) { fe = 1; }
+                if (ch == 0) { fe = 1; }
+                #delete[ch];
+            }
+            if (fe == 0) { le = le + 1; }
+        }
+        #delete[fe];
+        #stack[int, 64] rle = le;
+        if (rle < len) { if (cssc::peek8(buf + rle) == 10) { rle = rle + 1; } }
+        // classify: comment-cut + trim -> [ts,te)
+        #stack[int, 64] ce = ls;
+        #stack[int, 32] fc = 0;
+        while (fc == 0) {
+            if (ce >= le) { fc = 1; }
+            if (fc == 0) {
+                #stack[int, 64] ch = cssc::peek8(buf + ce);
+                if (ch == 59) { fc = 1; }
+                if (ch == 35) { fc = 1; }
+                #delete[ch];
+            }
+            if (fc == 0) { ce = ce + 1; }
+        }
+        #delete[fc];
+        #stack[int, 64] ts = ls;
+        #stack[int, 64] te = ce;
+        #stack[int, 32] t1 = 1;
+        while (t1 == 1) {
+            t1 = 0;
+            if (ts < te) { ciIniWs(cssc::peek8(buf + ts)) w; if (w == 1) { ts = ts + 1; t1 = 1; } #delete[w]; }
+        }
+        #stack[int, 32] t2 = 1;
+        while (t2 == 1) {
+            t2 = 0;
+            if (te > ts) { ciIniWs(cssc::peek8(buf + te - 1)) w; if (w == 1) { te = te - 1; t2 = 1; } #delete[w]; }
+        }
+        #delete[t1];
+        #delete[t2];
+        #stack[int, 32] isHdr = 0;
+        #stack[int, 32] isTgtHdr = 0;
+        #stack[int, 32] isMatchKey = 0;
+        if (te > ts) {
+            #stack[int, 64] first = cssc::peek8(buf + ts);
+            if (first == 91) {
+                isHdr = 1;
+                ciIniSectMatch(buf, ts, te, sctP, sctL) sm;
+                isTgtHdr = sm;
+                #delete[sm];
+            }
+            if (first != 91) {
+                if (inTarget == 1) {
+                    #stack[int, 64] eq = ts;
+                    #stack[int, 32] fq = 0;
+                    while (fq == 0) {
+                        if (eq >= te) { fq = 1; }
+                        if (fq == 0) { if (cssc::peek8(buf + eq) == 61) { fq = 1; } }
+                        if (fq == 0) { eq = eq + 1; }
+                    }
+                    #delete[fq];
+                    if (eq < te) {
+                        #stack[int, 64] ke = eq;
+                        #stack[int, 32] kt = 1;
+                        while (kt == 1) {
+                            kt = 0;
+                            if (ke > ts) { ciIniWs(cssc::peek8(buf + ke - 1)) w; if (w == 1) { ke = ke - 1; kt = 1; } #delete[w]; }
+                        }
+                        #delete[kt];
+                        #stack[int, 64] kl2 = ke - ts;
+                        if (kl2 == keyL) {
+                            #stack[int, 32] km = 1;
+                            #stack[int, 64] j = 0;
+                            while (j < kl2) {
+                                if (cssc::peek8(buf + ts + j) != cssc::peek8(keyP + j)) { km = 0; }
+                                j = j + 1;
+                            }
+                            #delete[j];
+                            if (km == 1) { isMatchKey = 1; }
+                            #delete[km];
+                        }
+                        #delete[kl2];
+                        #delete[ke];
+                    }
+                    #delete[eq];
+                }
+            }
+            #delete[first];
+        }
+        if (isHdr == 1) {
+            if (inTarget == 1) {
+                if (wroteKey == 0) {
+                    ciIniEmitKV(op, keyP, keyL, valP, valL, 1) o2;
+                    op = o2;
+                    wroteKey = 1;
+                    #delete[o2];
+                }
+            }
+            ciIniPut(op, buf + ls, rle - ls) o3;
+            op = o3;
+            #delete[o3];
+            inTarget = isTgtHdr;
+            if (isTgtHdr == 1) { sawTarget = 1; }
+        }
+        if (isHdr == 0) {
+            if (isMatchKey == 1) {
+                #stack[int, 32] nlp = 0;
+                if (rle > le) { nlp = 1; }
+                ciIniEmitKV(op, keyP, keyL, valP, valL, nlp) o4;
+                op = o4;
+                wroteKey = 1;
+                #delete[nlp];
+                #delete[o4];
+            }
+            if (isMatchKey == 0) {
+                ciIniPut(op, buf + ls, rle - ls) o5;
+                op = o5;
+                #delete[o5];
+            }
+        }
+        #delete[isHdr];
+        #delete[isTgtHdr];
+        #delete[isMatchKey];
+        #delete[ts];
+        #delete[te];
+        #delete[ce];
+        pos = rle;
+        #delete[rle];
+        #delete[ls];
+        #delete[le];
+    }
+    if (sawTarget == 0) {
+        if (op > 0) { if (cssc::peek8(ciIniOut + op - 1) != 10) { cssc::poke8(ciIniOut + op, 10); op = op + 1; } }
+        cssc::poke8(ciIniOut + op, 91);
+        op = op + 1;
+        ciIniPut(op, sctP, sctL) os;
+        op = os;
+        #delete[os];
+        cssc::poke8(ciIniOut + op, 93);
+        op = op + 1;
+        cssc::poke8(ciIniOut + op, 10);
+        op = op + 1;
+        ciIniEmitKV(op, keyP, keyL, valP, valL, 1) ok;
+        op = ok;
+        #delete[ok];
+    }
+    if (sawTarget == 1) {
+        if (wroteKey == 0) {
+            if (op > 0) { if (cssc::peek8(ciIniOut + op - 1) != 10) { cssc::poke8(ciIniOut + op, 10); op = op + 1; } }
+            ciIniEmitKV(op, keyP, keyL, valP, valL, 1) ok;
+            op = ok;
+            #delete[ok];
+        }
+    }
+    #stack[int, 64] res = 0;
+    if (idx >= 0) {
+        fsStore(idx, ciIniOut, op);
+        res = 1;
+    }
+    #delete[op];
+    #delete[inTarget];
+    #delete[wroteKey];
+    #delete[sawTarget];
+    #delete[pos];
+    #delete[buf];
+    #delete[len];
+    #delete[idx];
+    #delete[sctP];
+    #delete[sctL];
+    #delete[keyP];
+    #delete[keyL];
+    #delete[valP];
+    #delete[valL];
+    return res;
+}
+
+// delete(path,section,key): drop every matching key line in matching sections
+// (its trailing newline too). Rewrites + stores only if something was removed.
+// Returns 1 if any line removed, else 0. Spec section 4.5.
+#define(ciIniDeleteKey) {
+    #scanp(ciIniDeleteKey, int, 0) pathStr;
+    #scanp(ciIniDeleteKey, int, 1) sectStr;
+    #scanp(ciIniDeleteKey, int, 2) keyStr;
+    #req[fsFind] fsFind;
+    #req[fsIdx] fsIdx;
+    #req[fsReadPtr] fsReadPtr;
+    #req[fsReadLen] fsReadLen;
+    #req[fsStore] fsStore;
+    #req[ciIniWs] ciIniWs;
+    #req[ciIniSectMatch] ciIniSectMatch;
+    #req[ciIniPut] ciIniPut;
+    #req[ciIniOut] ciIniOut;
+    #stack[int, 64] sctP = sectStr + 8;
+    #stack[int, 64] sctL = cssc::peek32(sectStr + 4);
+    #stack[int, 64] keyP = keyStr + 8;
+    #stack[int, 64] keyL = cssc::peek32(keyStr + 4);
+    #stack[int, 64] res = 0;
+    fsFind(pathStr + 8, cssc::peek32(pathStr + 4));
+    #stack[int, 64] idx = fsIdx;
+    if (idx >= 0) {
+        fsReadPtr(idx) bp;
+        #stack[int, 64] buf = bp;
+        #delete[bp];
+        fsReadLen(idx) bl;
+        #stack[int, 64] len = bl;
+        #delete[bl];
+        #stack[int, 64] op = 0;
+        #stack[int, 32] inTarget = 0;
+        #stack[int, 32] removed = 0;
+        #stack[int, 64] pos = 0;
+        while (pos < len) {
+            #stack[int, 64] ls = pos;
+            #stack[int, 64] le = pos;
+            #stack[int, 32] fe = 0;
+            while (fe == 0) {
+                if (le >= len) { fe = 1; }
+                if (fe == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + le);
+                    if (ch == 10) { fe = 1; }
+                    if (ch == 0) { fe = 1; }
+                    #delete[ch];
+                }
+                if (fe == 0) { le = le + 1; }
+            }
+            #delete[fe];
+            #stack[int, 64] rle = le;
+            if (rle < len) { if (cssc::peek8(buf + rle) == 10) { rle = rle + 1; } }
+            #stack[int, 64] ce = ls;
+            #stack[int, 32] fc = 0;
+            while (fc == 0) {
+                if (ce >= le) { fc = 1; }
+                if (fc == 0) {
+                    #stack[int, 64] ch = cssc::peek8(buf + ce);
+                    if (ch == 59) { fc = 1; }
+                    if (ch == 35) { fc = 1; }
+                    #delete[ch];
+                }
+                if (fc == 0) { ce = ce + 1; }
+            }
+            #delete[fc];
+            #stack[int, 64] ts = ls;
+            #stack[int, 64] te = ce;
+            #stack[int, 32] t1 = 1;
+            while (t1 == 1) {
+                t1 = 0;
+                if (ts < te) { ciIniWs(cssc::peek8(buf + ts)) w; if (w == 1) { ts = ts + 1; t1 = 1; } #delete[w]; }
+            }
+            #stack[int, 32] t2 = 1;
+            while (t2 == 1) {
+                t2 = 0;
+                if (te > ts) { ciIniWs(cssc::peek8(buf + te - 1)) w; if (w == 1) { te = te - 1; t2 = 1; } #delete[w]; }
+            }
+            #delete[t1];
+            #delete[t2];
+            #stack[int, 32] drop = 0;
+            if (te > ts) {
+                #stack[int, 64] first = cssc::peek8(buf + ts);
+                if (first == 91) {
+                    ciIniSectMatch(buf, ts, te, sctP, sctL) sm;
+                    inTarget = sm;
+                    #delete[sm];
+                }
+                if (first != 91) {
+                    if (inTarget == 1) {
+                        #stack[int, 64] eq = ts;
+                        #stack[int, 32] fq = 0;
+                        while (fq == 0) {
+                            if (eq >= te) { fq = 1; }
+                            if (fq == 0) { if (cssc::peek8(buf + eq) == 61) { fq = 1; } }
+                            if (fq == 0) { eq = eq + 1; }
+                        }
+                        #delete[fq];
+                        if (eq < te) {
+                            #stack[int, 64] ke = eq;
+                            #stack[int, 32] kt = 1;
+                            while (kt == 1) {
+                                kt = 0;
+                                if (ke > ts) { ciIniWs(cssc::peek8(buf + ke - 1)) w; if (w == 1) { ke = ke - 1; kt = 1; } #delete[w]; }
+                            }
+                            #delete[kt];
+                            #stack[int, 64] kl2 = ke - ts;
+                            if (kl2 == keyL) {
+                                #stack[int, 32] km = 1;
+                                #stack[int, 64] j = 0;
+                                while (j < kl2) {
+                                    if (cssc::peek8(buf + ts + j) != cssc::peek8(keyP + j)) { km = 0; }
+                                    j = j + 1;
+                                }
+                                #delete[j];
+                                if (km == 1) { drop = 1; }
+                                #delete[km];
+                            }
+                            #delete[kl2];
+                            #delete[ke];
+                        }
+                        #delete[eq];
+                    }
+                }
+                #delete[first];
+            }
+            if (drop == 1) { removed = 1; }
+            if (drop == 0) {
+                ciIniPut(op, buf + ls, rle - ls) o2;
+                op = o2;
+                #delete[o2];
+            }
+            #delete[drop];
+            #delete[ts];
+            #delete[te];
+            #delete[ce];
+            #delete[ls];
+            #delete[le];
+            pos = rle;
+            #delete[rle];
+        }
+        if (removed == 1) {
+            fsStore(idx, ciIniOut, op);
+            res = 1;
+        }
+        #delete[op];
+        #delete[inTarget];
+        #delete[removed];
+        #delete[pos];
+        #delete[buf];
+        #delete[len];
+    }
+    #delete[idx];
+    #delete[sctP];
+    #delete[sctL];
+    #delete[keyP];
+    #delete[keyL];
+    return res;
+}

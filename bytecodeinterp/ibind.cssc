@@ -1,0 +1,181 @@
+// ---- bind (value tag 7) : heterogeneous pair-record. handle{rc@0,size@4=PAIR
+// count,cap@8=cell capacity,pairWidth@12,data@16}; cell(16B){type@0,val@8}. Flat
+// cell k @ data+k*16; usedCells=size*pairWidth; b[r][c]=cell r*pairWidth+c;
+// b[i]=cell i. String cells OWNED (cloned on set, released on clear/free). Literal
+// `{a,b; c,d}` -> pairWidth = width of the first ;-group, size = group count.
+#define(ciBindNew) {
+    #scanp(ciBindNew, int, 0) pw;
+    #stack[int, 64] capCells = 8;
+    #stack[int, 64] h = cssc::alloc(24);
+    #stack[int, 64] d = cssc::alloc(capCells * 16);
+    // ZERO the cells: cssc::alloc hands back RECYCLED heap on ccos (not zeroed
+    // like host malloc). An out-of-range read such as `bind[1][0]` on a 1-pair
+    // bind then reads a stale cell whose garbage "type" can look like a container
+    // tag -> ciStrConcat/ciContFmt dereferences a wild pointer and corrupts the
+    // heap. Zeroing makes every unused cell a safe int 0.
+    cssc::memfill32(d, 0, capCells * 4);
+    cssc::poke32(h, 1);
+    cssc::poke32(h + 4, 0);
+    cssc::poke32(h + 8, capCells);
+    cssc::poke32(h + 12, pw);
+    cssc::poke64(h + 16, d);
+    #delete[d];
+    #delete[capCells];
+    return h;
+}
+#define(ciBindRawSet) {
+    #scanp(ciBindRawSet, int, 0) h;
+    #scanp(ciBindRawSet, int, 1) idx;
+    #scanp(ciBindRawSet, int, 2) type;
+    #scanp(ciBindRawSet, int, 3) val;
+    #req[ciStrClone] ciStrClone;
+    #stack[int, 64] cap = cssc::peek32(h + 8);
+    if (idx >= cap) {
+        #stack[int, 64] ncap = cap * 2;
+        while (ncap <= idx) { ncap = ncap * 2; }
+        #stack[int, 64] nd = cssc::alloc(ncap * 16);
+        #stack[int, 64] od = cssc::peek64(h + 16);
+        cssc::memcopy(nd, od, cap * 4);
+        // ZERO the newly-grown cells [cap..ncap): cssc::alloc returns RECYCLED,
+        // non-zeroed heap on ccos, so a stale cell's garbage "type" tag could look
+        // like a container and get wild-dereferenced (same hazard ciBindNew guards
+        // against at :2790). Each cell is 16B = 4 words; fill (ncap-cap)*4 words.
+        cssc::memfill32(nd + cap * 16, 0, (ncap - cap) * 4);
+        cssc::free(od);
+        cssc::poke64(h + 16, nd);
+        cssc::poke32(h + 8, ncap);
+        #delete[od];
+        #delete[nd];
+        #delete[ncap];
+    }
+    #stack[int, 64] sv = val;
+    if (type == 1) { ciStrClone(val) cx; sv = cx; #delete[cx]; }
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    cssc::poke64(d + idx * 16, type);
+    cssc::poke64(d + idx * 16 + 8, sv);
+    #delete[d];
+    #delete[sv];
+    #delete[cap];
+}
+#define(ciBindPairs) {
+    #scanp(ciBindPairs, int, 0) h;
+    return cssc::peek32(h + 4);
+}
+#define(ciBindWidth) {
+    #scanp(ciBindWidth, int, 0) h;
+    return cssc::peek32(h + 12);
+}
+#define(ciBindCellGet) {
+    #scanp(ciBindCellGet, int, 0) h;
+    #scanp(ciBindCellGet, int, 1) i;
+    #req[ciStrClone] ciStrClone;
+    #req[ciBindCellRT] ciBindCellRT;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] pw = cssc::peek32(h + 12);
+    #stack[int, 64] used = size * pw;
+    #stack[int, 64] r = 0;
+    ciBindCellRT = 0;
+    if (i >= 0) {
+        if (i < used) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            #stack[int, 64] ct = cssc::peek64(d + i * 16);
+            #stack[int, 64] cv = cssc::peek64(d + i * 16 + 8);
+            ciBindCellRT = ct;
+            if (ct == 1) { ciStrClone(cv) cc; r = cc; #delete[cc]; }
+            if (ct != 1) { r = cv; }
+            #delete[ct];
+            #delete[cv];
+            #delete[d];
+        }
+    }
+    #delete[used];
+    #delete[pw];
+    #delete[size];
+    return r;
+}
+#define(ciBindCellSet) {
+    #scanp(ciBindCellSet, int, 0) h;
+    #scanp(ciBindCellSet, int, 1) i;
+    #scanp(ciBindCellSet, int, 2) type;
+    #scanp(ciBindCellSet, int, 3) val;
+    #req[ciStrClone] ciStrClone;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] pw = cssc::peek32(h + 12);
+    #stack[int, 64] used = size * pw;
+    if (i >= 0) {
+        if (i < used) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            #stack[int, 64] ot = cssc::peek64(d + i * 16);
+            if (ot == 1) { cssc::free(cssc::peek64(d + i * 16 + 8)); }
+            #stack[int, 64] sv = val;
+            if (type == 1) { ciStrClone(val) cx; sv = cx; #delete[cx]; }
+            cssc::poke64(d + i * 16, type);
+            cssc::poke64(d + i * 16 + 8, sv);
+            #delete[sv];
+            #delete[ot];
+            #delete[d];
+        }
+    }
+    #delete[used];
+    #delete[pw];
+    #delete[size];
+}
+#define(ciBindAddmap) {
+    #scanp(ciBindAddmap, int, 0) h;
+    #scanp(ciBindAddmap, int, 1) mh;
+    #req[ciBindRawSet] ciBindRawSet;
+    #stack[int, 64] pw = cssc::peek32(h + 12);
+    if (pw == 0) { pw = 2; cssc::poke32(h + 12, 2); }
+    if (pw == 2) {
+        #stack[int, 64] msize = cssc::peek32(mh + 4);
+        #stack[int, 64] md = cssc::peek64(mh + 16);
+        #stack[int, 64] i = 0;
+        while (i < msize) {
+            #stack[int, 64] base = cssc::peek32(h + 4) * 2;
+            #stack[int, 64] kt = cssc::peek64(md + i * 32);
+            #stack[int, 64] kv = cssc::peek64(md + i * 32 + 8);
+            #stack[int, 64] vt = cssc::peek64(md + i * 32 + 16);
+            #stack[int, 64] vv = cssc::peek64(md + i * 32 + 24);
+            ciBindRawSet(h, base, kt, kv);
+            ciBindRawSet(h, base + 1, vt, vv);
+            cssc::poke32(h + 4, cssc::peek32(h + 4) + 1);
+            #delete[base];
+            #delete[kt];
+            #delete[kv];
+            #delete[vt];
+            #delete[vv];
+            i = i + 1;
+        }
+        #delete[i];
+        #delete[md];
+        #delete[msize];
+    }
+    #delete[pw];
+}
+#define(ciBindClear) {
+    #scanp(ciBindClear, int, 0) h;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] pw = cssc::peek32(h + 12);
+    #stack[int, 64] used = size * pw;
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 0;
+    while (i < used) {
+        if (cssc::peek64(d + i * 16) == 1) { cssc::free(cssc::peek64(d + i * 16 + 8)); }
+        i = i + 1;
+    }
+    cssc::poke32(h + 4, 0);
+    #delete[i];
+    #delete[d];
+    #delete[used];
+    #delete[pw];
+    #delete[size];
+}
+#define(ciBindFree) {
+    #scanp(ciBindFree, int, 0) h;
+    #req[ciBindClear] ciBindClear;
+    ciBindClear(h);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    cssc::free(d);
+    cssc::free(h);
+    #delete[d];
+}

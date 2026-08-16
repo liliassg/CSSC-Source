@@ -1,0 +1,231 @@
+// ============================================================================
+// MOUSE module (#include("mouse"); mouse::* ; mouse::client(vh) -> tag-8 handle).
+// Coordinates map the framebuffer cursor back into backbuffer space using the
+// scale/offset present() published. All state is plain int (no heap).
+// ============================================================================
+#define(ciMsLc) {
+    #scanp(ciMsLc, int, 0) c;
+    #stack[int, 64] r = c;
+    if (c >= 65) { if (c <= 90) { r = c + 32; } }
+    return r;
+}
+#define(ciMsMapX) {
+    #req[mouseX] mouseX;
+    #req[ciVidScale] ciVidScale;
+    #req[ciVidOffX] ciVidOffX;
+    #stack[int, 64] sc = ciVidScale;
+    if (sc < 1) { sc = 1; }
+    #stack[int, 64] r = (mouseX - ciVidOffX) / sc;
+    #delete[sc];
+    return r;
+}
+#define(ciMsMapY) {
+    #req[mouseY] mouseY;
+    #req[ciVidScale] ciVidScale;
+    #req[ciVidOffY] ciVidOffY;
+    #stack[int, 64] sc = ciVidScale;
+    if (sc < 1) { sc = 1; }
+    #stack[int, 64] r = (mouseY - ciVidOffY) / sc;
+    #delete[sc];
+    return r;
+}
+// "left"->1 "right"->2 "middle"->4 (case-insensitive); unknown -> 0
+#define(ciMsBtnMask) {
+    #scanp(ciMsBtnMask, int, 0) sp;
+    #req[ciMsLc] ciMsLc;
+    #stack[int, 64] r = 0;
+    if (sp != 0) {
+        #stack[int, 64] len = cssc::peek32(sp + 4);
+        #stack[int, 64] d = sp + 8;
+        if (len == 4) {
+            #stack[int, 32] m = 1;
+            ciMsLc(cssc::peek8(d)) c0;
+            if (c0 != 108) { m = 0; }
+            #delete[c0];
+            ciMsLc(cssc::peek8(d + 1)) c1;
+            if (c1 != 101) { m = 0; }
+            #delete[c1];
+            ciMsLc(cssc::peek8(d + 2)) c2;
+            if (c2 != 102) { m = 0; }
+            #delete[c2];
+            ciMsLc(cssc::peek8(d + 3)) c3;
+            if (c3 != 116) { m = 0; }
+            #delete[c3];
+            if (m == 1) { r = 1; }
+            #delete[m];
+        }
+        if (len == 5) {
+            #stack[int, 32] m = 1;
+            ciMsLc(cssc::peek8(d)) c0;
+            if (c0 != 114) { m = 0; }
+            #delete[c0];
+            ciMsLc(cssc::peek8(d + 1)) c1;
+            if (c1 != 105) { m = 0; }
+            #delete[c1];
+            ciMsLc(cssc::peek8(d + 2)) c2;
+            if (c2 != 103) { m = 0; }
+            #delete[c2];
+            ciMsLc(cssc::peek8(d + 3)) c3;
+            if (c3 != 104) { m = 0; }
+            #delete[c3];
+            ciMsLc(cssc::peek8(d + 4)) c4;
+            if (c4 != 116) { m = 0; }
+            #delete[c4];
+            if (m == 1) { r = 2; }
+            #delete[m];
+        }
+        if (len == 6) {
+            #stack[int, 32] m = 1;
+            ciMsLc(cssc::peek8(d)) c0;
+            if (c0 != 109) { m = 0; }
+            #delete[c0];
+            ciMsLc(cssc::peek8(d + 1)) c1;
+            if (c1 != 105) { m = 0; }
+            #delete[c1];
+            ciMsLc(cssc::peek8(d + 2)) c2;
+            if (c2 != 100) { m = 0; }
+            #delete[c2];
+            ciMsLc(cssc::peek8(d + 3)) c3;
+            if (c3 != 100) { m = 0; }
+            #delete[c3];
+            ciMsLc(cssc::peek8(d + 4)) c4;
+            if (c4 != 108) { m = 0; }
+            #delete[c4];
+            ciMsLc(cssc::peek8(d + 5)) c5;
+            if (c5 != 101) { m = 0; }
+            #delete[c5];
+            if (m == 1) { r = 4; }
+            #delete[m];
+        }
+        #delete[len];
+        #delete[d];
+    }
+    return r;
+}
+// snapshot the button state (prev<-curr, curr<-flags&7). Level state, no ring.
+#define(ciMsUpdate) {
+    #req[mouseFlags] mouseFlags;
+    #req[ciMsCurr] ciMsCurr;
+    #req[ciMsPrev] ciMsPrev;
+    ciMsPrev = ciMsCurr;
+    ciMsCurr = cssc::band(mouseFlags, 7);
+}
+#define(ciMsOver) {
+    #scanp(ciMsOver, int, 0) x;
+    #scanp(ciMsOver, int, 1) y;
+    #scanp(ciMsOver, int, 2) w;
+    #scanp(ciMsOver, int, 3) h;
+    #req[ciMsMapX] ciMsMapX;
+    #req[ciMsMapY] ciMsMapY;
+    ciMsMapX() mx;
+    ciMsMapY() my;
+    #stack[int, 64] r = 0;
+    if (mx >= x) { if (mx < x + w) { if (my >= y) { if (my < y + h) { r = 1; } } } }
+    #delete[mx];
+    #delete[my];
+    return r;
+}
+// compute an int mouse method result (shared by namespace + client-dot dispatch).
+// button methods take a1 = string ptr; isOver takes a1..a4; clampX/Y take (a1,a2).
+#define(ciMsMethod) {
+    #scanp(ciMsMethod, int, 0) moff;
+    #scanp(ciMsMethod, int, 1) mlen;
+    #scanp(ciMsMethod, int, 2) a1;
+    #scanp(ciMsMethod, int, 3) a2;
+    #scanp(ciMsMethod, int, 4) a3;
+    #scanp(ciMsMethod, int, 5) a4;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciMsMapX] ciMsMapX;
+    #req[ciMsMapY] ciMsMapY;
+    #req[ciMsOver] ciMsOver;
+    #req[ciMsBtnMask] ciMsBtnMask;
+    #req[ciMsCurr] ciMsCurr;
+    #req[ciMsPrev] ciMsPrev;
+    #req[mouseFlags] mouseFlags;
+    ciIdentIs(moff, mlen, "getX") mgx;
+    ciIdentIs(moff, mlen, "getY") mgy;
+    ciIdentIs(moff, mlen, "isOver") mov;
+    ciIdentIs(moff, mlen, "isClicked") mck;
+    ciIdentIs(moff, mlen, "isHeld") mhl;
+    ciIdentIs(moff, mlen, "isReleased") mrl;
+    ciIdentIs(moff, mlen, "clampX") mcx;
+    ciIdentIs(moff, mlen, "clampY") mcy;
+    #stack[int, 64] res = 0;
+    if (mgx == 1) { ciMsMapX() r; res = r; #delete[r]; }
+    if (mgy == 1) { ciMsMapY() r; res = r; #delete[r]; }
+    if (mov == 1) { ciMsOver(a1, a2, a3, a4) r; res = r; #delete[r]; }
+    if (mck == 1) {
+        ciMsBtnMask(a1) mask;
+        #stack[int, 64] rr = 0;
+        if (mask != 0) {
+            #stack[int, 64] cu = cssc::band(ciMsCurr, mask);
+            #stack[int, 64] pr = cssc::band(ciMsPrev, mask);
+            if (cu > 0) { if (pr == 0) { rr = 1; } }
+            #delete[cu];
+            #delete[pr];
+        }
+        res = rr;
+        #delete[mask];
+        #delete[rr];
+    }
+    if (mrl == 1) {
+        ciMsBtnMask(a1) mask;
+        #stack[int, 64] rr = 0;
+        if (mask != 0) {
+            #stack[int, 64] cu = cssc::band(ciMsCurr, mask);
+            #stack[int, 64] pr = cssc::band(ciMsPrev, mask);
+            if (cu == 0) { if (pr > 0) { rr = 1; } }
+            #delete[cu];
+            #delete[pr];
+        }
+        res = rr;
+        #delete[mask];
+        #delete[rr];
+    }
+    if (mhl == 1) {
+        ciMsBtnMask(a1) mask;
+        #stack[int, 64] m2 = mask;
+        if (m2 == 0) { m2 = 1; }
+        #stack[int, 64] hv = cssc::band(mouseFlags, m2);
+        #stack[int, 64] rr = 0;
+        if (hv > 0) { rr = 1; }
+        res = rr;
+        #delete[mask];
+        #delete[m2];
+        #delete[hv];
+        #delete[rr];
+    }
+    if (mcx == 1) {
+        ciMsMapX() mx;
+        #stack[int, 64] w = a2;
+        if (w < 1) { w = 1; }
+        #stack[int, 64] rr = mx;
+        if (mx < a1) { rr = a1; }
+        if (mx > a1 + w - 1) { rr = a1 + w - 1; }
+        res = rr;
+        #delete[mx];
+        #delete[w];
+        #delete[rr];
+    }
+    if (mcy == 1) {
+        ciMsMapY() my;
+        #stack[int, 64] h = a2;
+        if (h < 1) { h = 1; }
+        #stack[int, 64] rr = my;
+        if (my < a1) { rr = a1; }
+        if (my > a1 + h - 1) { rr = a1 + h - 1; }
+        res = rr;
+        #delete[my];
+        #delete[h];
+        #delete[rr];
+    }
+    #delete[mgx];
+    #delete[mgy];
+    #delete[mov];
+    #delete[mck];
+    #delete[mhl];
+    #delete[mrl];
+    #delete[mcx];
+    #delete[mcy];
+    return res;
+}

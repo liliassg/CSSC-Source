@@ -1,0 +1,32 @@
+// ===========================================================================
+//  transembly/sema_own_main.cssc  --  ownership-map entry. Reads a CSSC source
+//  FILE named by argv[1] (via cssc::argStr + cssc::osReadFile — no stdin, so a
+//  caller like the IDE never risks a blocked pipe) and prints the alloc<->
+//  dealloc + leak map the editor renders:
+//    A <line> <col> <scope> <freed> <leaked>
+//    D <line> <col> <targetAllocLine>
+//  Scope-aware: each delete resolves to its nearest-enclosing declaration.
+//  A missing/unreadable file yields no output (osReadFile returns -1 -> n=0).
+// ===========================================================================
+
+#stack[int, 64] pathBuf = cssc::alloc(4096);
+#stack[int, 64] plen = cssc::argStr(1, pathBuf, 4096);
+#stack[int, 64] buf = cssc::alloc(1200000);
+#stack[int, 64] n = cssc::osReadFile(pathBuf, plen, buf, 1000000);
+if (n < 0) { n = 0; }
+
+txLexInit();
+txTokenizeSrc(buf, n);
+
+txAstInit();
+txParseProgram() prog;
+
+txSemaBuildSyms(prog);
+txSetSrc(buf, n);
+txOwnershipEmit();
+
+#delete[prog];
+#delete[n];
+#delete[buf];
+#delete[plen];
+#delete[pathBuf];

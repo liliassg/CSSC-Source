@@ -1,0 +1,490 @@
+// ============================================================================
+// CONSOLE module (#include("console"); #console[w,h] name;) -- a grid-backed
+// terminal handle (value tag 6). Host-testable: writes mirror to stdout via
+// termTypeRaw; on CCOS the same bytes render to the terminal.
+// header 64B: w@0 h@4 curLine@8 curCol@12 curAttr@16 defAttr@20 closed@24
+// syncCount@28 cellsPtr@32 syncTagPtr@40 syncListPtr@48 syncLenPtr@56.
+// cell 2B {char@0, attr@1}. sync slots: 8 x i64 across the 3 parallel arrays.
+// ============================================================================
+// 0xRRGGBB -> VGA-ish attr (r>=128->4, g->2, b->1; hi 0x08 if max>=160; 0->grey 7)
+#define(ciConAttr) {
+    #scanp(ciConAttr, int, 0) color;
+    #stack[int, 64] col = color;
+    if (col < 0) { col = 13421772; }
+    #stack[int, 64] r = cssc::band(cssc::shr(col, 16), 255);
+    #stack[int, 64] g = cssc::band(cssc::shr(col, 8), 255);
+    #stack[int, 64] b = cssc::band(col, 255);
+    #stack[int, 64] mx = r;
+    if (g > mx) { mx = g; }
+    if (b > mx) { mx = b; }
+    #stack[int, 64] hi = 0;
+    if (mx >= 160) { hi = 8; }
+    #stack[int, 64] attr = 0;
+    if (r >= 128) { attr = attr + 4; }
+    if (g >= 128) { attr = attr + 2; }
+    if (b >= 128) { attr = attr + 1; }
+    if (attr == 0) { attr = 7; }
+    #stack[int, 64] res = attr + hi;
+    #delete[col];
+    #delete[r];
+    #delete[g];
+    #delete[b];
+    #delete[mx];
+    #delete[hi];
+    #delete[attr];
+    return res;
+}
+// allocate + zero a console: header, w*h*2 cells {0x20,defAttr=7}, 3 sync arrays.
+#define(ciConNew) {
+    #scanp(ciConNew, int, 0) w;
+    #scanp(ciConNew, int, 1) h;
+    #stack[int, 64] hd = cssc::alloc(64);
+    #stack[int, 64] cells = cssc::alloc(w * h * 2);
+    #stack[int, 64] st = cssc::alloc(64);
+    #stack[int, 64] sl = cssc::alloc(64);
+    #stack[int, 64] sn = cssc::alloc(64);
+    cssc::poke32(hd, w);
+    cssc::poke32(hd + 4, h);
+    cssc::poke32(hd + 8, 0);
+    cssc::poke32(hd + 12, 0);
+    cssc::poke32(hd + 16, 7);
+    cssc::poke32(hd + 20, 7);
+    cssc::poke32(hd + 24, 0);
+    cssc::poke32(hd + 28, 0);
+    cssc::poke64(hd + 32, cells);
+    cssc::poke64(hd + 40, st);
+    cssc::poke64(hd + 48, sl);
+    cssc::poke64(hd + 56, sn);
+    cssc::memfill32(st, 0, 16);
+    cssc::memfill32(sl, 0, 16);
+    cssc::memfill32(sn, 0, 16);
+    #stack[int, 64] i = 0;
+    #stack[int, 64] total = w * h;
+    while (i < total) {
+        cssc::poke8(cells + i * 2, 32);
+        cssc::poke8(cells + i * 2 + 1, 7);
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[total];
+    #delete[cells];
+    #delete[st];
+    #delete[sl];
+    #delete[sn];
+    return hd;
+}
+// shift rows up one, clear the last row to {space, defAttr}
+#define(ciConScroll) {
+    #scanp(ciConScroll, int, 0) ch;
+    #stack[int, 64] w = cssc::peek32(ch);
+    #stack[int, 64] h = cssc::peek32(ch + 4);
+    #stack[int, 64] da = cssc::peek32(ch + 20);
+    #stack[int, 64] cells = cssc::peek64(ch + 32);
+    if (h > 1) {
+        cssc::memcopy(cells, cells + w * 2, (h - 1) * w * 2);
+    }
+    #stack[int, 64] base = (h - 1) * w;
+    #stack[int, 64] c = 0;
+    while (c < w) {
+        cssc::poke8(cells + (base + c) * 2, 32);
+        cssc::poke8(cells + (base + c) * 2 + 1, da);
+        c = c + 1;
+    }
+    #delete[c];
+    #delete[base];
+    #delete[w];
+    #delete[h];
+    #delete[da];
+    #delete[cells];
+}
+// write one byte into the grid at the cursor (wrap + scroll). '\n' -> next line.
+#define(ciConPutc) {
+    #scanp(ciConPutc, int, 0) ch;
+    #scanp(ciConPutc, int, 1) b;
+    #req[ciConScroll] ciConScroll;
+    #stack[int, 64] w = cssc::peek32(ch);
+    #stack[int, 64] h = cssc::peek32(ch + 4);
+    #stack[int, 64] cl = cssc::peek32(ch + 8);
+    #stack[int, 64] cc = cssc::peek32(ch + 12);
+    #stack[int, 64] at = cssc::peek32(ch + 16);
+    if (b == 10) {
+        cl = cl + 1;
+        cc = 0;
+    }
+    if (b != 10) {
+        if (cc >= w) { cl = cl + 1; cc = 0; }
+        if (cl >= h) { ciConScroll(ch); cl = h - 1; }
+        #stack[int, 64] cells = cssc::peek64(ch + 32);
+        #stack[int, 64] off = (cl * w + cc) * 2;
+        cssc::poke8(cells + off, b);
+        cssc::poke8(cells + off + 1, at);
+        cc = cc + 1;
+        #delete[cells];
+        #delete[off];
+    }
+    if (cl >= h) { ciConScroll(ch); cl = h - 1; }
+    cssc::poke32(ch + 8, cl);
+    cssc::poke32(ch + 12, cc);
+    #delete[w];
+    #delete[h];
+    #delete[cl];
+    #delete[cc];
+    #delete[at];
+}
+// write n bytes at src into the grid + mirror to the host/terminal sink.
+#define(ciConOut) {
+    #scanp(ciConOut, int, 0) ch;
+    #scanp(ciConOut, int, 1) src;
+    #scanp(ciConOut, int, 2) n;
+    #req[ciConPutc] ciConPutc;
+    #req[termTypeRaw] termTypeRaw;
+    #stack[int, 64] closed = cssc::peek32(ch + 24);
+    if (closed == 0) {
+        #stack[int, 64] i = 0;
+        while (i < n) {
+            ciConPutc(ch, cssc::peek8(src + i));
+            i = i + 1;
+        }
+        #delete[i];
+        termTypeRaw(src, n, 11843776);
+    }
+    #delete[closed];
+}
+// fill the whole grid with {space, defAttr}; cursor -> (0,0)
+#define(ciConClearAll) {
+    #scanp(ciConClearAll, int, 0) ch;
+    #stack[int, 64] closed = cssc::peek32(ch + 24);
+    if (closed == 0) {
+        #stack[int, 64] w = cssc::peek32(ch);
+        #stack[int, 64] h = cssc::peek32(ch + 4);
+        #stack[int, 64] da = cssc::peek32(ch + 20);
+        #stack[int, 64] cells = cssc::peek64(ch + 32);
+        #stack[int, 64] i = 0;
+        #stack[int, 64] total = w * h;
+        while (i < total) {
+            cssc::poke8(cells + i * 2, 32);
+            cssc::poke8(cells + i * 2 + 1, da);
+            i = i + 1;
+        }
+        #delete[i];
+        #delete[total];
+        cssc::poke32(ch + 8, 0);
+        cssc::poke32(ch + 12, 0);
+        #delete[w];
+        #delete[h];
+        #delete[da];
+        #delete[cells];
+    }
+    #delete[closed];
+}
+// fill one row with {space, defAttr}; out-of-range -> no-op; cursor unchanged
+#define(ciConClearLine) {
+    #scanp(ciConClearLine, int, 0) ch;
+    #scanp(ciConClearLine, int, 1) line;
+    #stack[int, 64] w = cssc::peek32(ch);
+    #stack[int, 64] h = cssc::peek32(ch + 4);
+    if (line >= 0) {
+        if (line < h) {
+            #stack[int, 64] da = cssc::peek32(ch + 20);
+            #stack[int, 64] cells = cssc::peek64(ch + 32);
+            #stack[int, 64] base = line * w;
+            #stack[int, 64] c = 0;
+            while (c < w) {
+                cssc::poke8(cells + (base + c) * 2, 32);
+                cssc::poke8(cells + (base + c) * 2 + 1, da);
+                c = c + 1;
+            }
+            #delete[c];
+            #delete[base];
+            #delete[da];
+            #delete[cells];
+        }
+    }
+    #delete[w];
+    #delete[h];
+}
+// per-mille cursor X (native float(pos in [-1,1]) redefined as int -1000..1000)
+#define(ciConCursorPos) {
+    #scanp(ciConCursorPos, int, 0) ch;
+    #scanp(ciConCursorPos, int, 1) p;
+    #stack[int, 64] w = cssc::peek32(ch);
+    #stack[int, 64] cx = 0;
+    #stack[int, 32] mid = 1;
+    if (p <= 0 - 1000) { cx = 0; mid = 0; }
+    if (p >= 1000) { cx = w - 1; mid = 0; }
+    if (mid == 1) {
+        #stack[int, 64] pp = p;
+        if (pp < 0) { pp = pp + 1000; }
+        cx = pp * (w - 1) / 1000;
+        if (cx < 0) { cx = 0; }
+        if (cx > w - 1) { cx = w - 1; }
+        #delete[pp];
+    }
+    #delete[mid];
+    cssc::poke32(ch + 12, cx);
+    #delete[w];
+    #delete[cx];
+}
+// read a row into a fresh string, rstripping trailing space/NUL; oob -> 0 (null)
+#define(ciConGetLine) {
+    #scanp(ciConGetLine, int, 0) ch;
+    #scanp(ciConGetLine, int, 1) line;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] w = cssc::peek32(ch);
+    #stack[int, 64] h = cssc::peek32(ch + 4);
+    #stack[int, 64] res = 0;
+    if (line >= 0) {
+        if (line < h) {
+            #stack[int, 64] cells = cssc::peek64(ch + 32);
+            #stack[int, 64] tmp = cssc::alloc(w + 1);
+            #stack[int, 64] base = line * w;
+            #stack[int, 64] c = 0;
+            while (c < w) {
+                cssc::poke8(tmp + c, cssc::peek8(cells + (base + c) * 2));
+                c = c + 1;
+            }
+            #delete[c];
+            #stack[int, 64] ln = w;
+            #stack[int, 32] go = 1;
+            while (go == 1) {
+                if (ln <= 0) { go = 0; }
+                if (go == 1) {
+                    #stack[int, 64] bb = cssc::peek8(tmp + ln - 1);
+                    #stack[int, 32] trim = 0;
+                    if (bb == 32) { trim = 1; }
+                    if (bb == 0) { trim = 1; }
+                    if (trim == 0) { go = 0; }
+                    if (trim == 1) { ln = ln - 1; }
+                    #delete[bb];
+                    #delete[trim];
+                }
+            }
+            #delete[go];
+            ciStrNew(tmp, ln) s;
+            res = s;
+            cssc::free(tmp);
+            #delete[s];
+            #delete[ln];
+            #delete[base];
+            #delete[cells];
+            #delete[tmp];
+        }
+    }
+    #delete[w];
+    #delete[h];
+    return res;
+}
+// fresh 2-element int vector [curLine, curCol]
+#define(ciConCursorAt) {
+    #scanp(ciConCursorAt, int, 0) ch;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] cl = cssc::peek32(ch + 8);
+    #stack[int, 64] cc = cssc::peek32(ch + 12);
+    ciVecNew(0) v;
+    ciVecPush(v, cl, 0);
+    ciVecPush(v, cc, 0);
+    #stack[int, 64] res = v;
+    #delete[v];
+    #delete[cl];
+    #delete[cc];
+    return res;
+}
+// register/replace a {tag, listHandle, lastLen=current size} sync binding (cap 8).
+// TAIL not replay: lastLen starts at the list's current length. null list -> ignored.
+#define(ciConSyncAdd) {
+    #scanp(ciConSyncAdd, int, 0) ch;
+    #scanp(ciConSyncAdd, int, 1) tagPtr;
+    #scanp(ciConSyncAdd, int, 2) lh;
+    #req[ciStrClone] ciStrClone;
+    #req[ciStrCmp] ciStrCmp;
+    if (lh != 0) {
+        #stack[int, 64] st = cssc::peek64(ch + 40);
+        #stack[int, 64] sl = cssc::peek64(ch + 48);
+        #stack[int, 64] sn = cssc::peek64(ch + 56);
+        #stack[int, 64] count = cssc::peek32(ch + 28);
+        #stack[int, 64] idx = 0 - 1;
+        #stack[int, 64] i = 0;
+        while (i < count) {
+            if (idx < 0) {
+                #stack[int, 64] et = cssc::peek64(st + i * 8);
+                if (et != 0) {
+                    ciStrCmp(et, tagPtr) c;
+                    if (c == 0) { idx = i; }
+                    #delete[c];
+                }
+                #delete[et];
+            }
+            i = i + 1;
+        }
+        #delete[i];
+        #stack[int, 64] curSize = cssc::peek32(lh + 4);
+        if (idx >= 0) {
+            cssc::poke64(sl + idx * 8, lh);
+            cssc::poke64(sn + idx * 8, curSize);
+        }
+        if (idx < 0) {
+            if (count < 8) {
+                ciStrClone(tagPtr) tc;
+                cssc::poke64(st + count * 8, tc);
+                cssc::poke64(sl + count * 8, lh);
+                cssc::poke64(sn + count * 8, curSize);
+                cssc::poke32(ch + 28, count + 1);
+                #delete[tc];
+            }
+        }
+        #delete[curSize];
+        #delete[idx];
+        #delete[count];
+        #delete[st];
+        #delete[sl];
+        #delete[sn];
+    }
+}
+// synchronous tail-forward: for each binding, emit "[tag] entry\n" for the new
+// entries [lastLen..size) then bump lastLen. Collapses the host's poll thread.
+#define(ciConSyncDrain) {
+    #scanp(ciConSyncDrain, int, 0) ch;
+    #req[ciConOut] ciConOut;
+    #req[ciVecGet] ciVecGet;
+    #stack[int, 64] st = cssc::peek64(ch + 40);
+    #stack[int, 64] sl = cssc::peek64(ch + 48);
+    #stack[int, 64] sn = cssc::peek64(ch + 56);
+    #stack[int, 64] count = cssc::peek32(ch + 28);
+    #stack[int, 64] i = 0;
+    while (i < count) {
+        #stack[int, 64] lh = cssc::peek64(sl + i * 8);
+        #stack[int, 64] tg = cssc::peek64(st + i * 8);
+        #stack[int, 64] last = cssc::peek64(sn + i * 8);
+        if (lh != 0) {
+            #stack[int, 64] sz = cssc::peek32(lh + 4);
+            #stack[int, 64] tglen = 0;
+            if (tg != 0) { tglen = cssc::peek32(tg + 4); }
+            #stack[int, 64] j = last;
+            while (j < sz) {
+                ciVecGet(lh, j) entry;
+                #stack[int, 64] elen = 0;
+                if (entry != 0) { elen = cssc::peek32(entry + 4); }
+                #stack[int, 64] tot = tglen + elen + 4;
+                #stack[int, 64] buf = cssc::alloc(tot);
+                #stack[int, 64] p = 0;
+                cssc::poke8(buf + p, 91);
+                p = p + 1;
+                #stack[int, 64] k = 0;
+                while (k < tglen) {
+                    cssc::poke8(buf + p, cssc::peek8(tg + 8 + k));
+                    p = p + 1;
+                    k = k + 1;
+                }
+                #delete[k];
+                cssc::poke8(buf + p, 93);
+                p = p + 1;
+                cssc::poke8(buf + p, 32);
+                p = p + 1;
+                #stack[int, 64] k2 = 0;
+                while (k2 < elen) {
+                    cssc::poke8(buf + p, cssc::peek8(entry + 8 + k2));
+                    p = p + 1;
+                    k2 = k2 + 1;
+                }
+                #delete[k2];
+                cssc::poke8(buf + p, 10);
+                p = p + 1;
+                ciConOut(ch, buf, p);
+                cssc::free(buf);
+                if (entry != 0) { cssc::free(entry); }
+                #delete[p];
+                #delete[buf];
+                #delete[tot];
+                #delete[elen];
+                #delete[entry];
+                j = j + 1;
+            }
+            #delete[j];
+            cssc::poke64(sn + i * 8, sz);
+            #delete[sz];
+            #delete[tglen];
+        }
+        #delete[lh];
+        #delete[tg];
+        #delete[last];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[st];
+    #delete[sl];
+    #delete[sn];
+    #delete[count];
+}
+// flush pending FIRST, then remove the binding (compact); missing tag -> no-op
+#define(ciConDesync) {
+    #scanp(ciConDesync, int, 0) ch;
+    #scanp(ciConDesync, int, 1) tagPtr;
+    #req[ciConSyncDrain] ciConSyncDrain;
+    #req[ciStrCmp] ciStrCmp;
+    ciConSyncDrain(ch);
+    #stack[int, 64] st = cssc::peek64(ch + 40);
+    #stack[int, 64] sl = cssc::peek64(ch + 48);
+    #stack[int, 64] sn = cssc::peek64(ch + 56);
+    #stack[int, 64] count = cssc::peek32(ch + 28);
+    #stack[int, 64] idx = 0 - 1;
+    #stack[int, 64] i = 0;
+    while (i < count) {
+        if (idx < 0) {
+            #stack[int, 64] et = cssc::peek64(st + i * 8);
+            if (et != 0) {
+                ciStrCmp(et, tagPtr) c;
+                if (c == 0) { idx = i; }
+                #delete[c];
+            }
+            #delete[et];
+        }
+        i = i + 1;
+    }
+    #delete[i];
+    if (idx >= 0) {
+        #stack[int, 64] ot = cssc::peek64(st + idx * 8);
+        if (ot != 0) { cssc::free(ot); }
+        #delete[ot];
+        #stack[int, 64] lastI = count - 1;
+        if (idx < lastI) {
+            cssc::poke64(st + idx * 8, cssc::peek64(st + lastI * 8));
+            cssc::poke64(sl + idx * 8, cssc::peek64(sl + lastI * 8));
+            cssc::poke64(sn + idx * 8, cssc::peek64(sn + lastI * 8));
+        }
+        cssc::poke64(st + lastI * 8, 0);
+        cssc::poke64(sl + lastI * 8, 0);
+        cssc::poke64(sn + lastI * 8, 0);
+        cssc::poke32(ch + 28, lastI);
+        #delete[lastI];
+    }
+    #delete[idx];
+    #delete[count];
+    #delete[st];
+    #delete[sl];
+    #delete[sn];
+}
+// mark closed + drop all sync bindings (free owned tag strings). Cells/header left
+// for the program-end sweep (ciValFree tag 6).
+#define(ciConClose) {
+    #scanp(ciConClose, int, 0) ch;
+    #stack[int, 64] closed = cssc::peek32(ch + 24);
+    if (closed == 0) {
+        #stack[int, 64] st = cssc::peek64(ch + 40);
+        #stack[int, 64] count = cssc::peek32(ch + 28);
+        #stack[int, 64] i = 0;
+        while (i < count) {
+            #stack[int, 64] t = cssc::peek64(st + i * 8);
+            if (t != 0) { cssc::free(t); }
+            cssc::poke64(st + i * 8, 0);
+            #delete[t];
+            i = i + 1;
+        }
+        #delete[i];
+        cssc::poke32(ch + 28, 0);
+        cssc::poke32(ch + 24, 1);
+        #delete[st];
+        #delete[count];
+    }
+    #delete[closed];
+}

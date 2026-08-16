@@ -1,0 +1,26 @@
+ciInit();
+keyBufAddr = cssc::alloc(256);
+keyHead = 0;
+fsNames = cssc::alloc(512);
+fsLens = cssc::alloc(64);
+fsData = cssc::alloc(64);
+fsSizes = cssc::alloc(64);
+fsCount = 0;
+#stack[int, 64] hbuf = cssc::alloc(1048576);
+#stack[int, 64] hn = 0;
+cssc::argc() ac;
+if (ac > 1) {
+    #stack[int, 64] pb = cssc::alloc(4096);
+    cssc::argStr(1, pb, 4095) pn;
+    ciSrcPath = pb;
+    ciSrcPathLen = pn;
+    cssc::osReadFile(pb, pn, hbuf, 1048576) fn;
+    hn = fn;
+    #delete[fn];
+    #delete[pn];
+} else {
+    cssc::hostRead(hbuf, 1048576) sn;
+    hn = sn;
+    #delete[sn];
+}
+ciRun(hbuf, hn);

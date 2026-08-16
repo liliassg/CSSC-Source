@@ -1,0 +1,214 @@
+// ===========================================================================
+// Host test prelude for kernel/interp.cssc.
+//
+// Provides host stand-ins for the kernel globals + free functions the pure
+// interpreter #req's, so it can be compiled with `--target host` and unit-
+// tested from the command line (no QEMU, no framebuffer). Concatenated BEFORE
+// interp.cssc; the entry (cssc_user_main) is appended AFTER it (host_main.cssc).
+//
+// Output path: the interpreter prints through termTypeRaw / termNum /
+// termNewline -> here routed to exact-byte stdout via cssc::printRaw / cssc::out
+// / cssc::outln. Video/fs are inert (drawing + CCFS are not exercised on host).
+// ===========================================================================
+
+#stack[int, 64] cfgLang = 0;
+#stack[int, 64] cfgLayout = 0;
+// minimal in-memory CCFS for ini tests (up to 8 files). host_main allocs these.
+#stack[int, 64] fsIdx = 0;
+#stack[int, 64] fsCount = 0;
+#stack[int, 64] fsNames = 0;
+#stack[int, 64] fsLens = 0;
+#stack[int, 64] fsData = 0;
+#stack[int, 64] fsSizes = 0;
+// PS/2 scancode ring (kernel globals.cssc provides these; on host we allocate
+// keyBufAddr in host_main). Lets keyboard tests drive input via cssc::keyInject.
+#stack[int, 64] keyBufAddr = 0;
+#stack[int, 64] keyHead = 0;
+// kernel globals the interp reads for cssc::ticks / cssc::mouse* (host stubs: no
+// timer or mouse device, so they stay 0 -- the dispatch still compiles + runs)
+#stack[int, 64] tickCount = 0;
+#stack[int, 64] mouseX = 0;
+#stack[int, 64] mouseY = 0;
+#stack[int, 64] mouseFlags = 0;
+// SD driver stubs (sd.cssc is kernel-only; on host these no-op so cssc::sdInit /
+// cssc::sdWriteRange still resolve + the harness links)
+#stack[int, 64] sdInit;
+#define(sdInit) { return 0; }
+#stack[int, 64] sdWriteRange;
+#define(sdWriteRange) {
+    #scanp(sdWriteRange, int, 0) a;
+    #scanp(sdWriteRange, int, 1) b;
+    #scanp(sdWriteRange, int, 2) c;
+    return 0;
+}
+#stack[int, 64] sdFlashDisk;
+#define(sdFlashDisk) {
+    #scanp(sdFlashDisk, int, 0) a;
+    #scanp(sdFlashDisk, int, 1) b;
+    #scanp(sdFlashDisk, int, 2) c;
+    return 0;
+}
+#stack[int, 64] sdVerifyDisk;
+#define(sdVerifyDisk) {
+    #scanp(sdVerifyDisk, int, 0) a;
+    #scanp(sdVerifyDisk, int, 1) b;
+    #scanp(sdVerifyDisk, int, 2) c;
+    return 0;
+}
+// on-disk LBA table for lazy files (kernel globals.cssc provides this; host stub)
+#stack[int, 64] fsDiskLba = 0;
+
+#stack[int, 64] fillBlock;
+#define(fillBlock) {
+    #scanp(fillBlock, int, 0) a0;
+    #scanp(fillBlock, int, 1) a1;
+    #scanp(fillBlock, int, 2) a2;
+    #scanp(fillBlock, int, 3) a3;
+    #scanp(fillBlock, int, 4) a4;
+}
+
+#stack[int, 64] drawChar;
+#define(drawChar) {
+    #scanp(drawChar, int, 0) a0;
+    #scanp(drawChar, int, 1) a1;
+    #scanp(drawChar, int, 2) a2;
+    #scanp(drawChar, int, 3) a3;
+    #scanp(drawChar, int, 4) a4;
+}
+
+#stack[int, 64] fsFind;
+#define(fsFind) {
+    #scanp(fsFind, int, 0) nameAddr;
+    #scanp(fsFind, int, 1) nameLen;
+    #req[fsCount] fsCount;
+    #req[fsNames] fsNames;
+    #req[fsLens] fsLens;
+    #req[fsIdx] fsIdx;
+    fsIdx = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i < fsCount) {
+        #stack[int, 64] li = cssc::peek64(fsLens + i * 8);
+        if (li == nameLen) {
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < nameLen) {
+                if (cssc::peek8(nameAddr + j) != cssc::peek8(fsNames + i * 64 + j)) { m = 0; }
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { fsIdx = i; }
+            #delete[m];
+        }
+        #delete[li];
+        i = i + 1;
+    }
+    #delete[i];
+}
+
+#stack[int, 64] fsReadPtr;
+#define(fsReadPtr) {
+    #scanp(fsReadPtr, int, 0) idx;
+    #req[fsData] fsData;
+    #stack[int, 64] p = cssc::peek64(fsData + idx * 8);
+    return p;
+}
+
+#stack[int, 64] fsReadLen;
+#define(fsReadLen) {
+    #scanp(fsReadLen, int, 0) idx;
+    #req[fsSizes] fsSizes;
+    #stack[int, 64] n = cssc::peek64(fsSizes + idx * 8);
+    return n;
+}
+
+#stack[int, 64] fsCreate;
+#define(fsCreate) {
+    #scanp(fsCreate, int, 0) nameAddr;
+    #scanp(fsCreate, int, 1) nameLen;
+    #req[fsFind] fsFind;
+    #req[fsCount] fsCount;
+    #req[fsNames] fsNames;
+    #req[fsLens] fsLens;
+    #req[fsData] fsData;
+    #req[fsSizes] fsSizes;
+    #req[fsIdx] fsIdx;
+    fsFind(nameAddr, nameLen);
+    if (fsIdx < 0) {
+        #stack[int, 64] i = fsCount;
+        #stack[int, 32] j = 0;
+        while (j < nameLen) {
+            cssc::poke8(fsNames + i * 64 + j, cssc::peek8(nameAddr + j));
+            j = j + 1;
+        }
+        #delete[j];
+        cssc::poke64(fsLens + i * 8, nameLen);
+        cssc::poke64(fsData + i * 8, cssc::alloc(34816));
+        cssc::poke64(fsSizes + i * 8, 0);
+        fsCount = fsCount + 1;
+        fsIdx = i;
+        #delete[i];
+    }
+}
+
+#stack[int, 64] fsStore;
+#define(fsStore) {
+    #scanp(fsStore, int, 0) idx;
+    #scanp(fsStore, int, 1) src;
+    #scanp(fsStore, int, 2) len;
+    #req[fsData] fsData;
+    #req[fsSizes] fsSizes;
+    #stack[int, 64] buf = cssc::peek64(fsData + idx * 8);
+    #stack[int, 64] n = len;
+    if (n > 34816) { n = 34816; }
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        cssc::poke8(buf + i, cssc::peek8(src + i));
+        i = i + 1;
+    }
+    #delete[i];
+    cssc::poke64(fsSizes + idx * 8, n);
+    #delete[buf];
+    #delete[n];
+}
+
+// used by stdio::removefile in the interpreter's file-I/O module
+#stack[int, 64] fsTruncate;
+#define(fsTruncate) {
+    #scanp(fsTruncate, int, 0) idx;
+    #req[fsSizes] fsSizes;
+    cssc::poke64(fsSizes + idx * 8, 0);
+}
+
+#stack[int, 64] termNewline;
+#define(termNewline) {
+    cssc::outln();
+}
+
+#stack[int, 64] termNum;
+#define(termNum) {
+    #scanp(termNum, int, 0) val;
+    #scanp(termNum, int, 1) color;
+    cssc::out(val);
+}
+
+#stack[int, 64] termTypeRaw;
+#define(termTypeRaw) {
+    #scanp(termTypeRaw, int, 0) addr;
+    #scanp(termTypeRaw, int, 1) n;
+    #scanp(termTypeRaw, int, 2) color;
+    cssc::printRaw(addr, n);
+}
+
+#stack[int, 64] termType;
+#define(termType) {
+    #scanp(termType, string, 0) s;
+    #scanp(termType, int, 1) color;
+    #stack[int, 64] sa = 0;
+    #adress[s] sa;
+    #stack[int, 64] hdr = cssc::peek64(sa);
+    #stack[int, 64] len = cssc::peek32(hdr + 4);
+    cssc::printRaw(hdr + 8, len);
+    #delete[len];
+    #delete[hdr];
+    #delete[sa];
+}

@@ -1,0 +1,297 @@
+// ============================================================================
+//  KEYBOARD module -- real PS/2 input. The ISR fills a scancode ring buffer
+//  (keyBufAddr/keyHead); this module drains it via its OWN tail (ciKbTail,
+//  independent of the shell's keyTail) applying make/break codes to a held-by-VK
+//  state (ciKbCurr). update() snapshots last frame to ciKbPrev first. Queries
+//  return strictly 0/1. Focused == always true on CCOS. See spec section 2.
+// ============================================================================
+
+// PS/2 set-1 make scancode (top bit stripped) + E0-ext flag -> VK, else 0.
+#define(ciScanToVk) {
+    #scanp(ciScanToVk, int, 0) base;
+    #scanp(ciScanToVk, int, 1) ext;
+    #stack[int, 64] vk = 0;
+    if (ext == 1) {
+        if (base == 72) { vk = 38; }
+        if (base == 80) { vk = 40; }
+        if (base == 75) { vk = 37; }
+        if (base == 77) { vk = 39; }
+        if (base == 29) { vk = 17; }
+        if (base == 56) { vk = 18; }
+    }
+    if (ext == 0) {
+        if (base == 1) { vk = 27; }
+        if (base == 28) { vk = 13; }
+        if (base == 14) { vk = 8; }
+        if (base == 15) { vk = 9; }
+        if (base == 42) { vk = 16; }
+        if (base == 54) { vk = 16; }
+        if (base == 29) { vk = 17; }
+        if (base == 56) { vk = 18; }
+        if (base == 57) { vk = 32; }
+        if (base >= 59) { if (base <= 68) { vk = 112 + (base - 59); } }
+        if (base == 87) { vk = 122; }
+        if (base == 88) { vk = 123; }
+        if (base >= 2) { if (base <= 10) { vk = 48 + (base - 1); } }
+        if (base == 11) { vk = 48; }
+        if (base == 16) { vk = 81; }
+        if (base == 17) { vk = 87; }
+        if (base == 18) { vk = 69; }
+        if (base == 19) { vk = 82; }
+        if (base == 20) { vk = 84; }
+        if (base == 21) { vk = 89; }
+        if (base == 22) { vk = 85; }
+        if (base == 23) { vk = 73; }
+        if (base == 24) { vk = 79; }
+        if (base == 25) { vk = 80; }
+        if (base == 30) { vk = 65; }
+        if (base == 31) { vk = 83; }
+        if (base == 32) { vk = 68; }
+        if (base == 33) { vk = 70; }
+        if (base == 34) { vk = 71; }
+        if (base == 35) { vk = 72; }
+        if (base == 36) { vk = 74; }
+        if (base == 37) { vk = 75; }
+        if (base == 38) { vk = 76; }
+        if (base == 44) { vk = 90; }
+        if (base == 45) { vk = 88; }
+        if (base == 46) { vk = 67; }
+        if (base == 47) { vk = 86; }
+        if (base == 48) { vk = 66; }
+        if (base == 49) { vk = 78; }
+        if (base == 50) { vk = 77; }
+    }
+    return vk;
+}
+
+// key name (string ptr) -> VK, case-insensitive exact match. -1 = unknown.
+// single-char a-z/A-Z -> VK uppercase ascii; 0-9 -> VK ascii; else name table.
+#define(ciNameToVk) {
+    #scanp(ciNameToVk, int, 0) sp;
+    #req[ciKbNames] ciKbNames;
+    #stack[int, 64] vk = 0 - 1;
+    #stack[int, 64] len = cssc::peek32(sp + 4);
+    if (len == 1) {
+        #stack[int, 64] c = cssc::peek8(sp + 8);
+        #stack[int, 64] lc = c;
+        if (c >= 65) { if (c <= 90) { lc = c + 32; } }
+        if (lc >= 97) { if (lc <= 122) { vk = lc - 32; } }
+        if (c >= 48) { if (c <= 57) { vk = c; } }
+        #delete[c];
+        #delete[lc];
+    }
+    if (len != 1) {
+        #stack[int, 64] p = ciKbNames;
+        #stack[int, 32] scanning = 1;
+        while (scanning == 1) {
+            #stack[int, 64] rlen = cssc::peek8(p);
+            if (rlen == 0) { scanning = 0; }
+            if (rlen != 0) {
+                #stack[int, 64] rvk = cssc::peek8(p + 1);
+                #stack[int, 32] match = 0;
+                if (rlen == len) {
+                    match = 1;
+                    #stack[int, 64] j = 0;
+                    while (j < len) {
+                        #stack[int, 64] a = cssc::peek8(sp + 8 + j);
+                        #stack[int, 64] b = cssc::peek8(p + 2 + j);
+                        if (a >= 97) { if (a <= 122) { a = a - 32; } }
+                        if (a != b) { match = 0; }
+                        #delete[a];
+                        #delete[b];
+                        j = j + 1;
+                    }
+                    #delete[j];
+                }
+                if (match == 1) { vk = rvk; scanning = 0; }
+                if (match == 0) { p = p + 2 + rlen; }
+                #delete[match];
+                #delete[rvk];
+            }
+            #delete[rlen];
+        }
+        #delete[p];
+        #delete[scanning];
+    }
+    #delete[len];
+    return vk;
+}
+
+// update(): snapshot curr->prev, then drain the scancode ring since ciKbTail,
+// applying make (held=1) / break (held=0) to ciKbCurr[vk]. E0 prefix latches.
+#define(ciKbUpdate) {
+    #req[ciKbCurr] ciKbCurr;
+    #req[ciKbPrev] ciKbPrev;
+    #req[ciKbEdge] ciKbEdge;
+    #req[ciKbTail] ciKbTail;
+    #req[ciKbExt] ciKbExt;
+    #req[ciScanToVk] ciScanToVk;
+    #req[keyBufAddr] keyBufAddr;
+    #req[keyHead] keyHead;
+    cssc::memcopy(ciKbPrev, ciKbCurr, 64);
+    // clear the per-frame press latch; a make below re-sets it and a same-frame
+    // break does NOT clear it, so taps survive slow frames (see ciKbEdge decl)
+    cssc::memfill32(ciKbEdge, 0, 64);
+    #stack[int, 64] hd = keyHead;
+    while (ciKbTail < hd) {
+        #stack[int, 64] sc = cssc::peek8(keyBufAddr + ciKbTail % 256);
+        ciKbTail = ciKbTail + 1;
+        #stack[int, 32] consumed = 0;
+        if (sc == 224) { ciKbExt = 1; consumed = 1; }
+        if (consumed == 0) {
+            #stack[int, 64] rel = 0;
+            #stack[int, 64] base = sc;
+            if (sc >= 128) { rel = 1; base = sc - 128; }
+            ciScanToVk(base, ciKbExt) vk;
+            if (vk > 0) {
+                #stack[int, 64] v = 1;
+                if (rel == 1) { v = 0; }
+                cssc::poke8(ciKbCurr + vk, v);
+                if (rel == 0) { cssc::poke8(ciKbEdge + vk, 1); }
+                #delete[v];
+            }
+            ciKbExt = 0;
+            #delete[vk];
+            #delete[rel];
+            #delete[base];
+        }
+        #delete[consumed];
+        #delete[sc];
+    }
+    #delete[hd];
+}
+
+// getKey(): canonical UPPERCASE name (owned string) of the first held key in
+// table order, then A-Z, then 0-9; "" (empty owned string) if none held.
+#define(ciKbGetKey) {
+    #req[ciKbNames] ciKbNames;
+    #req[ciKbCurr] ciKbCurr;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] outp = 0;
+    #stack[int, 32] found = 0;
+    // named keys (table order; skip the RETURN/ESCAPE aliases via vk dedupe not
+    // needed -- canonical precedes them, so first-held wins)
+    #stack[int, 64] p = ciKbNames;
+    #stack[int, 32] scanning = 1;
+    while (scanning == 1) {
+        #stack[int, 64] rlen = cssc::peek8(p);
+        if (rlen == 0) { scanning = 0; }
+        if (rlen != 0) {
+            #stack[int, 64] rvk = cssc::peek8(p + 1);
+            if (found == 0) {
+                if (cssc::peek8(ciKbCurr + rvk) == 1) {
+                    ciStrNew(p + 2, rlen) s;
+                    outp = s;
+                    found = 1;
+                    #delete[s];
+                }
+            }
+            p = p + 2 + rlen;
+            #delete[rvk];
+        }
+        #delete[rlen];
+    }
+    #delete[p];
+    #delete[scanning];
+    // A-Z (VK 0x41..0x5A) then 0-9 (VK 0x30..0x39): single-char names
+    #stack[int, 64] k = 65;
+    while (k <= 90) {
+        if (found == 0) {
+            if (cssc::peek8(ciKbCurr + k) == 1) {
+                #stack[int, 64] tmp = cssc::alloc(1);
+                cssc::poke8(tmp, k);
+                ciStrNew(tmp, 1) s;
+                outp = s;
+                found = 1;
+                cssc::free(tmp);
+                #delete[tmp];
+                #delete[s];
+            }
+        }
+        k = k + 1;
+    }
+    #delete[k];
+    #stack[int, 64] d = 48;
+    while (d <= 57) {
+        if (found == 0) {
+            if (cssc::peek8(ciKbCurr + d) == 1) {
+                #stack[int, 64] tmp = cssc::alloc(1);
+                cssc::poke8(tmp, d);
+                ciStrNew(tmp, 1) s;
+                outp = s;
+                found = 1;
+                cssc::free(tmp);
+                #delete[tmp];
+                #delete[s];
+            }
+        }
+        d = d + 1;
+    }
+    #delete[d];
+    if (found == 0) { ciStrNew(ciKbNames, 0) e; outp = e; #delete[e]; }
+    #delete[found];
+    return outp;
+}
+
+// ============================================================================
+//  SOUND module -- INERT return-correct stub (no audio engine on bare metal).
+//  Exact signatures/returns so guest code runs unchanged; produces no sound.
+//  32 slots {path@0 i64, alias@8 i64}; nextId + volume. See spec section 3.
+// ============================================================================
+
+// load(path): first free slot gets path; returns owned alias "cssc"+nextId then
+// nextId++. Empty string on null path / table full. (isPlaying stays 0.)
+#define(ciSndLoad) {
+    #scanp(ciSndLoad, int, 0) pathPtr;
+    #req[ciSndSlots] ciSndSlots;
+    #req[ciSndNextId] ciSndNextId;
+    #req[ciStrNew] ciStrNew;
+    #req[ciStrClone] ciStrClone;
+    #req[ciItoa] ciItoa;
+    #stack[int, 64] out = 0;
+    #stack[int, 32] fail = 0;
+    if (pathPtr == 0) { fail = 1; }
+    #stack[int, 64] slot = 0 - 1;
+    if (fail == 0) {
+        #stack[int, 64] i = 0;
+        while (i < 32) {
+            if (slot < 0) {
+                if (cssc::peek64(ciSndSlots + i * 16) == 0) { slot = i; }
+            }
+            i = i + 1;
+        }
+        #delete[i];
+        if (slot < 0) { fail = 1; }
+    }
+    if (fail == 1) {
+        ciStrNew(ciSndSlots, 0) e;
+        out = e;
+        #delete[e];
+    }
+    if (fail == 0) {
+        ciStrClone(pathPtr) pc;
+        cssc::poke64(ciSndSlots + slot * 16, pc);
+        #delete[pc];
+        #stack[int, 64] id = ciSndNextId;
+        ciSndNextId = ciSndNextId + 1;
+        #stack[int, 64] buf = cssc::alloc(24);
+        cssc::poke8(buf, 99);
+        cssc::poke8(buf + 1, 115);
+        cssc::poke8(buf + 2, 115);
+        cssc::poke8(buf + 3, 99);
+        ciItoa(id, buf + 4) dn;
+        ciStrNew(buf, 4 + dn) alias;
+        ciStrClone(alias) ac;
+        cssc::poke64(ciSndSlots + slot * 16 + 8, ac);
+        out = alias;
+        cssc::free(buf);
+        #delete[ac];
+        #delete[alias];
+        #delete[dn];
+        #delete[id];
+        #delete[buf];
+    }
+    #delete[fail];
+    #delete[slot];
+    return out;
+}

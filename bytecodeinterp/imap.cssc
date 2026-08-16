@@ -1,0 +1,373 @@
+// ---- map (value tag 5) : key->value store, linear probe. handle{rc@0,size@4,
+// cap@8,data@16}; data = cap*32, entry{keyType@0,keyVal@8,valType@16,valVal@24}.
+// keys int OR string (string keys compared by content via ciStrCmp and CLONED on
+// insert so a temp literal key stays valid); values int for now.
+#define(ciMapNew) {
+    #stack[int, 64] cap = 8;
+    #stack[int, 64] h = cssc::alloc(24);
+    #stack[int, 64] d = cssc::alloc(cap * 32);
+    cssc::memfill32(d, 0, cap * 8);
+    cssc::poke32(h, 1);
+    cssc::poke32(h + 4, 0);
+    cssc::poke32(h + 8, cap);
+    cssc::poke64(h + 16, d);
+    #delete[d];
+    #delete[cap];
+    return h;
+}
+#define(ciMapSize) {
+    #scanp(ciMapSize, int, 0) h;
+    return cssc::peek32(h + 4);
+}
+#define(ciMapFind) {
+    #scanp(ciMapFind, int, 0) h;
+    #scanp(ciMapFind, int, 1) kt;
+    #scanp(ciMapFind, int, 2) kv;
+    #req[ciStrCmp] ciStrCmp;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 0;
+    #stack[int, 64] res = 0 - 1;
+    while (i < size) {
+        if (res < 0) {
+            #stack[int, 64] ekt = cssc::peek64(d + i * 32);
+            #stack[int, 64] ekv = cssc::peek64(d + i * 32 + 8);
+            #stack[int, 32] match = 0;
+            if (ekt == kt) {
+                if (kt == 1) {
+                    ciStrCmp(ekv, kv) c;
+                    if (c == 0) { match = 1; }
+                    #delete[c];
+                }
+                if (kt != 1) {
+                    if (ekv == kv) { match = 1; }
+                }
+            }
+            if (match == 1) { res = i; }
+            #delete[match];
+            #delete[ekv];
+            #delete[ekt];
+        }
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[size];
+    return res;
+}
+#define(ciMapSet) {
+    #scanp(ciMapSet, int, 0) h;
+    #scanp(ciMapSet, int, 1) kt;
+    #scanp(ciMapSet, int, 2) kv;
+    #scanp(ciMapSet, int, 3) vt;
+    #scanp(ciMapSet, int, 4) vv;
+    #req[ciMapFind] ciMapFind;
+    #req[ciStrClone] ciStrClone;
+    ciMapFind(h, kt, kv) idx;
+    #stack[int, 64] sv = vv;
+    if (vt == 1) {
+        ciStrClone(vv) cv;
+        sv = cv;
+        #delete[cv];
+    }
+    if (idx >= 0) {
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] ovt = cssc::peek64(d + idx * 32 + 16);
+        if (ovt == 1) { cssc::free(cssc::peek64(d + idx * 32 + 24)); }
+        cssc::poke64(d + idx * 32 + 16, vt);
+        cssc::poke64(d + idx * 32 + 24, sv);
+        #delete[ovt];
+        #delete[d];
+    }
+    if (idx < 0) {
+        #stack[int, 64] size = cssc::peek32(h + 4);
+        #stack[int, 64] cap = cssc::peek32(h + 8);
+        if (size >= cap) {
+            #stack[int, 64] ncap = cap * 2;
+            #stack[int, 64] nd = cssc::alloc(ncap * 32);
+            #stack[int, 64] od = cssc::peek64(h + 16);
+            cssc::memcopy(nd, od, size * 8);
+            cssc::free(od);
+            cssc::poke64(h + 16, nd);
+            cssc::poke32(h + 8, ncap);
+            #delete[od];
+            #delete[nd];
+            #delete[ncap];
+        }
+        #stack[int, 64] sk = kv;
+        if (kt == 1) {
+            ciStrClone(kv) ck;
+            sk = ck;
+            #delete[ck];
+        }
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        cssc::poke64(d + size * 32, kt);
+        cssc::poke64(d + size * 32 + 8, sk);
+        cssc::poke64(d + size * 32 + 16, vt);
+        cssc::poke64(d + size * 32 + 24, sv);
+        cssc::poke32(h + 4, size + 1);
+        #delete[d];
+        #delete[sk];
+        #delete[size];
+        #delete[cap];
+    }
+    #delete[sv];
+    #delete[idx];
+}
+#define(ciMapGet) {
+    #scanp(ciMapGet, int, 0) h;
+    #scanp(ciMapGet, int, 1) kt;
+    #scanp(ciMapGet, int, 2) kv;
+    #req[ciStrClone] ciStrClone;
+    #req[ciMapRT] ciMapRT;
+    #req[ciMapFound] ciMapFound;
+    #req[ciMapFind] ciMapFind;
+    ciMapFind(h, kt, kv) idx;
+    #stack[int, 64] r = 0;
+    ciMapRT = 0;
+    ciMapFound = 0;
+    if (idx >= 0) {
+        ciMapFound = 1;
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] vt = cssc::peek64(d + idx * 32 + 16);
+        #stack[int, 64] vv = cssc::peek64(d + idx * 32 + 24);
+        ciMapRT = vt;
+        if (vt == 1) {
+            ciStrClone(vv) cv;
+            r = cv;
+            #delete[cv];
+        }
+        if (vt != 1) { r = vv; }
+        #delete[vv];
+        #delete[vt];
+        #delete[d];
+    }
+    #delete[idx];
+    return r;
+}
+// release owned string keys AND values, then zero the size (map.clear()). Was a
+// leak: the old clear() only zeroed size@4 while ciMapSet clones keys+values.
+#define(ciMapClear) {
+    #scanp(ciMapClear, int, 0) h;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        if (cssc::peek64(d + i * 32) == 1) { cssc::free(cssc::peek64(d + i * 32 + 8)); }
+        if (cssc::peek64(d + i * 32 + 16) == 1) { cssc::free(cssc::peek64(d + i * 32 + 24)); }
+        i = i + 1;
+    }
+    cssc::poke32(h + 4, 0);
+    #delete[i];
+    #delete[d];
+    #delete[size];
+}
+// remove entry by key, returning its VALUE (ownership transfers to the caller
+// like ciVecPop -- the slot is dropped so a string value is no longer owned
+// here). The owned string KEY is freed. Entries after it shift down one slot.
+// Sets ciMapFound (0/1) + ciMapRT (removed value's type) for the caller. Miss->0.
+#define(ciMapRemove) {
+    #scanp(ciMapRemove, int, 0) h;
+    #scanp(ciMapRemove, int, 1) kt;
+    #scanp(ciMapRemove, int, 2) kv;
+    #req[ciMapFind] ciMapFind;
+    #req[ciMapRT] ciMapRT;
+    #req[ciMapFound] ciMapFound;
+    ciMapFind(h, kt, kv) idx;
+    #stack[int, 64] r = 0;
+    ciMapRT = 0;
+    ciMapFound = 0;
+    if (idx >= 0) {
+        ciMapFound = 1;
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] size = cssc::peek32(h + 4);
+        #stack[int, 64] ekt = cssc::peek64(d + idx * 32);
+        #stack[int, 64] ekv = cssc::peek64(d + idx * 32 + 8);
+        #stack[int, 64] evt = cssc::peek64(d + idx * 32 + 16);
+        #stack[int, 64] evv = cssc::peek64(d + idx * 32 + 24);
+        ciMapRT = evt;
+        r = evv;
+        if (ekt == 1) { if (ekv != 0) { cssc::free(ekv); } }
+        #stack[int, 64] i = idx;
+        while (i < size - 1) {
+            cssc::poke64(d + i * 32,      cssc::peek64(d + (i + 1) * 32));
+            cssc::poke64(d + i * 32 + 8,  cssc::peek64(d + (i + 1) * 32 + 8));
+            cssc::poke64(d + i * 32 + 16, cssc::peek64(d + (i + 1) * 32 + 16));
+            cssc::poke64(d + i * 32 + 24, cssc::peek64(d + (i + 1) * 32 + 24));
+            i = i + 1;
+        }
+        cssc::poke32(h + 4, size - 1);
+        #delete[i];
+        #delete[ekt];
+        #delete[ekv];
+        #delete[evt];
+        #delete[evv];
+        #delete[d];
+        #delete[size];
+    }
+    #delete[idx];
+    return r;
+}
+// snapshot keys in insertion order -> fresh owned vector (elem type = key type;
+// string keys are cloned by ciVecPush). Empty map -> empty int-vector.
+#define(ciMapKeys) {
+    #scanp(ciMapKeys, int, 0) h;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] kt = 0;
+    if (size > 0) { kt = cssc::peek64(d); }
+    ciVecNew(kt) v;
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ekt = cssc::peek64(d + i * 32);
+        #stack[int, 64] ekv = cssc::peek64(d + i * 32 + 8);
+        ciVecPush(v, ekv, ekt);
+        #delete[ekt];
+        #delete[ekv];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[kt];
+    #delete[d];
+    #delete[size];
+    return v;
+}
+// snapshot values in insertion order -> fresh owned vector (elem type = value
+// type; string values cloned by ciVecPush). Empty map -> empty int-vector.
+#define(ciMapValues) {
+    #scanp(ciMapValues, int, 0) h;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] vt = 0;
+    if (size > 0) { vt = cssc::peek64(d + 16); }
+    ciVecNew(vt) v;
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] evt = cssc::peek64(d + i * 32 + 16);
+        #stack[int, 64] evv = cssc::peek64(d + i * 32 + 24);
+        ciVecPush(v, evv, evt);
+        #delete[evt];
+        #delete[evv];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[vt];
+    #delete[d];
+    #delete[size];
+    return v;
+}
+// snapshot entries as a vector<vector> -- each element is a 2-slot string-vector
+// [keyStr, valStr] so ciContFmt renders `{{k, v}, ...}` (curly braces, comma).
+// NOTE: the inner pair-vectors are borrows of the outer (ciVecClear/Free frees
+// only string elements), so they are reclaimed at process exit, not on free.
+#define(ciMapItems) {
+    #scanp(ciMapItems, int, 0) h;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    ciVecNew(4) v;
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ekt = cssc::peek64(d + i * 32);
+        #stack[int, 64] ekv = cssc::peek64(d + i * 32 + 8);
+        #stack[int, 64] evt = cssc::peek64(d + i * 32 + 16);
+        #stack[int, 64] evv = cssc::peek64(d + i * 32 + 24);
+        ciVecNew(1) pr;
+        ciVecPush(pr, ekv, ekt);
+        ciVecPush(pr, evv, evt);
+        ciVecPush(v, pr, 4);
+        #delete[pr];
+        #delete[ekt];
+        #delete[ekv];
+        #delete[evt];
+        #delete[evv];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[size];
+    return v;
+}
+// key of entry `idx` (insertion order); string cloned (owned). Sets ciMapRT to
+// the key type, or -1 when idx is out of range (empty map / begin/end miss).
+#define(ciMapKeyAt) {
+    #scanp(ciMapKeyAt, int, 0) h;
+    #scanp(ciMapKeyAt, int, 1) idx;
+    #req[ciStrClone] ciStrClone;
+    #req[ciMapRT] ciMapRT;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] r = 0;
+    ciMapRT = 0 - 1;
+    if (idx >= 0) {
+        if (idx < size) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            #stack[int, 64] kt = cssc::peek64(d + idx * 32);
+            #stack[int, 64] kv = cssc::peek64(d + idx * 32 + 8);
+            ciMapRT = kt;
+            if (kt == 1) { ciStrClone(kv) c; r = c; #delete[c]; }
+            if (kt != 1) { r = kv; }
+            #delete[d];
+            #delete[kt];
+            #delete[kv];
+        }
+    }
+    #delete[size];
+    return r;
+}
+// value of entry `idx`; string cloned (owned). Sets ciMapRT to value type or -1
+// (idx out of range -> null).
+#define(ciMapValAt) {
+    #scanp(ciMapValAt, int, 0) h;
+    #scanp(ciMapValAt, int, 1) idx;
+    #req[ciStrClone] ciStrClone;
+    #req[ciMapRT] ciMapRT;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] r = 0;
+    ciMapRT = 0 - 1;
+    if (idx >= 0) {
+        if (idx < size) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            #stack[int, 64] vt = cssc::peek64(d + idx * 32 + 16);
+            #stack[int, 64] vv = cssc::peek64(d + idx * 32 + 24);
+            ciMapRT = vt;
+            if (vt == 1) { ciStrClone(vv) c; r = c; #delete[c]; }
+            if (vt != 1) { r = vv; }
+            #delete[d];
+            #delete[vt];
+            #delete[vv];
+        }
+    }
+    #delete[size];
+    return r;
+}
+// copy every entry of `src` into `dst`, overwriting duplicate keys (ciMapSet
+// clones keys+values so dst gets independent copies; src is untouched). Backs
+// map.append / .merge / .update. Do not call with src == dst.
+#define(ciMapAppend) {
+    #scanp(ciMapAppend, int, 0) dst;
+    #scanp(ciMapAppend, int, 1) src;
+    #req[ciMapSet] ciMapSet;
+    #stack[int, 64] size = cssc::peek32(src + 4);
+    #stack[int, 64] d = cssc::peek64(src + 16);
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] kt = cssc::peek64(d + i * 32);
+        #stack[int, 64] kv = cssc::peek64(d + i * 32 + 8);
+        #stack[int, 64] vt = cssc::peek64(d + i * 32 + 16);
+        #stack[int, 64] vv = cssc::peek64(d + i * 32 + 24);
+        ciMapSet(dst, kt, kv, vt, vv);
+        #delete[kt];
+        #delete[kv];
+        #delete[vt];
+        #delete[vv];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[size];
+}

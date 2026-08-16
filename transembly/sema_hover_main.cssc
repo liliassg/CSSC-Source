@@ -1,0 +1,52 @@
+// ===========================================================================
+//  transembly/sema_hover_main.cssc  --  hover entry. Reads source with a cursor
+//  marker byte (0x04) on stdin and prints a concise description of the symbol
+//  under the cursor. Core hover (kind + type + size), not the reference's rich
+//  access-counting markdown.
+//
+//  The marker is removed by shifting the tail left (the hovered word is a
+//  complete reference, so no cursor-line blanking is needed) and the cursor
+//  offset stays at `mk` — now the first char after the removed marker.
+// ===========================================================================
+
+// Input: argv[1] file (0x04 marker inside) for the IDE (system::capture, no
+// stdin, no hang); else stdin (harness/manual piping).
+#stack[int, 64] buf = cssc::alloc(1048576);
+#stack[int, 64] n = 0;
+if (cssc::argc() >= 2) {
+    #stack[int, 64] pathBuf = cssc::alloc(4096);
+    #stack[int, 64] plen = cssc::argStr(1, pathBuf, 4096);
+    #stack[int, 64] rn = cssc::osReadFile(pathBuf, plen, buf, 1000000);
+    if (rn < 0) { rn = 0; }
+    n = rn;
+    #delete[pathBuf];
+    #delete[plen];
+    #delete[rn];
+}
+if (cssc::argc() < 2) {
+    #stack[int, 64] sn = cssc::hostRead(buf, 1000000);
+    n = sn;
+    #delete[sn];
+}
+
+txFindMarker(buf, n) mk;
+#stack[int, 64] si = mk;                 // remove the marker byte (shift tail left)
+while (si < n - 1) {
+    cssc::poke8(buf + si, cssc::peek8(buf + si + 1));
+    si = si + 1;
+}
+#delete[si];
+n = n - 1;
+
+txLexInit();
+txTokenizeSrc(buf, n);
+txAstInit();
+txParseProgram() prog;
+txSemaBuildSyms(prog);
+
+txHoverAt(mk);
+
+#delete[prog];
+#delete[mk];
+#delete[n];
+#delete[buf];

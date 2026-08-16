@@ -1,0 +1,1351 @@
+// ---- instance record (heap block, value tag 3) ----
+//   +0  i32 refcount        +4  i32 freed-flag (free{} run-once)
+//   +8  i64 objDefIdx       +16 i64 memberCount
+//   +24 8 member rows, stride 64: name[32] | len | val | type | owns
+// member row lookup by name -> row index or -1 (name bytes read at addr,
+// which may be ciSrc + off OR the qualification scratch)
+#define(ciInstMemFind) {
+    #scanp(ciInstMemFind, int, 0) inst;
+    #scanp(ciInstMemFind, int, 1) off;
+    #scanp(ciInstMemFind, int, 2) len;
+    #req[ciSrc] ciSrc;
+    if (len > 32) { len = 32; }
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 64] n = cssc::peek64(inst + 16);
+    #stack[int, 32] i = 0;
+    while (i < n) {
+        #stack[int, 64] row = inst + 24 + i * 64;
+        #stack[int, 64] nl = cssc::peek64(row + 32);
+        if (nl == len) {
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(row + j);
+                if (a != b) { m = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { found = i; }
+            #delete[m];
+        }
+        #delete[nl];
+        #delete[row];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    return found;
+}
+
+// release an instance: null var-table borrows of every freed value, free
+// owned member strings, recurse into owned nested instances (self-recursion
+// is backend-legal), null borrows of the block pointer, free the block.
+// Does NOT run the guest free{} block (that replay needs ciStmt and happens
+// at the explicit #free site); cascade/REPL teardown uses this raw release.
+#define(ciInstFree) {
+    #scanp(ciInstFree, int, 0) inst;
+    #req[ciInstFree] ciInstFree;
+    #req[ciNullBorrows] ciNullBorrows;
+    #stack[int, 64] n = cssc::peek64(inst + 16);
+    #stack[int, 32] i = 0;
+    while (i < n) {
+        #stack[int, 64] row = inst + 24 + i * 64;
+        #stack[int, 64] mo = cssc::peek64(row + 56);
+        #stack[int, 64] mt = cssc::peek64(row + 48);
+        #stack[int, 64] mv = cssc::peek64(row + 40);
+        if (mo == 1) {
+            if (mt == 1) {
+                ciNullBorrows(mv, 1);
+                cssc::free(mv);
+            }
+            if (mt == 3) { if (mv != 0) { ciInstFree(mv); } }
+        }
+        #delete[mo];
+        #delete[mt];
+        #delete[mv];
+        #delete[row];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    ciNullBorrows(inst, 3);
+    cssc::free(inst);
+}
+
+// deep-copy a value into a fresh OWNED allocation (value semantics for `&`).
+// Self-contained + self-recursive (must sit before ciExpr, so it inlines the
+// string/vector/map/bind construction rather than calling ciStrClone/ciVecNew).
+// Clones owned string sub-elements + the top-level structure; nested container/
+// object sub-elements are copied by pointer (BORROW) to stay symmetric with the
+// borrow-respecting ciValFree (which never frees them). int(0)/float(2) copy raw.
+#define(ciValClone) {
+    #scanp(ciValClone, int, 0) ty;
+    #scanp(ciValClone, int, 1) vv;
+    #stack[int, 64] r = vv;
+    if (vv != 0) {
+        if (ty == 1) {
+            // string {rc@0,size@4,bytes@8}
+            #stack[int, 64] sl = cssc::peek32(vv + 4);
+            #stack[int, 64] nb = cssc::alloc(sl + 8);
+            cssc::poke32(nb, 1);
+            cssc::poke32(nb + 4, sl);
+            #stack[int, 64] i = 0;
+            while (i < sl) {
+                cssc::poke8(nb + 8 + i, cssc::peek8(vv + 8 + i));
+                i = i + 1;
+            }
+            #delete[i];
+            r = nb;
+            #delete[nb];
+            #delete[sl];
+        }
+        if (ty == 4) {
+            // vector/array {rc,size@4,cap@8,elemType@12,data@16,(auto)types@24}.
+            // The header is 32 B (types@24 must exist for et==8 auto arrays, else
+            // ciContFmt reads a wild pointer). Elements clone by their REAL type:
+            // homogeneous vectors use elemType; auto arrays use the per-element
+            // types[] array (which is itself cloned).
+            #stack[int, 64] sz = cssc::peek32(vv + 4);
+            #stack[int, 64] et = cssc::peek32(vv + 12);
+            #stack[int, 64] cap = sz;
+            if (cap < 8) { cap = 8; }
+            #stack[int, 64] nh = cssc::alloc(32);
+            #stack[int, 64] nd = cssc::alloc(cap * 8);
+            cssc::memfill32(nd, 0, cap * 2);
+            cssc::poke32(nh, 1);
+            cssc::poke32(nh + 4, sz);
+            cssc::poke32(nh + 8, cap);
+            cssc::poke32(nh + 12, et);
+            cssc::poke64(nh + 16, nd);
+            #stack[int, 64] otp = 0;
+            #stack[int, 64] ntp = 0;
+            if (et == 8) {
+                otp = cssc::peek64(vv + 24);
+                ntp = cssc::alloc(cap * 8);
+                cssc::memfill32(ntp, 0, cap * 2);
+            }
+            cssc::poke64(nh + 24, ntp);
+            #stack[int, 64] od = cssc::peek64(vv + 16);
+            #stack[int, 64] i = 0;
+            while (i < sz) {
+                #stack[int, 64] ev = cssc::peek64(od + i * 8);
+                #stack[int, 64] pet = et;
+                if (et == 8) {
+                    pet = cssc::peek64(otp + i * 8);
+                    cssc::poke64(ntp + i * 8, pet);
+                }
+                #stack[int, 64] cev = ev;
+                if (pet == 1) { ciValClone(1, ev) c; cev = c; #delete[c]; }
+                if (pet == 4) { ciValClone(4, ev) c; cev = c; #delete[c]; }
+                if (pet == 5) { ciValClone(5, ev) c; cev = c; #delete[c]; }
+                cssc::poke64(nd + i * 8, cev);
+                #delete[cev];
+                #delete[pet];
+                #delete[ev];
+                i = i + 1;
+            }
+            #delete[i];
+            #delete[od];
+            #delete[otp];
+            #delete[ntp];
+            r = nh;
+            #delete[nh];
+            #delete[nd];
+            #delete[cap];
+            #delete[et];
+            #delete[sz];
+        }
+        if (ty == 5) {
+            // map {rc,size@4,cap@8,data@16}; entry 32B kt@0,kv@8,vt@16,vv@24
+            #stack[int, 64] sz = cssc::peek32(vv + 4);
+            #stack[int, 64] cap = sz;
+            if (cap < 8) { cap = 8; }
+            #stack[int, 64] nh = cssc::alloc(24);
+            #stack[int, 64] nd = cssc::alloc(cap * 32);
+            cssc::poke32(nh, 1);
+            cssc::poke32(nh + 4, sz);
+            cssc::poke32(nh + 8, cap);
+            cssc::poke64(nh + 16, nd);
+            #stack[int, 64] od = cssc::peek64(vv + 16);
+            #stack[int, 64] i = 0;
+            while (i < sz) {
+                #stack[int, 64] kt = cssc::peek64(od + i * 32);
+                #stack[int, 64] kv = cssc::peek64(od + i * 32 + 8);
+                #stack[int, 64] vt = cssc::peek64(od + i * 32 + 16);
+                #stack[int, 64] vl = cssc::peek64(od + i * 32 + 24);
+                #stack[int, 64] nkv = kv;
+                #stack[int, 64] nvl = vl;
+                if (kt == 1) { ciValClone(1, kv) c; nkv = c; #delete[c]; }
+                if (vt == 1) { ciValClone(1, vl) c; nvl = c; #delete[c]; }
+                cssc::poke64(nd + i * 32, kt);
+                cssc::poke64(nd + i * 32 + 8, nkv);
+                cssc::poke64(nd + i * 32 + 16, vt);
+                cssc::poke64(nd + i * 32 + 24, nvl);
+                #delete[nkv];
+                #delete[nvl];
+                #delete[kt];
+                #delete[kv];
+                #delete[vt];
+                #delete[vl];
+                i = i + 1;
+            }
+            #delete[i];
+            #delete[od];
+            r = nh;
+            #delete[nh];
+            #delete[nd];
+            #delete[cap];
+            #delete[sz];
+        }
+        if (ty == 7) {
+            // bind {rc,size@4=pairs,cap@8,pairWidth@12,data@16}; cell 16B type@0,val@8
+            #stack[int, 64] sz = cssc::peek32(vv + 4);
+            #stack[int, 64] pw = cssc::peek32(vv + 12);
+            #stack[int, 64] cap = cssc::peek32(vv + 8);
+            #stack[int, 64] used = sz * pw;
+            #stack[int, 64] acells = cap * pw;
+            if (acells < 1) { acells = 1; }
+            #stack[int, 64] nh = cssc::alloc(24);
+            #stack[int, 64] nd = cssc::alloc(acells * 16);
+            cssc::poke32(nh, 1);
+            cssc::poke32(nh + 4, sz);
+            cssc::poke32(nh + 8, cap);
+            cssc::poke32(nh + 12, pw);
+            cssc::poke64(nh + 16, nd);
+            #stack[int, 64] od = cssc::peek64(vv + 16);
+            #stack[int, 64] i = 0;
+            while (i < used) {
+                #stack[int, 64] ct = cssc::peek64(od + i * 16);
+                #stack[int, 64] cvl = cssc::peek64(od + i * 16 + 8);
+                #stack[int, 64] ncvl = cvl;
+                if (ct == 1) { ciValClone(1, cvl) c; ncvl = c; #delete[c]; }
+                cssc::poke64(nd + i * 16, ct);
+                cssc::poke64(nd + i * 16 + 8, ncvl);
+                #delete[ncvl];
+                #delete[ct];
+                #delete[cvl];
+                i = i + 1;
+            }
+            #delete[i];
+            #delete[od];
+            r = nh;
+            #delete[nh];
+            #delete[nd];
+            #delete[used];
+            #delete[acells];
+            #delete[cap];
+            #delete[pw];
+            #delete[sz];
+        }
+    }
+    return r;
+}
+
+// unified value destructor: frees whatever heap a value tag OWNS -- string(1),
+// object instance(3), and the top-level structure of vector/array(4), map(5),
+// bind(7). BORROW-RESPECTING: containers store nested container/object cells as
+// raw borrows (only strings are cloned on insert), so it frees owned string
+// sub-elements + the handle/data but NEVER a nested container -> no double-free.
+// Placed right after ciInstFree (its only callee) so EVERY release site (ciVarSet
+// overwrite, ciVarDrop, frame/arg teardown, the run reset) can call it backward.
+#define(ciValFree) {
+    #scanp(ciValFree, int, 0) ty;
+    #scanp(ciValFree, int, 1) vv;
+    #req[ciInstFree] ciInstFree;
+    if (vv != 0) {
+        if (ty == 1) { cssc::free(vv); }
+        if (ty == 3) { ciInstFree(vv); }
+        if (ty == 4) {
+            // vector/array {rc,size@4,cap@8,elemType@12,data@16}. Only STRING
+            // elements are cloned+owned (ciVecPush); container/object elements
+            // are BORROWS stored raw -- recursing would double-free. So release
+            // just the owned string elements + the handle+data (borrow-respecting).
+            #stack[int, 64] et = cssc::peek32(vv + 12);
+            #stack[int, 64] vd = cssc::peek64(vv + 16);
+            if (et == 1) {
+                #stack[int, 64] vsz = cssc::peek32(vv + 4);
+                #stack[int, 64] vi = 0;
+                while (vi < vsz) {
+                    #stack[int, 64] ev = cssc::peek64(vd + vi * 8);
+                    if (ev != 0) { cssc::free(ev); }
+                    #delete[ev];
+                    vi = vi + 1;
+                }
+                #delete[vi];
+                #delete[vsz];
+            }
+            cssc::free(vd);
+            cssc::free(vv);
+            #delete[vd];
+            #delete[et];
+        }
+        if (ty == 5) {
+            // map {rc,size@4,cap@8,data@16}; entry 32B keyType@0,keyVal@8,
+            // valType@16,valVal@24. Only string keys/values are cloned+owned;
+            // container values are borrows -> free the owned strings + handle+data.
+            #stack[int, 64] msz = cssc::peek32(vv + 4);
+            #stack[int, 64] md = cssc::peek64(vv + 16);
+            #stack[int, 64] mi = 0;
+            while (mi < msz) {
+                #stack[int, 64] kt = cssc::peek64(md + mi * 32);
+                #stack[int, 64] kv = cssc::peek64(md + mi * 32 + 8);
+                #stack[int, 64] mvt = cssc::peek64(md + mi * 32 + 16);
+                #stack[int, 64] mvv = cssc::peek64(md + mi * 32 + 24);
+                if (kt == 1) { if (kv != 0) { cssc::free(kv); } }
+                if (mvt == 1) { if (mvv != 0) { cssc::free(mvv); } }
+                #delete[kt];
+                #delete[kv];
+                #delete[mvt];
+                #delete[mvv];
+                mi = mi + 1;
+            }
+            #delete[mi];
+            #delete[msz];
+            cssc::free(md);
+            cssc::free(vv);
+            #delete[md];
+        }
+        if (ty == 7) {
+            // bind {rc,size@4=pairs,cap@8,pairWidth@12,data@16}; cell 16B
+            // type@0,val@8. Only string cells are cloned+owned (ciBindRawSet);
+            // container cells are BORROWS -> free the owned string cells +
+            // handle+data (matches ciBindClear; NEVER frees a borrowed container,
+            // e.g. a bind literal that captured a live global vector by reference).
+            #stack[int, 64] bsz = cssc::peek32(vv + 4);
+            #stack[int, 64] bpw = cssc::peek32(vv + 12);
+            #stack[int, 64] bused = bsz * bpw;
+            #stack[int, 64] bd = cssc::peek64(vv + 16);
+            #stack[int, 64] bi = 0;
+            while (bi < bused) {
+                #stack[int, 64] ct = cssc::peek64(bd + bi * 16);
+                #stack[int, 64] cvv = cssc::peek64(bd + bi * 16 + 8);
+                if (ct == 1) { if (cvv != 0) { cssc::free(cvv); } }
+                #delete[ct];
+                #delete[cvv];
+                bi = bi + 1;
+            }
+            #delete[bi];
+            #delete[bused];
+            #delete[bpw];
+            #delete[bsz];
+            cssc::free(bd);
+            cssc::free(vv);
+            #delete[bd];
+        }
+        if (ty == 6) {
+            // console instance {..., cellsPtr@32, syncTagPtr@40, syncListPtr@48,
+            // syncLenPtr@56}. Frees the grid + the 3 sync subbuffers + owned sync
+            // tag strings (the bound LISTs are borrows -> never freed here) + header.
+            #stack[int, 64] cst = cssc::peek64(vv + 40);
+            #stack[int, 64] ccount = cssc::peek32(vv + 28);
+            #stack[int, 64] ci6 = 0;
+            while (ci6 < ccount) {
+                #stack[int, 64] ctg = cssc::peek64(cst + ci6 * 8);
+                if (ctg != 0) { cssc::free(ctg); }
+                #delete[ctg];
+                ci6 = ci6 + 1;
+            }
+            #delete[ci6];
+            cssc::free(cssc::peek64(vv + 32));
+            cssc::free(cst);
+            cssc::free(cssc::peek64(vv + 48));
+            cssc::free(cssc::peek64(vv + 56));
+            cssc::free(vv);
+            #delete[cst];
+            #delete[ccount];
+        }
+    }
+}
+
+// bind/overwrite an instance member (find-or-create; owned old values are
+// released on overwrite -- single owner, exactly like the var table)
+#define(ciInstMemSet) {
+    #scanp(ciInstMemSet, int, 0) inst;
+    #scanp(ciInstMemSet, int, 1) off;
+    #scanp(ciInstMemSet, int, 2) len;
+    #scanp(ciInstMemSet, int, 3) val;
+    #scanp(ciInstMemSet, int, 4) vtype;
+    #scanp(ciInstMemSet, int, 5) owns;
+    #req[ciSrc] ciSrc;
+    #req[ciInstMemFind] ciInstMemFind;
+    #req[ciInstFree] ciInstFree;
+    #req[ciNullBorrows] ciNullBorrows;
+    if (len > 32) { len = 32; }
+    ciInstMemFind(inst, off, len) idx;
+    if (idx < 0) {
+        #stack[int, 64] n = cssc::peek64(inst + 16);
+        if (n < 8) {
+            #stack[int, 64] row = inst + 24 + n * 64;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                cssc::poke8(row + j, cssc::peek8(ciSrc + off + j));
+                j = j + 1;
+            }
+            #delete[j];
+            cssc::poke64(row + 32, len);
+            cssc::poke64(row + 40, val);
+            cssc::poke64(row + 48, vtype);
+            cssc::poke64(row + 56, owns);
+            cssc::poke64(inst + 16, n + 1);
+            idx = n;
+            #delete[row];
+        }
+        if (idx < 0) {
+            // instance full (8 members): drop the bind, release an owned temp
+            if (owns == 1) {
+                if (vtype == 1) { cssc::free(val); }
+                if (vtype == 3) { if (val != 0) { ciInstFree(val); } }
+            }
+        }
+        #delete[n];
+    }
+    if (idx >= 0) {
+        #stack[int, 64] row = inst + 24 + idx * 64;
+        #stack[int, 64] ov = cssc::peek64(row + 40);
+        if (ov != val) {
+            #stack[int, 64] oo = cssc::peek64(row + 56);
+            #stack[int, 64] ot = cssc::peek64(row + 48);
+            if (oo == 1) {
+                if (ot == 1) {
+                    ciNullBorrows(ov, 1);
+                    cssc::free(ov);
+                }
+                if (ot == 3) { if (ov != 0) { ciInstFree(ov); } }
+            }
+            cssc::poke64(row + 40, val);
+            cssc::poke64(row + 48, vtype);
+            cssc::poke64(row + 56, owns);
+            #delete[oo];
+            #delete[ot];
+        }
+        #delete[ov];
+        #delete[row];
+    }
+    #delete[idx];
+}
+
+// read an instance member; sets ciEvalType; missing member -> 0
+#define(ciInstMemGet) {
+    #scanp(ciInstMemGet, int, 0) inst;
+    #scanp(ciInstMemGet, int, 1) off;
+    #scanp(ciInstMemGet, int, 2) len;
+    #req[ciEvalType] ciEvalType;
+    #req[ciInstMemFind] ciInstMemFind;
+    ciInstMemFind(inst, off, len) idx;
+    #stack[int, 64] r = 0;
+    ciEvalType = 0;
+    if (idx >= 0) {
+        #stack[int, 64] row = inst + 24 + idx * 64;
+        r = cssc::peek64(row + 40);
+        ciEvalType = cssc::peek64(row + 48);
+        #delete[row];
+    }
+    #delete[idx];
+    return r;
+}
+
+#define(ciVarFind) {
+    #scanp(ciVarFind, int, 0) off;
+    #scanp(ciVarFind, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciVNames] ciVNames;
+    #req[ciVLens] ciVLens;
+    #req[ciVCount] ciVCount;
+    #req[ciScopeBase] ciScopeBase;
+    // consistent-truncation rule: stores clamp to 32, so must lookups
+    if (len > 32) { len = 32; }
+    #stack[int, 64] found = 0 - 1;
+    // only search rows in the current frame [ciScopeBase, ciVCount) -> isolation
+    #stack[int, 32] i = ciScopeBase;
+    while (i < ciVCount) {
+        #stack[int, 64] nl = cssc::peek64(ciVLens + i * 8);
+        if (nl == len) {
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(ciVNames + i * 32 + j);
+                if (a != b) { m = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { found = i; }
+            #delete[m];
+        }
+        #delete[nl];
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// var lookup with the frame floor dropped to 0 (global-frame resolution)
+#define(ciVarFindGlobal) {
+    #scanp(ciVarFindGlobal, int, 0) off;
+    #scanp(ciVarFindGlobal, int, 1) len;
+    #req[ciScopeBase] ciScopeBase;
+    #req[ciVarFind] ciVarFind;
+    #stack[int, 64] savedBase = ciScopeBase;
+    ciScopeBase = 0;
+    ciVarFind(off, len) idx;
+    ciScopeBase = savedBase;
+    #delete[savedBase];
+    return idx;
+}
+
+// read a variable. Resolution: qualified "Sec::member" tokens resolve in the
+// global frame with a visibility check (private -> 0 unless inside that
+// sector); bare names resolve in the current frame, then -- inside a sector
+// method / free block -- fall back to the qualified member (reference
+// semantics: members are visible bare inside their sector, cssl_cssc.py:16060)
+#define(ciVarGet) {
+    #scanp(ciVarGet, int, 0) off;
+    #scanp(ciVarGet, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVVis] ciVVis;
+    #req[ciEvalType] ciEvalType;
+    #req[ciCurSecOff] ciCurSecOff;
+    #req[ciCurSecLen] ciCurSecLen;
+    #req[ciQualBuf] ciQualBuf;
+    #req[ciQualify] ciQualify;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciSecPrefixIs] ciSecPrefixIs;
+    #req[ciVarFind] ciVarFind;
+    #req[ciVarFindGlobal] ciVarFindGlobal;
+    // names are consistently clamped to the 32B column everywhere
+    if (len > 32) { len = 32; }
+    ciTokHasCC(off, len) ccp;
+    #stack[int, 64] idx = 0 - 1;
+    if (ccp >= 0) {
+        ciVarFindGlobal(off, len) gi;
+        idx = gi;
+        #delete[gi];
+        if (idx >= 0) {
+            #stack[int, 64] vis = cssc::peek64(ciVVis + idx * 8);
+            if (vis == 0) {
+                // private member: readable only from inside its own sector
+                ciSecPrefixIs(off, ccp) same;
+                if (same == 0) { idx = 0 - 1; }
+                #delete[same];
+            }
+            #delete[vis];
+        }
+    }
+    if (ccp < 0) {
+        ciVarFind(off, len) fi;
+        idx = fi;
+        #delete[fi];
+        if (idx < 0) {
+            if (ciCurSecLen > 0) {
+                ciQualify(ciCurSecOff, ciCurSecLen, off, len) ql;
+                ciVarFindGlobal(ciQualBuf - ciSrc, ql) qi;
+                idx = qi;
+                #delete[qi];
+                #delete[ql];
+            }
+        }
+    }
+    #stack[int, 64] r = 0;
+    ciEvalType = 0;
+    if (idx >= 0) {
+        r = cssc::peek64(ciVVals + idx * 8);
+        ciEvalType = cssc::peek64(ciVTypes + idx * 8);
+    }
+    if (idx < 0) { ciEvalType = 3; }   // FX-NULLVAR: unbound/deleted read -> null (tag 3, val 0 -> `0x0`)
+    #delete[idx];
+    #delete[ccp];
+    return r;
+}
+
+// bind name = (val, vtype) with ownership `owns` (1 = this slot owns a heap
+// string). Resolution order: (1) qualified "Sec::member" tokens target the
+// GLOBAL member row -- writes to a foreign private member are silently
+// dropped (read parity: private reads yield 0); (2) bare names target the
+// current frame; (3) on a frame miss in ASSIGNMENT mode (ciSetMode=1) inside
+// a sector context the write falls through to the qualified member (the
+// reference's member write-back, cssl_cssc.py:16129); declarations
+// (ciSetMode=0) never fall through -- a method-local #stack always shadows.
+// (4) otherwise a fresh row is created in the current frame, writing ALL
+// columns (val/type/owns/vis) so reused slots never leak stale state.
+// Overwriting a slot that owns a string frees the old one first (single
+// owner, reassignment never leaks).
+#define(ciVarSet) {
+    #scanp(ciVarSet, int, 0) off;
+    #scanp(ciVarSet, int, 1) len;
+    #scanp(ciVarSet, int, 2) val;
+    #scanp(ciVarSet, int, 3) vtype;
+    #scanp(ciVarSet, int, 4) owns;
+    #req[ciSrc] ciSrc;
+    #req[ciVNames] ciVNames;
+    #req[ciVLens] ciVLens;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVOwns] ciVOwns;
+    #req[ciVVis] ciVVis;
+    #req[ciVCount] ciVCount;
+    #req[ciBindVis] ciBindVis;
+    #req[ciSetMode] ciSetMode;
+    #req[ciCurSecOff] ciCurSecOff;
+    #req[ciCurSecLen] ciCurSecLen;
+    #req[ciQualBuf] ciQualBuf;
+    #req[ciQualify] ciQualify;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciSecPrefixIs] ciSecPrefixIs;
+    #req[ciVarFind] ciVarFind;
+    #req[ciVarFindGlobal] ciVarFindGlobal;
+    #req[ciInstFree] ciInstFree;
+    #req[ciValFree] ciValFree;
+    #req[ciNullBorrows] ciNullBorrows;
+    #req[ciBindBits] ciBindBits;
+    #req[ciVBits] ciVBits;
+    #req[ciVReq] ciVReq;
+    #req[ciSignal] ciSignal;
+    #req[termType] termType;
+    #req[termNewline] termNewline;
+    if (len > 32) { len = 32; }
+    ciTokHasCC(off, len) ccp;
+    #stack[int, 64] idx = 0 - 1;
+    #stack[int, 32] blocked = 0;
+    if (ccp >= 0) {
+        ciVarFindGlobal(off, len) gi;
+        idx = gi;
+        #delete[gi];
+        if (idx >= 0) {
+            #stack[int, 64] vis = cssc::peek64(ciVVis + idx * 8);
+            if (vis == 0) {
+                ciSecPrefixIs(off, ccp) same;
+                if (same == 0) { blocked = 1; }
+                #delete[same];
+            }
+            #delete[vis];
+        }
+    }
+    if (ccp < 0) {
+        ciVarFind(off, len) fi;
+        idx = fi;
+        #delete[fi];
+        if (idx < 0) {
+            if (ciSetMode == 1) {
+                if (ciCurSecLen > 0) {
+                    ciQualify(ciCurSecOff, ciCurSecLen, off, len) ql;
+                    ciVarFindGlobal(ciQualBuf - ciSrc, ql) qi;
+                    idx = qi;
+                    #delete[qi];
+                    #delete[ql];
+                }
+            }
+        }
+    }
+    // ---- declared-bit-width enforcement (reference: "Value exceeds its
+    // bit limit" is a hard error). An int write must fit the slot's width:
+    // accepted range = [-(2^(b-1)) .. 2^b - 1] (union of signed/unsigned).
+    if (blocked == 0) {
+        if (vtype == 0) {
+            #stack[int, 64] bw = ciBindBits;
+            if (idx >= 0) { bw = cssc::peek64(ciVBits + idx * 8); }
+            if (bw > 0) {
+                if (bw < 64) {
+                    #stack[int, 64] lim = cssc::shl(1, bw - 1);
+                    #stack[int, 64] ulim = cssc::shl(1, bw);
+                    #stack[int, 32] fits = 1;
+                    if (val > ulim - 1) { fits = 0; }
+                    if (val < 0 - lim) { fits = 0; }
+                    if (fits == 0) {
+                        blocked = 1;
+                        #stack[string, 48] bmsg = "error: value exceeds its bit limit";
+                        termType(bmsg, 14707829);
+                        termNewline();
+                        #delete[bmsg];
+                        // reference semantics: the program aborts
+                        ciSignal = 2;
+                    }
+                    #delete[fits];
+                    #delete[lim];
+                    #delete[ulim];
+                }
+            }
+            #delete[bw];
+        }
+    }
+    if (blocked == 0) {
+        if (idx < 0) {
+            if (ciVCount < 4096) {
+                #stack[int, 32] j = 0;
+                while (j < len) {
+                    #stack[int, 64] ch = cssc::peek8(ciSrc + off + j);
+                    cssc::poke8(ciVNames + ciVCount * 32 + j, ch);
+                    #delete[ch];
+                    j = j + 1;
+                }
+                #delete[j];
+                cssc::poke64(ciVLens + ciVCount * 8, len);
+                cssc::poke64(ciVVals + ciVCount * 8, val);
+                cssc::poke64(ciVTypes + ciVCount * 8, vtype);
+                cssc::poke64(ciVOwns + ciVCount * 8, owns);
+                cssc::poke64(ciVVis + ciVCount * 8, ciBindVis);
+                cssc::poke64(ciVBits + ciVCount * 8, ciBindBits);
+                cssc::poke64(ciVReq + ciVCount * 8, 0);
+                idx = ciVCount;
+                ciVCount = ciVCount + 1;
+            }
+            if (idx < 0) {
+                // table full: the bind is dropped -- release an owned
+                // temporary so the overflow can not leak heap memory
+                if (owns == 1) { ciValFree(vtype, val); }
+            }
+        }
+        if (idx >= 0) {
+            #stack[int, 32] fresh = 0;
+            if (idx == ciVCount - 1) {
+                // just created above: columns already written
+                #stack[int, 64] cv = cssc::peek64(ciVVals + idx * 8);
+                if (cv == val) { fresh = 1; }
+                #delete[cv];
+            }
+            if (fresh == 0) {
+                // release what the slot owned before (string or instance;
+                // skip on self-assignment) and null any dangling borrows
+                #stack[int, 64] oldOwns = cssc::peek64(ciVOwns + idx * 8);
+                #stack[int, 64] oldType = cssc::peek64(ciVTypes + idx * 8);
+                #stack[int, 64] oldVal = cssc::peek64(ciVVals + idx * 8);
+                if (oldOwns == 1) {
+                    if (oldVal != val) {
+                        // null dangling aliases, then release string/instance AND
+                        // container (4/5/7) -- reassigning an owned container var
+                        // (e.g. setCH overwriting the global CH vector) otherwise
+                        // orphaned the previous container on every write
+                        if (oldType == 1) { ciNullBorrows(oldVal, 1); }
+                        if (oldType == 4) { ciNullBorrows(oldVal, 4); }
+                        if (oldType == 5) { ciNullBorrows(oldVal, 5); }
+                        if (oldType == 7) { ciNullBorrows(oldVal, 7); }
+                        ciValFree(oldType, oldVal);
+                    }
+                }
+                cssc::poke64(ciVVals + idx * 8, val);
+                cssc::poke64(ciVTypes + idx * 8, vtype);
+                cssc::poke64(ciVOwns + idx * 8, owns);
+                // #req write-through: if this row is a requisition alias, mutate
+                // the target global too (transfer ownership to the global; the
+                // alias becomes a borrow). Lets `#req[A] a; a = x;` update A.
+                #stack[int, 64] rl = cssc::peek64(ciVReq + idx * 8);
+                if (rl > 0) {
+                    #stack[int, 64] grow = rl - 1;
+                    #stack[int, 64] goOwns = cssc::peek64(ciVOwns + grow * 8);
+                    #stack[int, 64] goType = cssc::peek64(ciVTypes + grow * 8);
+                    #stack[int, 64] goVal = cssc::peek64(ciVVals + grow * 8);
+                    if (goOwns == 1) {
+                        if (goVal != val) {
+                            // release the target global's previous owned value,
+                            // containers included (setCH via `#req[CH] ch; ch=...`
+                            // reaches CH through this write-through path)
+                            ciValFree(goType, goVal);
+                        }
+                    }
+                    cssc::poke64(ciVVals + grow * 8, val);
+                    cssc::poke64(ciVTypes + grow * 8, vtype);
+                    cssc::poke64(ciVOwns + grow * 8, owns);
+                    cssc::poke64(ciVOwns + idx * 8, 0);
+                    #delete[goOwns];
+                    #delete[goType];
+                    #delete[goVal];
+                    #delete[grow];
+                }
+                #delete[rl];
+                #delete[oldOwns];
+                #delete[oldType];
+                #delete[oldVal];
+            }
+            #delete[fresh];
+        }
+    }
+    if (blocked == 1) {
+        // silently dropped write to a foreign private member: nobody adopts
+        // an owned temporary, so release it here
+        if (owns == 1) {
+            if (vtype == 1) { cssc::free(val); }
+            if (vtype == 3) { if (val != 0) { ciInstFree(val); } }
+        }
+    }
+    #delete[blocked];
+    #delete[idx];
+    #delete[ccp];
+}
+
+// Bind a call/mirror result capture to its target. A plain ident (isMem=0) binds
+// a variable; `X->member` (isMem=1) binds an object member, resolving X the same
+// way an `X->m = v` assignment does: the running object's own instance when the
+// name is the current object, else a variable holding an instance (tag 3). This
+// is why a capture like `g::ld() Self->data;` must NOT just ciVarSet the first
+// ident -- that overwrote the instance and left the member 0.
+#define(ciCapStore) {
+    #scanp(ciCapStore, int, 0) nOff;
+    #scanp(ciCapStore, int, 1) nLen;
+    #scanp(ciCapStore, int, 2) isMem;
+    #scanp(ciCapStore, int, 3) mOff;
+    #scanp(ciCapStore, int, 4) mLen;
+    #scanp(ciCapStore, int, 5) val;
+    #scanp(ciCapStore, int, 6) vtype;
+    #scanp(ciCapStore, int, 7) owns;
+    #req[ciVarSet] ciVarSet;
+    #req[ciVarGet] ciVarGet;
+    #req[ciInstMemSet] ciInstMemSet;
+    #req[ciObjNameIs] ciObjNameIs;
+    #req[ciCurInst] ciCurInst;
+    #req[ciCurObj] ciCurObj;
+    #req[ciEvalType] ciEvalType;
+    if (isMem == 0) {
+        ciVarSet(nOff, nLen, val, vtype, owns);
+    }
+    if (isMem == 1) {
+        #stack[int, 64] tinst = 0;
+        if (ciCurInst != 0) {
+            ciObjNameIs(ciCurObj, nOff, nLen) isCur;
+            if (isCur == 1) { tinst = ciCurInst; }
+            #delete[isCur];
+        }
+        if (tinst == 0) {
+            ciVarGet(nOff, nLen) iv;
+            if (ciEvalType == 3) { tinst = iv; }
+            #delete[iv];
+        }
+        if (tinst != 0) {
+            ciInstMemSet(tinst, mOff, mLen, val, vtype, owns);
+        }
+        if (tinst == 0) {
+            if (owns == 1) { if (vtype == 1) { cssc::free(val); } }
+        }
+        #delete[tinst];
+    }
+}
+
+// #delete[name]: free the string the row owns (if any) and unbind the row by
+// TOMBSTONING it in place (nameLen=0 never matches a lookup). No rows are
+// moved: a swap-compaction could pull a live frame-local across the frame
+// floor when a GLOBAL member row is dropped from inside a method -- the
+// tombstone is provably safe in every frame context. Resolution mirrors
+// ciVarGet: qualified tokens hit the global row (private only from inside),
+// bare names hit the frame, then fall back to the current sector's member.
+#define(ciVarDrop) {
+    #scanp(ciVarDrop, int, 0) off;
+    #scanp(ciVarDrop, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciVLens] ciVLens;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVOwns] ciVOwns;
+    #req[ciVVis] ciVVis;
+    #req[ciVCount] ciVCount;
+    #req[ciInstFree] ciInstFree;
+    #req[ciNullBorrows] ciNullBorrows;
+    #req[ciValFree] ciValFree;
+    #req[ciCurSecOff] ciCurSecOff;
+    #req[ciCurSecLen] ciCurSecLen;
+    #req[ciQualBuf] ciQualBuf;
+    #req[ciQualify] ciQualify;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciSecPrefixIs] ciSecPrefixIs;
+    #req[ciVarFind] ciVarFind;
+    #req[ciVarFindGlobal] ciVarFindGlobal;
+    if (len > 32) { len = 32; }
+    ciTokHasCC(off, len) ccp;
+    #stack[int, 64] idx = 0 - 1;
+    if (ccp >= 0) {
+        ciVarFindGlobal(off, len) gi;
+        idx = gi;
+        #delete[gi];
+        if (idx >= 0) {
+            #stack[int, 64] vis = cssc::peek64(ciVVis + idx * 8);
+            if (vis == 0) {
+                ciSecPrefixIs(off, ccp) same;
+                if (same == 0) { idx = 0 - 1; }
+                #delete[same];
+            }
+            #delete[vis];
+        }
+    }
+    if (ccp < 0) {
+        ciVarFind(off, len) fi;
+        idx = fi;
+        #delete[fi];
+        if (idx < 0) {
+            if (ciCurSecLen > 0) {
+                ciQualify(ciCurSecOff, ciCurSecLen, off, len) ql;
+                ciVarFindGlobal(ciQualBuf - ciSrc, ql) qi;
+                idx = qi;
+                #delete[qi];
+                #delete[ql];
+            }
+        }
+    }
+    if (idx >= 0) {
+        #stack[int, 64] ty = cssc::peek64(ciVTypes + idx * 8);
+        #stack[int, 64] ow = cssc::peek64(ciVOwns + idx * 8);
+        #stack[int, 64] vv = cssc::peek64(ciVVals + idx * 8);
+        if (ow == 1) {
+            // release the owned value; null every dangling alias first
+            // (use-after-free guard), then hand the heap back via ciValFree so
+            // strings, objects AND containers (vector/map/bind) are all freed
+            if (vv != 0) {
+                if (ty == 1) { ciNullBorrows(vv, 1); }
+                if (ty == 4) { ciNullBorrows(vv, 4); }
+                if (ty == 5) { ciNullBorrows(vv, 5); }
+                if (ty == 7) { ciNullBorrows(vv, 7); }
+                ciValFree(ty, vv);
+            }
+        }
+        // tombstone: unbind in place, wipe every column
+        cssc::poke64(ciVLens + idx * 8, 0);
+        cssc::poke64(ciVVals + idx * 8, 0);
+        cssc::poke64(ciVTypes + idx * 8, 0);
+        cssc::poke64(ciVOwns + idx * 8, 0);
+        cssc::poke64(ciVVis + idx * 8, 1);
+        #delete[ty];
+        #delete[ow];
+        #delete[vv];
+    }
+    #delete[idx];
+    #delete[ccp];
+}
+
+#define(ciEatCall) {
+    #req[ciCur] ciCur;
+    #req[ciAdvance] ciAdvance;
+    if (ciCur == 9) {
+        ciAdvance();
+    }
+    if (ciCur == 10) {
+        ciAdvance();
+    }
+}
+
+#define(ciStrNew) {
+    #scanp(ciStrNew, int, 0) srcAddr;
+    #scanp(ciStrNew, int, 1) len;
+    #stack[int, 64] p = cssc::alloc(len + 8);
+    cssc::poke32(p, 1);
+    cssc::poke32(p + 4, len);
+    #stack[int, 32] i = 0;
+    while (i < len) {
+        cssc::poke8(p + 8 + i, cssc::peek8(srcAddr + i));
+        i = i + 1;
+    }
+    #delete[i];
+    return p;
+}
+
+// deep-copy a string object {rc,size,bytes} into a fresh owned allocation.
+// This is what the `&` copy operator produces (CSSC: ref by default, & = copy).
+#define(ciStrClone) {
+    #scanp(ciStrClone, int, 0) src;
+    // a null source (uninitialized string) clones to an empty string, not a fault.
+    #stack[int, 64] n = 0;
+    if (src != 0) { n = cssc::peek32(src + 4); }
+    #stack[int, 64] p = cssc::alloc(n + 8);
+    cssc::poke32(p, 1);
+    cssc::poke32(p + 4, n);
+    #stack[int, 32] i = 0;
+    while (i < n) {
+        cssc::poke8(p + 8 + i, cssc::peek8(src + 8 + i));
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    return p;
+}
+
+#define(ciItoa) {
+    #scanp(ciItoa, int, 0) val;
+    #scanp(ciItoa, int, 1) buf;
+    #stack[int, 64] v = val;
+    #stack[int, 32] n = 0;
+    if (v < 0) {
+        cssc::poke8(buf, 45);
+        n = 1;
+        v = 0 - v;
+    }
+    #stack[int, 64] place = 1;
+    while (place * 10 <= v) {
+        place = place * 10;
+    }
+    #stack[int, 32] more = 1;
+    while (more == 1) {
+        #stack[int, 64] d = (v / place) % 10;
+        cssc::poke8(buf + n, 48 + d);
+        n = n + 1;
+        #delete[d];
+        place = place / 10;
+        if (place == 0) {
+            more = 0;
+        }
+    }
+    #delete[more];
+    #delete[place];
+    #delete[v];
+    return n;
+}
+
+// stringify ANY value into buf at offset `off` (cap-bounded); returns the new
+// offset. SELF-RECURSIVE so nested containers print in full: scalars via itoa/
+// fToStr/bytes; vector/array 4 -> [a, b, c]; bind 7 -> [cells]; map 5 -> {k: v}.
+// A container element that is itself a container recurses (nested vec support).
+#define(ciContFmt) {
+    #scanp(ciContFmt, int, 0) val;
+    #scanp(ciContFmt, int, 1) type;
+    #scanp(ciContFmt, int, 2) buf;
+    #scanp(ciContFmt, int, 3) off;
+    #scanp(ciContFmt, int, 4) cap;
+    #req[ciItoa] ciItoa;
+    #req[ciContFmt] ciContFmt;
+    #stack[int, 64] n = off;
+    if (type == 1) {
+        #stack[int, 64] sl = cssc::peek32(val + 4);
+        #stack[int, 64] j = 0;
+        while (j < sl) { if (n < cap) { cssc::poke8(buf + n, cssc::peek8(val + 8 + j)); n = n + 1; } j = j + 1; }
+        #delete[j];
+        #delete[sl];
+    }
+    if (type == 2) {
+        #stack[int, 64] fb = cssc::alloc(48);
+        cssc::fToStr(val, fb, 48) fn;
+        #stack[int, 64] j = 0;
+        while (j < fn) { if (n < cap) { cssc::poke8(buf + n, cssc::peek8(fb + j)); n = n + 1; } j = j + 1; }
+        cssc::free(fb);
+        #delete[j];
+        #delete[fn];
+        #delete[fb];
+    }
+    #stack[int, 32] scalarInt = 0;
+    if (type == 0) { scalarInt = 1; }
+    if (type == 3) { scalarInt = 1; }
+    if (scalarInt == 1) {
+        #stack[int, 64] tb = cssc::alloc(24);
+        ciItoa(val, tb) dn;
+        #stack[int, 64] j = 0;
+        while (j < dn) { if (n < cap) { cssc::poke8(buf + n, cssc::peek8(tb + j)); n = n + 1; } j = j + 1; }
+        cssc::free(tb);
+        #delete[j];
+        #delete[dn];
+        #delete[tb];
+    }
+    #delete[scalarInt];
+    if (type == 9) {
+        #stack[int, 32] tv = 0;
+        if (val != 0) { tv = 1; }
+        if (tv == 1) {
+            if (n < cap) { cssc::poke8(buf + n, 116); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 114); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 117); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 101); n = n + 1; }
+        }
+        if (tv == 0) {
+            if (n < cap) { cssc::poke8(buf + n, 102); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 97); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 108); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 115); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 101); n = n + 1; }
+        }
+        #delete[tv];
+    }
+    if (type == 4) {
+        #stack[int, 64] sz = cssc::peek32(val + 4);
+        #stack[int, 64] et = cssc::peek32(val + 12);
+        #stack[int, 64] data = cssc::peek64(val + 16);
+        #stack[int, 64] tp = 0;
+        if (et == 8) { tp = cssc::peek64(val + 24); }
+        if (n < cap) { cssc::poke8(buf + n, 123); n = n + 1; }
+        #stack[int, 64] i = 0;
+        while (i < sz) {
+            if (i > 0) { if (n < cap) { cssc::poke8(buf + n, 44); n = n + 1; } if (n < cap) { cssc::poke8(buf + n, 32); n = n + 1; } }
+            #stack[int, 64] ev = cssc::peek64(data + i * 8);
+            #stack[int, 64] eet = et;
+            if (et == 8) { eet = cssc::peek32(tp + i * 8); }
+            #stack[int, 32] evNull = 0;
+            if (eet == 3) { if (ev == 0) { evNull = 1; } }
+            if (evNull == 1) {
+                if (n < cap) { cssc::poke8(buf + n, 48); n = n + 1; }
+                if (n < cap) { cssc::poke8(buf + n, 120); n = n + 1; }
+                if (n < cap) { cssc::poke8(buf + n, 48); n = n + 1; }
+            }
+            if (evNull == 0) {
+                ciContFmt(ev, eet, buf, n, cap) nn;
+                n = nn;
+                #delete[nn];
+            }
+            #delete[evNull];
+            #delete[eet];
+            #delete[ev];
+            i = i + 1;
+        }
+        if (n < cap) { cssc::poke8(buf + n, 125); n = n + 1; }
+        #delete[i];
+        #delete[tp];
+        #delete[data];
+        #delete[et];
+        #delete[sz];
+    }
+    if (type == 7) {
+        // FX-BINDLIT render: `{c0, c1; c2, c3}` -- curly braces, `; ` between
+        // rows (every pairWidth cells), `, ` within a row; null pad cells -> 0x0.
+        #stack[int, 64] size = cssc::peek32(val + 4);
+        #stack[int, 64] pw = cssc::peek32(val + 12);
+        #stack[int, 64] used = size * pw;
+        #stack[int, 64] d = cssc::peek64(val + 16);
+        if (n < cap) { cssc::poke8(buf + n, 123); n = n + 1; }
+        #stack[int, 64] i = 0;
+        while (i < used) {
+            if (i > 0) {
+                #stack[int, 64] sep = 44;                       // ','
+                if (pw > 0) { if (i % pw == 0) { sep = 59; } }  // ';' on a row boundary
+                if (n < cap) { cssc::poke8(buf + n, sep); n = n + 1; }
+                if (n < cap) { cssc::poke8(buf + n, 32); n = n + 1; }
+                #delete[sep];
+            }
+            #stack[int, 64] ct = cssc::peek64(d + i * 16);
+            #stack[int, 64] cv = cssc::peek64(d + i * 16 + 8);
+            #stack[int, 32] isNull = 0;
+            if (ct == 3) { if (cv == 0) { isNull = 1; } }
+            if (isNull == 1) {
+                if (n < cap) { cssc::poke8(buf + n, 48); n = n + 1; }
+                if (n < cap) { cssc::poke8(buf + n, 120); n = n + 1; }
+                if (n < cap) { cssc::poke8(buf + n, 48); n = n + 1; }
+            }
+            if (isNull == 0) {
+                ciContFmt(cv, ct, buf, n, cap) nn;
+                n = nn;
+                #delete[nn];
+            }
+            #delete[isNull];
+            #delete[ct];
+            #delete[cv];
+            i = i + 1;
+        }
+        if (n < cap) { cssc::poke8(buf + n, 125); n = n + 1; }
+        #delete[i];
+        #delete[d];
+        #delete[used];
+        #delete[pw];
+        #delete[size];
+    }
+    if (type == 5) {
+        #stack[int, 64] sz = cssc::peek32(val + 4);
+        #stack[int, 64] data = cssc::peek64(val + 16);
+        if (n < cap) { cssc::poke8(buf + n, 123); n = n + 1; }
+        #stack[int, 64] i = 0;
+        while (i < sz) {
+            if (i > 0) { if (n < cap) { cssc::poke8(buf + n, 44); n = n + 1; } if (n < cap) { cssc::poke8(buf + n, 32); n = n + 1; } }
+            #stack[int, 64] kt = cssc::peek64(data + i * 32);
+            #stack[int, 64] kv = cssc::peek64(data + i * 32 + 8);
+            #stack[int, 64] vt = cssc::peek64(data + i * 32 + 16);
+            #stack[int, 64] vv = cssc::peek64(data + i * 32 + 24);
+            ciContFmt(kv, kt, buf, n, cap) n1;
+            n = n1;
+            #delete[n1];
+            if (n < cap) { cssc::poke8(buf + n, 58); n = n + 1; }
+            if (n < cap) { cssc::poke8(buf + n, 32); n = n + 1; }
+            ciContFmt(vv, vt, buf, n, cap) n2;
+            n = n2;
+            #delete[n2];
+            #delete[kt];
+            #delete[kv];
+            #delete[vt];
+            #delete[vv];
+            i = i + 1;
+        }
+        if (n < cap) { cssc::poke8(buf + n, 125); n = n + 1; }
+        #delete[i];
+        #delete[data];
+        #delete[sz];
+    }
+    return n;
+}
+
+#define(ciStrConcat) {
+    #scanp(ciStrConcat, int, 0) a;
+    #scanp(ciStrConcat, int, 1) aT;
+    #scanp(ciStrConcat, int, 2) b;
+    #scanp(ciStrConcat, int, 3) bT;
+    #req[ciItoa] ciItoa;
+    #req[ciContFmt] ciContFmt;
+    #stack[int, 64] tmpA = cssc::alloc(1024);
+    #stack[int, 64] tmpB = cssc::alloc(1024);
+    #stack[int, 64] aData = 0;
+    #stack[int, 64] aLen = 0;
+    #stack[int, 64] bData = 0;
+    #stack[int, 64] bLen = 0;
+    if (aT == 1) {
+        // a null string pointer (an uninitialized `#stack[string]` reads as 0)
+        // is an empty string, NOT a fault: peek32(0+4) would segfault. Match the
+        // reference, which treats an uninitialised string as "".
+        if (a != 0) {
+            aData = a + 8;
+            aLen = cssc::peek32(a + 4);
+        }
+    }
+    if (aT == 2) {
+        cssc::fToStr(a, tmpA, 1024) na;
+        aLen = na;
+        aData = tmpA;
+        #delete[na];
+    }
+    if (aT == 0) {
+        ciItoa(a, tmpA) na;
+        aLen = na;
+        aData = tmpA;
+        #delete[na];
+    }
+    if (aT >= 4) {
+        ciContFmt(a, aT, tmpA, 0, 1024) na;
+        aLen = na;
+        aData = tmpA;
+        #delete[na];
+    }
+    if (bT == 1) {
+        if (b != 0) {
+            bData = b + 8;
+            bLen = cssc::peek32(b + 4);
+        }
+    }
+    if (bT == 2) {
+        cssc::fToStr(b, tmpB, 1024) nb;
+        bLen = nb;
+        bData = tmpB;
+        #delete[nb];
+    }
+    if (bT == 0) {
+        ciItoa(b, tmpB) nb;
+        bLen = nb;
+        bData = tmpB;
+        #delete[nb];
+    }
+    if (bT >= 4) {
+        ciContFmt(b, bT, tmpB, 0, 1024) nb;
+        bLen = nb;
+        bData = tmpB;
+        #delete[nb];
+    }
+    #stack[int, 64] total = aLen + bLen;
+    #stack[int, 64] p = cssc::alloc(total + 8);
+    cssc::poke32(p, 1);
+    cssc::poke32(p + 4, total);
+    #stack[int, 32] i = 0;
+    while (i < aLen) {
+        cssc::poke8(p + 8 + i, cssc::peek8(aData + i));
+        i = i + 1;
+    }
+    #stack[int, 32] k = 0;
+    while (k < bLen) {
+        cssc::poke8(p + 8 + aLen + k, cssc::peek8(bData + k));
+        k = k + 1;
+    }
+    #delete[i];
+    #delete[k];
+    #delete[total];
+    #delete[aData];
+    #delete[aLen];
+    #delete[bData];
+    #delete[bLen];
+    // free the heap the scratch buffers hold -- #delete only pops the stack slot
+    // and would otherwise leak 2KB on EVERY concatenation (the dominant leak that
+    // starved the OS heap when running concat-heavy programs like test_file.cssc)
+    cssc::free(tmpA);
+    cssc::free(tmpB);
+    #delete[tmpA];
+    #delete[tmpB];
+    return p;
+}
+
+// look up a registered user function by name -> table index, or -1
+#define(ciFnFind) {
+    #scanp(ciFnFind, int, 0) off;
+    #scanp(ciFnFind, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciFnNames] ciFnNames;
+    #req[ciFnLens] ciFnLens;
+    #req[ciFnCount] ciFnCount;
+    // consistent-truncation rule: stores clamp to 32, so must lookups
+    if (len > 32) { len = 32; }
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i < ciFnCount) {
+        #stack[int, 64] nl = cssc::peek64(ciFnLens + i * 8);
+        if (nl == len) {
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(ciFnNames + i * 32 + j);
+                if (a != b) { m = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { found = i; }
+            #delete[m];
+        }
+        #delete[nl];
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// record a #define's name + body source span (start after '{', end at the
+// matching '}'). Re-registering an existing name UPDATES it in place (sector
+// redeclaration = silent replace, reference cssl_cssc.py:16301). The sector
+// backpointer + visibility come from the ciRegSecOff/Len + ciBindVis context
+// globals and are written on EVERY register so reused rows carry no stale
+// state (0/0 + public for plain free functions).
+#define(ciFnRegister) {
+    #scanp(ciFnRegister, int, 0) off;
+    #scanp(ciFnRegister, int, 1) len;
+    #scanp(ciFnRegister, int, 2) bstart;
+    #scanp(ciFnRegister, int, 3) bend;
+    #req[ciSrc] ciSrc;
+    #req[ciFnNames] ciFnNames;
+    #req[ciFnLens] ciFnLens;
+    #req[ciFnBodyStart] ciFnBodyStart;
+    #req[ciFnBodyEnd] ciFnBodyEnd;
+    #req[ciFnSecOff] ciFnSecOff;
+    #req[ciFnSecLen] ciFnSecLen;
+    #req[ciFnVis] ciFnVis;
+    #req[ciFnCount] ciFnCount;
+    #req[ciRegSecOff] ciRegSecOff;
+    #req[ciRegSecLen] ciRegSecLen;
+    #req[ciBindVis] ciBindVis;
+    #req[ciFnFind] ciFnFind;
+    #req[ciFnParCnt] ciFnParCnt;
+    if (len > 32) { len = 32; }
+    ciFnFind(off, len) row;
+    if (row < 0) {
+        if (ciFnCount < 2048) {
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                cssc::poke8(ciFnNames + ciFnCount * 32 + j, cssc::peek8(ciSrc + off + j));
+                j = j + 1;
+            }
+            #delete[j];
+            cssc::poke64(ciFnLens + ciFnCount * 8, len);
+            row = ciFnCount;
+            ciFnCount = ciFnCount + 1;
+        }
+    }
+    if (row >= 0) {
+        cssc::poke64(ciFnBodyStart + row * 8, bstart);
+        cssc::poke64(ciFnBodyEnd + row * 8, bend);
+        cssc::poke64(ciFnSecOff + row * 8, ciRegSecOff);
+        cssc::poke64(ciFnSecLen + row * 8, ciRegSecLen);
+        cssc::poke64(ciFnVis + row * 8, ciBindVis);
+        // default to no named params (#define uses #scanp); #cdefine sets these after
+        cssc::poke64(ciFnParCnt + row * 8, 0);
+    }
+    // return the row so #cdefine can attach its named params (#define ignores it)
+    return row;
+}
