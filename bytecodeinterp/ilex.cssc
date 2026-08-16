@@ -1,0 +1,1350 @@
+// ---- Phase A: pre-tokenized stream (PERFORMANCE FOUNDATION) ----
+// The lexer (ciLexRaw) runs ONCE over the whole source (ciTokenize), storing each
+// token in these parallel per-token columns. ciAdvance then just reads column[ciPos]
+// and increments -- NO per-token character scan. So a loop/function body replays by
+// resetting ciPos to a saved TOKEN INDEX with ZERO re-lexing (the old byte-cursor
+// span-replay re-lexed the body from source every iteration -> O(bytes x iters)).
+// ciPos is a TOKEN INDEX during parsing; ciLexRaw reuses it as a BYTE cursor ONLY
+// during tokenization (never concurrently). ciTokOff/ciTokLen stay BYTE offsets into
+// ciSrc (identifier/string text lives in the source buffer, compared byte-wise), so
+// name resolution + the ciMainEnd/aend boundary checks are unchanged. Cap = ciSrcBuf
+// bytes (each token consumes >=1 source byte, whitespace/comments consume 0 tokens).
+#stack[int, 64] ciTokCode = 0;   // per-token: token code (poke8)
+#stack[int, 64] ciTokNumA = 0;   // per-token: int value or f64 bit pattern (poke64)
+#stack[int, 64] ciTokFlag = 0;   // per-token: 1 = float literal (poke8)
+#stack[int, 64] ciTokOffA = 0;   // per-token: byte offset of ident/string text (poke32)
+#stack[int, 64] ciTokLenA = 0;   // per-token: byte length of ident/string text (poke32)
+#stack[int, 64] ciTokCount = 0;  // number of tokens currently in the stream
+#stack[int, 64] ciTokCap = 0;    // capacity (entries)
+
+#stack[int, 64] ciInit;
+#stack[int, 64] ciLexRaw;
+#stack[int, 64] ciTokenize;
+#stack[int, 64] ciAdvance;
+#stack[int, 64] ciIdentIs;
+#stack[int, 64] ciQualify;
+#stack[int, 64] ciTokHasCC;
+#stack[int, 64] ciSecPrefixIs;
+#stack[int, 64] ciSecFind;
+#stack[int, 64] ciSecFindLab;
+#stack[int, 64] ciObjFind;
+#stack[int, 64] ciObjNameIs;
+#stack[int, 64] ciNullBorrows;
+#stack[int, 64] ciInstMemFind;
+#stack[int, 64] ciInstFree;
+#stack[int, 64] ciInstMemSet;
+#stack[int, 64] ciInstMemGet;
+#stack[int, 64] ciVarFind;
+#stack[int, 64] ciVarFindGlobal;
+#stack[int, 64] ciVarGet;
+#stack[int, 64] ciVarSet;
+#stack[int, 64] ciCapStore;
+#stack[int, 64] ciVarDrop;
+// unified value destructor: frees whatever heap a value tag owns (string 1,
+// object 3, vector/array 4, map 5, bind 7; int/float own nothing). Forward slot
+// so the early ciVarDrop / ciVecClear can dispatch through it and recurse into
+// nested containers. THE fix for the cross-run + scope-exit container leak.
+#stack[int, 64] ciValFree;
+#stack[int, 64] ciEatCall;
+#stack[int, 64] ciStrNew;
+#stack[int, 64] ciStrClone;
+#stack[int, 64] ciItoa;
+#stack[int, 64] ciContFmt;
+#stack[int, 64] ciStrConcat;
+#stack[int, 64] ciFnFind;
+#stack[int, 64] ciFnRegister;
+#stack[int, 64] ciExpr;
+#stack[int, 64] ciDoPrint;
+#stack[int, 64] ciDoPoke;
+#stack[int, 64] ciDoVideo;
+#stack[int, 64] ciDoSound;
+// console module (value tag 6): pure helpers + statement dispatcher
+#stack[int, 64] ciDoConsole;
+#stack[int, 64] ciConAttr;
+#stack[int, 64] ciConNew;
+#stack[int, 64] ciConScroll;
+#stack[int, 64] ciConPutc;
+#stack[int, 64] ciConOut;
+#stack[int, 64] ciConClearAll;
+#stack[int, 64] ciConClearLine;
+#stack[int, 64] ciConCursorPos;
+#stack[int, 64] ciConGetLine;
+#stack[int, 64] ciConCursorAt;
+#stack[int, 64] ciConSyncAdd;
+#stack[int, 64] ciConSyncDrain;
+#stack[int, 64] ciConDesync;
+#stack[int, 64] ciConClose;
+// mouse module (client value tag 8): pure helpers + statement dispatcher
+#stack[int, 64] ciDoMouse;
+#stack[int, 64] ciMsLc;
+#stack[int, 64] ciMsMapX;
+#stack[int, 64] ciMsMapY;
+#stack[int, 64] ciMsBtnMask;
+#stack[int, 64] ciMsUpdate;
+#stack[int, 64] ciMsOver;
+#stack[int, 64] ciMsMethod;
+#stack[int, 64] ciDoSprite;
+#stack[int, 64] ciDoTilemap;
+#stack[int, 64] ciDoFont;
+#stack[int, 64] ciSext32;
+#stack[int, 64] ciBmpLoad;
+#stack[int, 64] ciSprNew;
+#stack[int, 64] ciSheetNew;
+#stack[int, 64] ciSprBlit;
+#stack[int, 64] ciSprBlitScaled;
+#stack[int, 64] ciSprBlitTinted;
+#stack[int, 64] ciSprBlitAlpha;
+#stack[int, 64] ciSprBlitFlip;
+#stack[int, 64] ciSheetDrawFrame;
+#stack[int, 64] ciTmDraw;
+#stack[int, 64] ciFontMeasure;
+#stack[int, 64] ciFontBlit;
+#stack[int, 64] ciDoAssign;
+#stack[int, 64] ciDoDecl;
+#stack[int, 64] ciStmt;
+#stack[int, 64] ciRun;
+
+#define(ciInit) {
+    #req[ciVNames] ciVNames;
+    #req[ciVLens] ciVLens;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVOwns] ciVOwns;
+    #req[ciFnNames] ciFnNames;
+    #req[ciFnLens] ciFnLens;
+    #req[ciFnBodyStart] ciFnBodyStart;
+    #req[ciFnInjCnt] ciFnInjCnt;
+    #req[ciFnInjStart] ciFnInjStart;
+    #req[ciFnInjEnd] ciFnInjEnd;
+    #req[ciFnBodyEnd] ciFnBodyEnd;
+    #req[ciFnParCnt] ciFnParCnt;
+    #req[ciFnParOff] ciFnParOff;
+    #req[ciFnParLen] ciFnParLen;
+    #req[ciCdOff] ciCdOff;
+    #req[ciCdLen] ciCdLen;
+    #req[ciArgVals] ciArgVals;
+    #req[ciArgTypes] ciArgTypes;
+    #req[ciArgOwns] ciArgOwns;
+    #req[ciFnSecOff] ciFnSecOff;
+    #req[ciFnSecLen] ciFnSecLen;
+    #req[ciFnVis] ciFnVis;
+    #req[ciVVis] ciVVis;
+    #req[ciVBits] ciVBits;
+    #req[ciVReq] ciVReq;
+    #req[ciQualBuf] ciQualBuf;
+    #req[ciSecNameOff] ciSecNameOff;
+    #req[ciSecNameLen] ciSecNameLen;
+    #req[ciSecBodyS] ciSecBodyS;
+    #req[ciSecBodyE] ciSecBodyE;
+    #req[ciSecFreeS] ciSecFreeS;
+    #req[ciSecFreeE] ciSecFreeE;
+    #req[ciSecFreed] ciSecFreed;
+    #req[ciSecDefer] ciSecDefer;
+    #req[ciSecLabOff] ciSecLabOff;
+    #req[ciSecLabLen] ciSecLabLen;
+    #req[ciObjNameOff] ciObjNameOff;
+    #req[ciObjNameLen] ciObjNameLen;
+    #req[ciObjParS] ciObjParS;
+    #req[ciObjBodyS] ciObjBodyS;
+    #req[ciObjBodyE] ciObjBodyE;
+    #req[ciObjTopE] ciObjTopE;
+    #req[ciObjFreeS] ciObjFreeS;
+    #req[ciObjFreeE] ciObjFreeE;
+    #req[ciLabObj] ciLabObj;
+    #req[ciLabNameOff] ciLabNameOff;
+    #req[ciLabNameLen] ciLabNameLen;
+    #req[ciLabParS] ciLabParS;
+    #req[ciLabBodyS] ciLabBodyS;
+    #req[ciLabBodyE] ciLabBodyE;
+    #req[ciSrcBuf] ciSrcBuf;
+    #req[ciLoadName] ciLoadName;
+    #req[ciLoadFnS] ciLoadFnS;
+    #req[ciLoadFnE] ciLoadFnE;
+    #req[ciTokCode] ciTokCode;
+    #req[ciTokNumA] ciTokNumA;
+    #req[ciTokFlag] ciTokFlag;
+    #req[ciTokOffA] ciTokOffA;
+    #req[ciTokLenA] ciTokLenA;
+    #req[ciTokCap] ciTokCap;
+    #req[ciFont] ciFont;
+    #req[ciFont5] ciFont5;
+    #req[ciAlOff] ciAlOff;
+    #req[ciAlLen] ciAlLen;
+    #req[ciAlMod] ciAlMod;
+    #req[ciKbCurr] ciKbCurr;
+    #req[ciKbPrev] ciKbPrev;
+    #req[ciKbEdge] ciKbEdge;
+    #req[ciKbNames] ciKbNames;
+    #req[ciSndSlots] ciSndSlots;
+    #req[ciIniVal] ciIniVal;
+    #req[ciIniOut] ciIniOut;
+    // variable table: up to 4096 rows (name 32B for qualified Sector::member,
+    // len/val/type/owns 8B each). BIG for firefield's 13-module global set.
+    ciVNames = cssc::alloc(131072);
+    ciVLens = cssc::alloc(32768);
+    ciVVals = cssc::alloc(32768);
+    ciVTypes = cssc::alloc(32768);
+    ciVOwns = cssc::alloc(32768);
+    // function table: up to 2048 defs (free functions + sector methods + the
+    // alias-qualified duplicates for #load'd modules; name 32B, cols 8B each).
+    ciFnNames = cssc::alloc(65536);
+    ciFnLens = cssc::alloc(16384);
+    ciFnBodyStart = cssc::alloc(16384);
+    ciFnBodyEnd = cssc::alloc(16384);
+    ciFnInjCnt = cssc::alloc(16384);
+    ciFnInjStart = cssc::alloc(131072);
+    ciFnInjEnd = cssc::alloc(131072);
+    cssc::memfill32(ciFnInjCnt, 0, 4096);
+    ciFnSecOff = cssc::alloc(16384);
+    ciFnSecLen = cssc::alloc(16384);
+    ciFnVis = cssc::alloc(16384);
+    // argument frame: up to 8 args (value/type/owns)
+    ciArgVals = cssc::alloc(64);
+    ciArgTypes = cssc::alloc(64);
+    ciArgOwns = cssc::alloc(64);
+    // per-var visibility column + qualified-name scratch (>= 32B name + '::')
+    ciVVis = cssc::alloc(32768);
+    ciVBits = cssc::alloc(32768);
+    ciVReq = cssc::alloc(32768);
+    ciQualBuf = cssc::alloc(128);
+    // sector table: 128 sectors x 8B per column
+    ciSecNameOff = cssc::alloc(1024);
+    ciSecNameLen = cssc::alloc(1024);
+    ciSecBodyS = cssc::alloc(1024);
+    ciSecBodyE = cssc::alloc(1024);
+    ciSecFreeS = cssc::alloc(1024);
+    ciSecFreeE = cssc::alloc(1024);
+    ciSecFreed = cssc::alloc(1024);
+    ciSecDefer = cssc::alloc(1024);
+    ciSecLabOff = cssc::alloc(1024);
+    ciSecLabLen = cssc::alloc(1024);
+    // object definition table: 32 defs x 8B per column
+    ciObjNameOff = cssc::alloc(256);
+    ciObjNameLen = cssc::alloc(256);
+    ciObjParS = cssc::alloc(256);
+    ciObjBodyS = cssc::alloc(256);
+    ciObjBodyE = cssc::alloc(256);
+    ciObjTopE = cssc::alloc(256);
+    ciObjFreeS = cssc::alloc(256);
+    ciObjFreeE = cssc::alloc(256);
+    // label table: 256 labels x 8B per column
+    ciLabObj = cssc::alloc(2048);
+    ciLabNameOff = cssc::alloc(2048);
+    ciLabNameLen = cssc::alloc(2048);
+    ciLabParS = cssc::alloc(2048);
+    ciLabBodyS = cssc::alloc(2048);
+    ciLabBodyE = cssc::alloc(2048);
+    // 512KB master source buffer for the program + #load'd files; load records
+    // (up to 32 loads). firefield's 13 concatenated modules are ~300KB.
+    ciSrcBuf = cssc::alloc(524288);
+    ciLoadName = cssc::alloc(1024);
+    ciLoadFnS = cssc::alloc(256);
+    ciLoadFnE = cssc::alloc(256);
+    // #cdefine named-param table (2048 fns; 8 params each) + parse scratch (8 entries)
+    ciFnParCnt = cssc::alloc(16384);
+    ciFnParOff = cssc::alloc(131072);
+    ciFnParLen = cssc::alloc(131072);
+    ciCdOff = cssc::alloc(64);
+    ciCdLen = cssc::alloc(64);
+    // pre-tokenized stream: one slot per possible token (<= ciSrcBuf bytes). Sized
+    // to the master buffer so #load's appended library code fits without a regrow.
+    ciTokCap = 262144;
+    ciTokCode = cssc::alloc(ciTokCap);          // 1 byte / token
+    ciTokNumA = cssc::alloc(ciTokCap * 8);      // 8 bytes / token
+    ciTokFlag = cssc::alloc(ciTokCap);          // 1 byte / token
+    ciTokOffA = cssc::alloc(ciTokCap * 4);      // 4 bytes / token
+    ciTokLenA = cssc::alloc(ciTokCap * 4);      // 4 bytes / token
+    // native module state: 8x8 font table, alias->module table (64 rows),
+    // keyboard curr/prev held arrays, sound slot table (32 * 16B). The verbatim
+    // System-B 8x8 font (96 glyphs, each 8 row-bytes packed into one i64; byte
+    // gy = (word>>(gy*8))&0xFF, bit0 = leftmost column) is loaded inline here.
+    ciFont = cssc::alloc(768);
+    cssc::poke64(ciFont + 0, 0x0000000000000000);
+    cssc::poke64(ciFont + 8, 0x0018000018181818);
+    cssc::poke64(ciFont + 16, 0x0000000000003636);
+    cssc::poke64(ciFont + 24, 0x0036367F367F3636);
+    cssc::poke64(ciFont + 32, 0x000C1F301E033E0C);
+    cssc::poke64(ciFont + 40, 0x0063660C18336300);
+    cssc::poke64(ciFont + 48, 0x006E333B6E1C361C);
+    cssc::poke64(ciFont + 56, 0x0000000000030606);
+    cssc::poke64(ciFont + 64, 0x00180C0606060C18);
+    cssc::poke64(ciFont + 72, 0x00060C1818180C06);
+    cssc::poke64(ciFont + 80, 0x0000663CFF3C6600);
+    cssc::poke64(ciFont + 88, 0x00000C0C3F0C0C00);
+    cssc::poke64(ciFont + 96, 0x060C0C0000000000);
+    cssc::poke64(ciFont + 104, 0x000000003F000000);
+    cssc::poke64(ciFont + 112, 0x000C0C0000000000);
+    cssc::poke64(ciFont + 120, 0x000103060C183060);
+    cssc::poke64(ciFont + 128, 0x003E676F7B73633E);
+    cssc::poke64(ciFont + 136, 0x003F0C0C0C0C0E0C);
+    cssc::poke64(ciFont + 144, 0x003F33061C30331E);
+    cssc::poke64(ciFont + 152, 0x001E33301C30331E);
+    cssc::poke64(ciFont + 160, 0x0078307F33363C38);
+    cssc::poke64(ciFont + 168, 0x001E3330301F033F);
+    cssc::poke64(ciFont + 176, 0x001E33331F03061C);
+    cssc::poke64(ciFont + 184, 0x000C0C0C1830333F);
+    cssc::poke64(ciFont + 192, 0x001E33331E33331E);
+    cssc::poke64(ciFont + 200, 0x000E18303E33331E);
+    cssc::poke64(ciFont + 208, 0x000C0C00000C0C00);
+    cssc::poke64(ciFont + 216, 0x060C0C00000C0C00);
+    cssc::poke64(ciFont + 224, 0x00180C0603060C18);
+    cssc::poke64(ciFont + 232, 0x00003F00003F0000);
+    cssc::poke64(ciFont + 240, 0x00060C1830180C06);
+    cssc::poke64(ciFont + 248, 0x000C000C1830331E);
+    cssc::poke64(ciFont + 256, 0x001E037B7B7B633E);
+    cssc::poke64(ciFont + 264, 0x0033333F33331E0C);
+    cssc::poke64(ciFont + 272, 0x003F66663E66663F);
+    cssc::poke64(ciFont + 280, 0x003C66030303663C);
+    cssc::poke64(ciFont + 288, 0x001F36666666361F);
+    cssc::poke64(ciFont + 296, 0x007F46161E16467F);
+    cssc::poke64(ciFont + 304, 0x000F06161E16467F);
+    cssc::poke64(ciFont + 312, 0x007C66730303663C);
+    cssc::poke64(ciFont + 320, 0x003333333F333333);
+    cssc::poke64(ciFont + 328, 0x001E0C0C0C0C0C1E);
+    cssc::poke64(ciFont + 336, 0x001E333330303078);
+    cssc::poke64(ciFont + 344, 0x006766361E366667);
+    cssc::poke64(ciFont + 352, 0x007F66460606060F);
+    cssc::poke64(ciFont + 360, 0x0063636B7F7F7763);
+    cssc::poke64(ciFont + 368, 0x006363737B6F6763);
+    cssc::poke64(ciFont + 376, 0x001C36636363361C);
+    cssc::poke64(ciFont + 384, 0x000F06063E66663F);
+    cssc::poke64(ciFont + 392, 0x00381E3B3333331E);
+    cssc::poke64(ciFont + 400, 0x006766363E66663F);
+    cssc::poke64(ciFont + 408, 0x001E33380E07331E);
+    cssc::poke64(ciFont + 416, 0x001E0C0C0C0C2D3F);
+    cssc::poke64(ciFont + 424, 0x003F333333333333);
+    cssc::poke64(ciFont + 432, 0x000C1E3333333333);
+    cssc::poke64(ciFont + 440, 0x0063777F6B636363);
+    cssc::poke64(ciFont + 448, 0x0063361C1C366363);
+    cssc::poke64(ciFont + 456, 0x001E0C0C1E333333);
+    cssc::poke64(ciFont + 464, 0x007F664C1831637F);
+    cssc::poke64(ciFont + 472, 0x001E06060606061E);
+    cssc::poke64(ciFont + 480, 0x00406030180C0603);
+    cssc::poke64(ciFont + 488, 0x001E18181818181E);
+    cssc::poke64(ciFont + 496, 0x0000000063361C08);
+    cssc::poke64(ciFont + 504, 0xFF00000000000000);
+    cssc::poke64(ciFont + 512, 0x0000000000180C0C);
+    cssc::poke64(ciFont + 520, 0x006E333E301E0000);
+    cssc::poke64(ciFont + 528, 0x003B66663E060607);
+    cssc::poke64(ciFont + 536, 0x001E3303331E0000);
+    cssc::poke64(ciFont + 544, 0x006E33333E303038);
+    cssc::poke64(ciFont + 552, 0x001E033F331E0000);
+    cssc::poke64(ciFont + 560, 0x000F06060F06361C);
+    cssc::poke64(ciFont + 568, 0x1F303E33336E0000);
+    cssc::poke64(ciFont + 576, 0x006766666E360607);
+    cssc::poke64(ciFont + 584, 0x001E0C0C0C0E000C);
+    cssc::poke64(ciFont + 592, 0x1E33333030300030);
+    cssc::poke64(ciFont + 600, 0x0067361E36660607);
+    cssc::poke64(ciFont + 608, 0x001E0C0C0C0C0C0E);
+    cssc::poke64(ciFont + 616, 0x00636B7F7F330000);
+    cssc::poke64(ciFont + 624, 0x00333333331F0000);
+    cssc::poke64(ciFont + 632, 0x001E3333331E0000);
+    cssc::poke64(ciFont + 640, 0x0F063E66663B0000);
+    cssc::poke64(ciFont + 648, 0x78303E33336E0000);
+    cssc::poke64(ciFont + 656, 0x000F06666E3B0000);
+    cssc::poke64(ciFont + 664, 0x001F301E033E0000);
+    cssc::poke64(ciFont + 672, 0x00182C0C0C3E0C08);
+    cssc::poke64(ciFont + 680, 0x006E333333330000);
+    cssc::poke64(ciFont + 688, 0x000C1E3333330000);
+    cssc::poke64(ciFont + 696, 0x00367F7F6B630000);
+    cssc::poke64(ciFont + 704, 0x0063361C36630000);
+    cssc::poke64(ciFont + 712, 0x1F303E3333330000);
+    cssc::poke64(ciFont + 720, 0x003F260C193F0000);
+    cssc::poke64(ciFont + 728, 0x00380C0C070C0C38);
+    cssc::poke64(ciFont + 736, 0x0018181800181818);
+    cssc::poke64(ciFont + 744, 0x00070C0C380C0C07);
+    cssc::poke64(ciFont + 752, 0x0000000000003B6E);
+    cssc::poke64(ciFont + 760, 0x0000000000000000);
+    // builtin 5x7 font (video.font::builtin). 95 glyphs, 8 bytes each (7 rows + pad).
+    ciFont5 = cssc::alloc(768);
+    cssc::poke64(ciFont5 + 0, 0x0000000000000000);
+    cssc::poke64(ciFont5 + 8, 0x0004000004040404);
+    cssc::poke64(ciFont5 + 16, 0x0000000000000A0A);
+    cssc::poke64(ciFont5 + 24, 0x0000000A1F0A1F0A);
+    cssc::poke64(ciFont5 + 32, 0x00041E050E140F04);
+    cssc::poke64(ciFont5 + 40, 0x0003130804021918);
+    cssc::poke64(ciFont5 + 48, 0x000D12150814120C);
+    cssc::poke64(ciFont5 + 56, 0x0000000000000404);
+    cssc::poke64(ciFont5 + 64, 0x0002040808080402);
+    cssc::poke64(ciFont5 + 72, 0x0008040202020408);
+    cssc::poke64(ciFont5 + 80, 0x00000A041F040A00);
+    cssc::poke64(ciFont5 + 88, 0x000004041F040400);
+    cssc::poke64(ciFont5 + 96, 0x0008040000000000);
+    cssc::poke64(ciFont5 + 104, 0x000000001F000000);
+    cssc::poke64(ciFont5 + 112, 0x0004000000000000);
+    cssc::poke64(ciFont5 + 120, 0x0010100804020101);
+    cssc::poke64(ciFont5 + 128, 0x000E11191513110E);
+    cssc::poke64(ciFont5 + 136, 0x000E040404040C04);
+    cssc::poke64(ciFont5 + 144, 0x001F08040201110E);
+    cssc::poke64(ciFont5 + 152, 0x000E11010601110E);
+    cssc::poke64(ciFont5 + 160, 0x0002021F120A0602);
+    cssc::poke64(ciFont5 + 168, 0x000E1101011E101F);
+    cssc::poke64(ciFont5 + 176, 0x000E11111E10110E);
+    cssc::poke64(ciFont5 + 184, 0x000808080402011F);
+    cssc::poke64(ciFont5 + 192, 0x000E11110E11110E);
+    cssc::poke64(ciFont5 + 200, 0x000E11010F11110E);
+    cssc::poke64(ciFont5 + 208, 0x0000040000000400);
+    cssc::poke64(ciFont5 + 216, 0x0000080400000400);
+    cssc::poke64(ciFont5 + 224, 0x0002040810080402);
+    cssc::poke64(ciFont5 + 232, 0x0000001F001F0000);
+    cssc::poke64(ciFont5 + 240, 0x0008040201020408);
+    cssc::poke64(ciFont5 + 248, 0x000400040201110E);
+    cssc::poke64(ciFont5 + 256, 0x000E10171517110E);
+    cssc::poke64(ciFont5 + 264, 0x001111111F11110E);
+    cssc::poke64(ciFont5 + 272, 0x001E11111E11111E);
+    cssc::poke64(ciFont5 + 280, 0x000E11101010110E);
+    cssc::poke64(ciFont5 + 288, 0x001E11111111111E);
+    cssc::poke64(ciFont5 + 296, 0x001F10101E10101F);
+    cssc::poke64(ciFont5 + 304, 0x001010101E10101F);
+    cssc::poke64(ciFont5 + 312, 0x000E11111310110E);
+    cssc::poke64(ciFont5 + 320, 0x001111111F111111);
+    cssc::poke64(ciFont5 + 328, 0x000E04040404040E);
+    cssc::poke64(ciFont5 + 336, 0x000C120202020207);
+    cssc::poke64(ciFont5 + 344, 0x0011121418141211);
+    cssc::poke64(ciFont5 + 352, 0x001F101010101010);
+    cssc::poke64(ciFont5 + 360, 0x0011111115151B11);
+    cssc::poke64(ciFont5 + 368, 0x0011111113151911);
+    cssc::poke64(ciFont5 + 376, 0x000E11111111110E);
+    cssc::poke64(ciFont5 + 384, 0x001010101E11111E);
+    cssc::poke64(ciFont5 + 392, 0x000D12151111110E);
+    cssc::poke64(ciFont5 + 400, 0x001112141E11111E);
+    cssc::poke64(ciFont5 + 408, 0x000E11010E10110E);
+    cssc::poke64(ciFont5 + 416, 0x000404040404041F);
+    cssc::poke64(ciFont5 + 424, 0x000E111111111111);
+    cssc::poke64(ciFont5 + 432, 0x00040A0A11111111);
+    cssc::poke64(ciFont5 + 440, 0x00111B1515111111);
+    cssc::poke64(ciFont5 + 448, 0x0011110A040A1111);
+    cssc::poke64(ciFont5 + 456, 0x00040404040A1111);
+    cssc::poke64(ciFont5 + 464, 0x001F10080402011F);
+    cssc::poke64(ciFont5 + 472, 0x000E08080808080E);
+    cssc::poke64(ciFont5 + 480, 0x0001010204081010);
+    cssc::poke64(ciFont5 + 488, 0x000E02020202020E);
+    cssc::poke64(ciFont5 + 496, 0x0000000000110A04);
+    cssc::poke64(ciFont5 + 504, 0x001F000000000000);
+    cssc::poke64(ciFont5 + 512, 0x0000000000000408);
+    cssc::poke64(ciFont5 + 520, 0x000F110F010E0000);
+    cssc::poke64(ciFont5 + 528, 0x001E11111E11111E);
+    cssc::poke64(ciFont5 + 536, 0x000E11101010110E);
+    cssc::poke64(ciFont5 + 544, 0x001E11111111111E);
+    cssc::poke64(ciFont5 + 552, 0x001F10101E10101F);
+    cssc::poke64(ciFont5 + 560, 0x001010101E10101F);
+    cssc::poke64(ciFont5 + 568, 0x000E11111310110E);
+    cssc::poke64(ciFont5 + 576, 0x001111111F111111);
+    cssc::poke64(ciFont5 + 584, 0x000E04040404040E);
+    cssc::poke64(ciFont5 + 592, 0x000C120202020207);
+    cssc::poke64(ciFont5 + 600, 0x0011121418141211);
+    cssc::poke64(ciFont5 + 608, 0x001F101010101010);
+    cssc::poke64(ciFont5 + 616, 0x0011111115151B11);
+    cssc::poke64(ciFont5 + 624, 0x0011111113151911);
+    cssc::poke64(ciFont5 + 632, 0x000E11111111110E);
+    cssc::poke64(ciFont5 + 640, 0x001010101E11111E);
+    cssc::poke64(ciFont5 + 648, 0x000D12151111110E);
+    cssc::poke64(ciFont5 + 656, 0x001112141E11111E);
+    cssc::poke64(ciFont5 + 664, 0x000E11010E10110E);
+    cssc::poke64(ciFont5 + 672, 0x000404040404041F);
+    cssc::poke64(ciFont5 + 680, 0x000E111111111111);
+    cssc::poke64(ciFont5 + 688, 0x00040A0A11111111);
+    cssc::poke64(ciFont5 + 696, 0x00111B1515111111);
+    cssc::poke64(ciFont5 + 704, 0x0011110A040A1111);
+    cssc::poke64(ciFont5 + 712, 0x00040404040A1111);
+    cssc::poke64(ciFont5 + 720, 0x001F10080402011F);
+    cssc::poke64(ciFont5 + 728, 0x0002040408040402);
+    cssc::poke64(ciFont5 + 736, 0x0004040404040404);
+    cssc::poke64(ciFont5 + 744, 0x0008040402040408);
+    cssc::poke64(ciFont5 + 752, 0x0000000215080000);
+    ciAlOff = cssc::alloc(1024);
+    ciAlLen = cssc::alloc(1024);
+    ciAlMod = cssc::alloc(1024);
+    ciKbCurr = cssc::alloc(256);
+    ciKbPrev = cssc::alloc(256);
+    ciKbEdge = cssc::alloc(256);
+    ciSndSlots = cssc::alloc(512);
+    // keyboard name->VK table (records [len][vk][UPPER name...], end len 0),
+    // in getKey priority order; RETURN/ESCAPE aliases appended last.
+    ciIniVal = cssc::alloc(1024);
+    ciIniOut = cssc::alloc(34816);
+    ciKbNames = cssc::alloc(160);
+    cssc::poke8(ciKbNames + 0, 4); cssc::poke8(ciKbNames + 1, 37); cssc::poke8(ciKbNames + 2, 76); cssc::poke8(ciKbNames + 3, 69); cssc::poke8(ciKbNames + 4, 70); cssc::poke8(ciKbNames + 5, 84);
+    cssc::poke8(ciKbNames + 6, 5); cssc::poke8(ciKbNames + 7, 39); cssc::poke8(ciKbNames + 8, 82); cssc::poke8(ciKbNames + 9, 73); cssc::poke8(ciKbNames + 10, 71); cssc::poke8(ciKbNames + 11, 72); cssc::poke8(ciKbNames + 12, 84);
+    cssc::poke8(ciKbNames + 13, 2); cssc::poke8(ciKbNames + 14, 38); cssc::poke8(ciKbNames + 15, 85); cssc::poke8(ciKbNames + 16, 80);
+    cssc::poke8(ciKbNames + 17, 4); cssc::poke8(ciKbNames + 18, 40); cssc::poke8(ciKbNames + 19, 68); cssc::poke8(ciKbNames + 20, 79); cssc::poke8(ciKbNames + 21, 87); cssc::poke8(ciKbNames + 22, 78);
+    cssc::poke8(ciKbNames + 23, 5); cssc::poke8(ciKbNames + 24, 32); cssc::poke8(ciKbNames + 25, 83); cssc::poke8(ciKbNames + 26, 80); cssc::poke8(ciKbNames + 27, 65); cssc::poke8(ciKbNames + 28, 67); cssc::poke8(ciKbNames + 29, 69);
+    cssc::poke8(ciKbNames + 30, 5); cssc::poke8(ciKbNames + 31, 13); cssc::poke8(ciKbNames + 32, 69); cssc::poke8(ciKbNames + 33, 78); cssc::poke8(ciKbNames + 34, 84); cssc::poke8(ciKbNames + 35, 69); cssc::poke8(ciKbNames + 36, 82);
+    cssc::poke8(ciKbNames + 37, 3); cssc::poke8(ciKbNames + 38, 27); cssc::poke8(ciKbNames + 39, 69); cssc::poke8(ciKbNames + 40, 83); cssc::poke8(ciKbNames + 41, 67);
+    cssc::poke8(ciKbNames + 42, 3); cssc::poke8(ciKbNames + 43, 9); cssc::poke8(ciKbNames + 44, 84); cssc::poke8(ciKbNames + 45, 65); cssc::poke8(ciKbNames + 46, 66);
+    cssc::poke8(ciKbNames + 47, 4); cssc::poke8(ciKbNames + 48, 8); cssc::poke8(ciKbNames + 49, 66); cssc::poke8(ciKbNames + 50, 65); cssc::poke8(ciKbNames + 51, 67); cssc::poke8(ciKbNames + 52, 75);
+    cssc::poke8(ciKbNames + 53, 5); cssc::poke8(ciKbNames + 54, 16); cssc::poke8(ciKbNames + 55, 83); cssc::poke8(ciKbNames + 56, 72); cssc::poke8(ciKbNames + 57, 73); cssc::poke8(ciKbNames + 58, 70); cssc::poke8(ciKbNames + 59, 84);
+    cssc::poke8(ciKbNames + 60, 4); cssc::poke8(ciKbNames + 61, 17); cssc::poke8(ciKbNames + 62, 67); cssc::poke8(ciKbNames + 63, 84); cssc::poke8(ciKbNames + 64, 82); cssc::poke8(ciKbNames + 65, 76);
+    cssc::poke8(ciKbNames + 66, 3); cssc::poke8(ciKbNames + 67, 18); cssc::poke8(ciKbNames + 68, 65); cssc::poke8(ciKbNames + 69, 76); cssc::poke8(ciKbNames + 70, 84);
+    cssc::poke8(ciKbNames + 71, 2); cssc::poke8(ciKbNames + 72, 112); cssc::poke8(ciKbNames + 73, 70); cssc::poke8(ciKbNames + 74, 49);
+    cssc::poke8(ciKbNames + 75, 2); cssc::poke8(ciKbNames + 76, 113); cssc::poke8(ciKbNames + 77, 70); cssc::poke8(ciKbNames + 78, 50);
+    cssc::poke8(ciKbNames + 79, 2); cssc::poke8(ciKbNames + 80, 114); cssc::poke8(ciKbNames + 81, 70); cssc::poke8(ciKbNames + 82, 51);
+    cssc::poke8(ciKbNames + 83, 2); cssc::poke8(ciKbNames + 84, 115); cssc::poke8(ciKbNames + 85, 70); cssc::poke8(ciKbNames + 86, 52);
+    cssc::poke8(ciKbNames + 87, 2); cssc::poke8(ciKbNames + 88, 116); cssc::poke8(ciKbNames + 89, 70); cssc::poke8(ciKbNames + 90, 53);
+    cssc::poke8(ciKbNames + 91, 2); cssc::poke8(ciKbNames + 92, 117); cssc::poke8(ciKbNames + 93, 70); cssc::poke8(ciKbNames + 94, 54);
+    cssc::poke8(ciKbNames + 95, 2); cssc::poke8(ciKbNames + 96, 118); cssc::poke8(ciKbNames + 97, 70); cssc::poke8(ciKbNames + 98, 55);
+    cssc::poke8(ciKbNames + 99, 2); cssc::poke8(ciKbNames + 100, 119); cssc::poke8(ciKbNames + 101, 70); cssc::poke8(ciKbNames + 102, 56);
+    cssc::poke8(ciKbNames + 103, 2); cssc::poke8(ciKbNames + 104, 120); cssc::poke8(ciKbNames + 105, 70); cssc::poke8(ciKbNames + 106, 57);
+    cssc::poke8(ciKbNames + 107, 3); cssc::poke8(ciKbNames + 108, 121); cssc::poke8(ciKbNames + 109, 70); cssc::poke8(ciKbNames + 110, 49); cssc::poke8(ciKbNames + 111, 48);
+    cssc::poke8(ciKbNames + 112, 3); cssc::poke8(ciKbNames + 113, 122); cssc::poke8(ciKbNames + 114, 70); cssc::poke8(ciKbNames + 115, 49); cssc::poke8(ciKbNames + 116, 49);
+    cssc::poke8(ciKbNames + 117, 3); cssc::poke8(ciKbNames + 118, 123); cssc::poke8(ciKbNames + 119, 70); cssc::poke8(ciKbNames + 120, 49); cssc::poke8(ciKbNames + 121, 50);
+    cssc::poke8(ciKbNames + 122, 6); cssc::poke8(ciKbNames + 123, 13); cssc::poke8(ciKbNames + 124, 82); cssc::poke8(ciKbNames + 125, 69); cssc::poke8(ciKbNames + 126, 84); cssc::poke8(ciKbNames + 127, 85); cssc::poke8(ciKbNames + 128, 82); cssc::poke8(ciKbNames + 129, 78);
+    cssc::poke8(ciKbNames + 130, 6); cssc::poke8(ciKbNames + 131, 27); cssc::poke8(ciKbNames + 132, 69); cssc::poke8(ciKbNames + 133, 83); cssc::poke8(ciKbNames + 134, 67); cssc::poke8(ciKbNames + 135, 65); cssc::poke8(ciKbNames + 136, 80); cssc::poke8(ciKbNames + 137, 69);
+    cssc::poke8(ciKbNames + 138, 0);
+}
+
+// ciLexRaw -- the raw single-token lexer. Reads ONE token starting at the BYTE
+// cursor ciPos (skipping whitespace/comments), sets ciCur/ciTokNum/ciTokFloat/
+// ciTokOff/ciTokLen, and advances ciPos past it. Called ONLY by ciTokenize during
+// the one-time pre-pass; during parsing ciPos is a token index and this is never
+// invoked. (Formerly ciAdvance -- the byte-cursor logic is byte-for-byte unchanged.)
+#define(ciLexRaw) {
+    #req[ciSrc] ciSrc;
+    #req[ciSrcLen] ciSrcLen;
+    #req[ciPos] ciPos;
+    #req[ciCur] ciCur;
+    #req[ciTokNum] ciTokNum;
+    #req[ciTokFloat] ciTokFloat;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    ciTokFloat = 0;
+    #stack[int, 32] skipping = 1;
+    while (skipping == 1) {
+        if (ciPos >= ciSrcLen) {
+            skipping = 0;
+        }
+        if (skipping == 1) {
+            #stack[int, 64] c = cssc::peek8(ciSrc + ciPos);
+            #stack[int, 32] isws = 0;
+            if (c == 32) { isws = 1; }
+            if (c == 10) { isws = 1; }
+            if (c == 13) { isws = 1; }
+            if (c == 9) { isws = 1; }
+            if (isws == 1) {
+                ciPos = ciPos + 1;
+            }
+            if (isws == 0) {
+                #stack[int, 32] iscomment = 0;
+                if (c == 47) {
+                    if (ciPos + 1 < ciSrcLen) {
+                        #stack[int, 64] c2 = cssc::peek8(ciSrc + ciPos + 1);
+                        if (c2 == 47) {
+                            iscomment = 1;
+                        }
+                        if (c2 == 42) {
+                            iscomment = 2;
+                        }
+                        #delete[c2];
+                    }
+                }
+                if (iscomment == 1) {
+                    #stack[int, 32] cs = 1;
+                    while (cs == 1) {
+                        if (ciPos >= ciSrcLen) { cs = 0; }
+                        if (cs == 1) {
+                            #stack[int, 64] cc = cssc::peek8(ciSrc + ciPos);
+                            if (cc == 10) { cs = 0; }
+                            if (cc != 10) { ciPos = ciPos + 1; }
+                            #delete[cc];
+                        }
+                    }
+                    #delete[cs];
+                }
+                if (iscomment == 2) {
+                    ciPos = ciPos + 2;
+                    #stack[int, 32] bcs = 1;
+                    while (bcs == 1) {
+                        if (ciPos + 1 >= ciSrcLen) { bcs = 0; ciPos = ciSrcLen; }
+                        if (bcs == 1) {
+                            #stack[int, 64] bc = cssc::peek8(ciSrc + ciPos);
+                            #stack[int, 64] bc2 = cssc::peek8(ciSrc + ciPos + 1);
+                            if (bc == 42) { if (bc2 == 47) { ciPos = ciPos + 2; bcs = 0; } }
+                            if (bcs == 1) { ciPos = ciPos + 1; }
+                            #delete[bc];
+                            #delete[bc2];
+                        }
+                    }
+                    #delete[bcs];
+                }
+                if (iscomment == 0) {
+                    skipping = 0;
+                }
+                #delete[iscomment];
+            }
+            #delete[isws];
+            #delete[c];
+        }
+    }
+    #delete[skipping];
+    if (ciPos >= ciSrcLen) {
+        ciCur = 0;
+    }
+    if (ciPos < ciSrcLen) {
+        #stack[int, 64] c = cssc::peek8(ciSrc + ciPos);
+        #stack[int, 32] done = 0;
+        // NUMBER: decimal, or hex when prefixed with 0x / 0X
+        if (c >= 48) {
+            if (c <= 57) {
+                // detect a 0x / 0X hex prefix
+                #stack[int, 32] ishex = 0;
+                if (c == 48) {
+                    if (ciPos + 1 < ciSrcLen) {
+                        #stack[int, 64] cx = cssc::peek8(ciSrc + ciPos + 1);
+                        if (cx == 120) { ishex = 1; }
+                        if (cx == 88) { ishex = 1; }
+                        #delete[cx];
+                    }
+                }
+                if (ishex == 1) {
+                    // hex literal: skip '0x', accumulate base-16 digits
+                    #stack[int, 64] hexStart = ciPos;
+                    ciPos = ciPos + 2;
+                    #stack[int, 64] hv = 0;
+                    #stack[int, 32] rd = 1;
+                    while (rd == 1) {
+                        if (ciPos >= ciSrcLen) { rd = 0; }
+                        if (rd == 1) {
+                            #stack[int, 64] d = cssc::peek8(ciSrc + ciPos);
+                            #stack[int, 64] hd = 0 - 1;
+                            if (d >= 48) { if (d <= 57) { hd = d - 48; } }
+                            if (d >= 97) { if (d <= 102) { hd = d - 87; } }
+                            if (d >= 65) { if (d <= 70) { hd = d - 55; } }
+                            if (hd >= 0) {
+                                hv = hv * 16 + hd;
+                                ciPos = ciPos + 1;
+                            }
+                            if (hd < 0) { rd = 0; }
+                            #delete[hd];
+                            #delete[d];
+                        }
+                    }
+                    #delete[rd];
+                    ciTokNum = hv;
+                    ciTokOff = hexStart;
+                    ciTokLen = ciPos - hexStart;
+                    ciTokFloat = 2;
+                    ciCur = 1;
+                    done = 1;
+                    #delete[hv];
+                    #delete[hexStart];
+                }
+                if (ishex == 0) {
+                    // decimal literal: DIGIT+ ('.' DIGIT+)? -- a '.' is part of
+                    // the number ONLY when a digit follows (so `3.` = int 3 + '.',
+                    // `3.5` = float). A float token carries the f64 bit pattern in
+                    // ciTokNum with ciTokFloat=1 (parsed via cssc::strToF).
+                    #stack[int, 64] numStart = ciPos;
+                    #stack[int, 64] v = 0;
+                    #stack[int, 32] rd = 1;
+                    while (rd == 1) {
+                        if (ciPos >= ciSrcLen) { rd = 0; }
+                        if (rd == 1) {
+                            #stack[int, 64] d = cssc::peek8(ciSrc + ciPos);
+                            #stack[int, 32] dig = 0;
+                            if (d >= 48) { if (d <= 57) { dig = 1; } }
+                            if (dig == 1) {
+                                v = v * 10 + (d - 48);
+                                ciPos = ciPos + 1;
+                            }
+                            if (dig == 0) { rd = 0; }
+                            #delete[dig];
+                            #delete[d];
+                        }
+                    }
+                    #delete[rd];
+                    #stack[int, 32] isFloat = 0;
+                    if (ciPos + 1 < ciSrcLen) {
+                        if (cssc::peek8(ciSrc + ciPos) == 46) {
+                            #stack[int, 64] nd = cssc::peek8(ciSrc + ciPos + 1);
+                            if (nd >= 48) { if (nd <= 57) { isFloat = 1; } }
+                            #delete[nd];
+                        }
+                    }
+                    if (isFloat == 1) {
+                        ciPos = ciPos + 1;
+                        // Build an integer mantissa + fractional-digit count so the
+                        // literal can be produced by ONE correctly-rounded f64
+                        // division mant / 10^fdc (Clinger fast path). The native
+                        // cssc::strToF mis-rounds some literals -- e.g. "0.3" comes
+                        // out as 0.30000000000000004 (one ULP high, it scales by an
+                        // inexact 0.1) which then wrongly compares equal to 0.1+0.2.
+                        // iToF/fDiv of exactly-representable operands rounds once and
+                        // matches the reference's compile-time literal parse. Fall
+                        // back to strToF only outside the exact range (mant > 2^53 or
+                        // fdc > 15), preserving prior behavior for huge literals.
+                        #stack[int, 64] mant = v;
+                        #stack[int, 64] fdc = 0;
+                        #stack[int, 32] moflow = 0;
+                        if (v > 900719925474098) { moflow = 1; }
+                        #stack[int, 32] fd = 1;
+                        while (fd == 1) {
+                            if (ciPos >= ciSrcLen) { fd = 0; }
+                            if (fd == 1) {
+                                #stack[int, 64] d2 = cssc::peek8(ciSrc + ciPos);
+                                #stack[int, 32] isd = 0;
+                                if (d2 >= 48) { if (d2 <= 57) { isd = 1; } }
+                                if (isd == 1) {
+                                    if (mant > 900719925474098) { moflow = 1; }
+                                    if (moflow == 0) { mant = mant * 10 + (d2 - 48); fdc = fdc + 1; }
+                                    ciPos = ciPos + 1;
+                                }
+                                if (isd == 0) { fd = 0; }
+                                #delete[isd];
+                                #delete[d2];
+                            }
+                        }
+                        #delete[fd];
+                        if (fdc > 15) { moflow = 1; }
+                        if (moflow == 0) {
+                            #stack[int, 64] p10 = 1;
+                            #stack[int, 64] pi = 0;
+                            while (pi < fdc) { p10 = p10 * 10; pi = pi + 1; }
+                            #delete[pi];
+                            cssc::fDiv(cssc::iToF(mant), cssc::iToF(p10)) fv2;
+                            ciTokNum = fv2;
+                            #delete[fv2];
+                            #delete[p10];
+                        }
+                        if (moflow == 1) {
+                            cssc::strToF(ciSrc + numStart, ciPos - numStart) fb;
+                            ciTokNum = fb;
+                            #delete[fb];
+                        }
+                        ciTokFloat = 1;
+                        #delete[mant];
+                        #delete[fdc];
+                        #delete[moflow];
+                    }
+                    if (isFloat == 0) { ciTokNum = v; }
+                    ciCur = 1;
+                    done = 1;
+                    #delete[isFloat];
+                    #delete[numStart];
+                    #delete[v];
+                }
+                #delete[ishex];
+            }
+        }
+        if (done == 0) {
+            #stack[int, 32] isletter = 0;
+            if (c >= 65) { if (c <= 90) { isletter = 1; } }
+            if (c >= 97) { if (c <= 122) { isletter = 1; } }
+            if (c == 95) { isletter = 1; }
+            if (isletter == 1) {
+                #stack[int, 64] start = ciPos;
+                #stack[int, 32] rd = 1;
+                while (rd == 1) {
+                    if (ciPos >= ciSrcLen) { rd = 0; }
+                    if (rd == 1) {
+                        #stack[int, 64] d = cssc::peek8(ciSrc + ciPos);
+                        #stack[int, 32] idc = 0;
+                        if (d >= 65) { if (d <= 90) { idc = 1; } }
+                        if (d >= 97) { if (d <= 122) { idc = 1; } }
+                        if (d >= 48) { if (d <= 57) { idc = 1; } }
+                        if (d == 95) { idc = 1; }
+                        // ':' folds into the identifier ONLY as a double '::'
+                        // (namespace path: cssc::outln, Sector::member). A
+                        // single ':' ends the ident and lexes as token 31,
+                        // so labels like `public:` / `private:` work (L3).
+                        if (d == 58) {
+                            if (ciPos + 1 < ciSrcLen) {
+                                #stack[int, 64] d2 = cssc::peek8(ciSrc + ciPos + 1);
+                                if (d2 == 58) { idc = 2; }
+                                #delete[d2];
+                            }
+                        }
+                        if (idc == 1) { ciPos = ciPos + 1; }
+                        if (idc == 2) { ciPos = ciPos + 2; }
+                        if (idc == 0) { rd = 0; }
+                        #delete[idc];
+                        #delete[d];
+                    }
+                }
+                #delete[rd];
+                ciTokOff = start;
+                ciTokLen = ciPos - start;
+                ciCur = 2;
+                done = 1;
+                #delete[start];
+            }
+            #delete[isletter];
+        }
+        if (done == 0) {
+            if (c == 34) {
+                ciPos = ciPos + 1;
+                #stack[int, 64] start = ciPos;
+                #stack[int, 32] rd = 1;
+                while (rd == 1) {
+                    if (ciPos >= ciSrcLen) { rd = 0; }
+                    if (rd == 1) {
+                        #stack[int, 64] d = cssc::peek8(ciSrc + ciPos);
+                        if (d == 34) { rd = 0; }
+                        if (d != 34) { ciPos = ciPos + 1; }
+                        #delete[d];
+                    }
+                }
+                #delete[rd];
+                ciTokOff = start;
+                ciTokLen = ciPos - start;
+                if (ciPos < ciSrcLen) { ciPos = ciPos + 1; }
+                ciCur = 3;
+                done = 1;
+                #delete[start];
+            }
+        }
+        if (done == 0) {
+            if (c == 39) {
+                // single-quote literal. The reference treats single quotes as
+                // STRINGS (like "); CCOS additionally keeps the char-literal 'x'->
+                // ASCII-number form (used by the `char` type). Disambiguate by
+                // scanning to the closing quote and counting LOGICAL chars: exactly
+                // one -> NUMBER (char literal); two or more (or zero) -> STRING
+                // (raw span between the quotes, escapes stored verbatim like ").
+                #stack[int, 64] qstart = ciPos + 1;   // first content byte
+                #stack[int, 64] sp = ciPos + 1;
+                #stack[int, 64] nch = 0;
+                #stack[int, 64] first = 0;
+                #stack[int, 32] qs = 1;
+                while (qs == 1) {
+                    if (sp >= ciSrcLen) { qs = 0; }
+                    if (qs == 1) {
+                        #stack[int, 64] d = cssc::peek8(ciSrc + sp);
+                        if (d == 39) { qs = 0; }
+                        if (d != 39) {
+                            if (d == 92) {
+                                #stack[int, 64] e = 0;
+                                if (sp + 1 < ciSrcLen) { e = cssc::peek8(ciSrc + sp + 1); }
+                                #stack[int, 64] ev = e;
+                                if (e == 110) { ev = 10; }
+                                if (e == 116) { ev = 9; }
+                                if (e == 114) { ev = 13; }
+                                if (e == 48) { ev = 0; }
+                                if (e == 92) { ev = 92; }
+                                if (e == 39) { ev = 39; }
+                                if (e == 34) { ev = 34; }
+                                if (nch == 0) { first = ev; }
+                                sp = sp + 2;
+                                nch = nch + 1;
+                                #delete[ev];
+                                #delete[e];
+                            }
+                            if (d != 92) {
+                                if (nch == 0) { first = d; }
+                                sp = sp + 1;
+                                nch = nch + 1;
+                            }
+                        }
+                        #delete[d];
+                    }
+                }
+                #delete[qs];
+                // FX-SQUOTE: single-quote is ALWAYS a string (match reference);
+                // the char-literal 'x'->ASCII-number form is dropped.
+                ciTokOff = qstart;
+                ciTokLen = sp - qstart;
+                ciCur = 3;
+                ciPos = sp;
+                if (ciPos < ciSrcLen) { if (cssc::peek8(ciSrc + ciPos) == 39) { ciPos = ciPos + 1; } }
+                done = 1;
+                #delete[first];
+                #delete[nch];
+                #delete[sp];
+                #delete[qstart];
+            }
+        }
+        if (done == 0) {
+            if (c == 61) {
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 61) { ciCur = 15; ciPos = ciPos + 2; }
+                if (c2 != 61) { ciCur = 14; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 33) {
+                // '!' : '!=' comparison (16), or logical-not (27)
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 61) { ciCur = 16; ciPos = ciPos + 2; }
+                if (c2 != 61) { ciCur = 27; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 60) {
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 61) { ciCur = 19; ciPos = ciPos + 2; }
+                if (c2 != 61) { ciCur = 17; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 62) {
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 61) { ciCur = 20; ciPos = ciPos + 2; }
+                if (c2 != 61) { ciCur = 18; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 38) {
+                // '&' : '&&' logical-and (25), or single '&' copy prefix (30)
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 38) { ciCur = 25; ciPos = ciPos + 2; }
+                if (c2 != 38) { ciCur = 30; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 124) {
+                // '|' : '||' logical-or (26); single '|' is unsupported (99)
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 124) { ciCur = 26; ciPos = ciPos + 2; }
+                if (c2 != 124) { ciCur = 99; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 45) {
+                // '-' : '->' arrow member access (34, L4 objects), else minus (5)
+                #stack[int, 64] c2 = 0;
+                if (ciPos + 1 < ciSrcLen) { c2 = cssc::peek8(ciSrc + ciPos + 1); }
+                if (c2 == 62) { ciCur = 34; ciPos = ciPos + 2; }
+                if (c2 != 62) { ciCur = 5; ciPos = ciPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            #stack[int, 64] t = 99;
+            if (c == 43) { t = 4; }
+            if (c == 42) { t = 6; }
+            if (c == 47) { t = 7; }
+            if (c == 37) { t = 8; }
+            if (c == 40) { t = 9; }
+            if (c == 41) { t = 10; }
+            if (c == 123) { t = 11; }
+            if (c == 125) { t = 12; }
+            if (c == 59) { t = 13; }
+            if (c == 44) { t = 21; }
+            if (c == 35) { t = 22; }
+            if (c == 91) { t = 23; }
+            if (c == 93) { t = 24; }
+            // L3 tokens: single ':' = 31 (labels public:/private:),
+            // '?' = 32 (deferred sector marker `sector Name ?label {..}`)
+            if (c == 58) { t = 31; }
+            if (c == 63) { t = 32; }
+            // L4 token: '.' = 33 (instance access `inst.label(args)` /
+            // `inst.member`); '-'/'->' are handled in their own case above
+            if (c == 46) { t = 33; }
+            ciCur = t;
+            ciPos = ciPos + 1;
+            done = 1;
+            #delete[t];
+        }
+        #delete[done];
+        #delete[c];
+    }
+}
+
+// ciTokenize -- APPEND tokens for the byte range [ciPos, ciSrcLen) onto the stream
+// at ciTokCount. The caller sets ciPos (BYTE start) + ciSrcLen (BYTE end) and, for a
+// fresh program, resets ciTokCount to 0 first. Runs ciLexRaw in a loop; stops at EOF
+// (ciCur==0) or when the byte cursor reaches ciSrcLen. This is the whole point of the
+// rewrite: it happens ONCE per source region, not per loop iteration.
+#define(ciTokenize) {
+    #req[ciLexRaw] ciLexRaw;
+    #req[ciPos] ciPos;
+    #req[ciSrcLen] ciSrcLen;
+    #req[ciTokCount] ciTokCount;
+    #req[ciTokCap] ciTokCap;
+    #req[ciTokCode] ciTokCode;
+    #req[ciTokNumA] ciTokNumA;
+    #req[ciTokFlag] ciTokFlag;
+    #req[ciTokOffA] ciTokOffA;
+    #req[ciTokLenA] ciTokLenA;
+    #req[ciCur] ciCur;
+    #req[ciTokNum] ciTokNum;
+    #req[ciTokFloat] ciTokFloat;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ciPos >= ciSrcLen) { go = 0; }
+        if (go == 1) {
+            ciLexRaw();
+            if (ciCur == 0) { go = 0; }
+            if (go == 1) {
+                if (ciTokCount < ciTokCap) {
+                    cssc::poke8(ciTokCode + ciTokCount, ciCur);
+                    cssc::poke64(ciTokNumA + ciTokCount * 8, ciTokNum);
+                    cssc::poke8(ciTokFlag + ciTokCount, ciTokFloat);
+                    cssc::poke32(ciTokOffA + ciTokCount * 4, ciTokOff);
+                    cssc::poke32(ciTokLenA + ciTokCount * 4, ciTokLen);
+                    ciTokCount = ciTokCount + 1;
+                }
+            }
+        }
+    }
+    #delete[go];
+}
+
+// ciAdvance -- the hot-path token reader. ciPos is a TOKEN INDEX: load the current
+// token's columns into the ciCur/ciTokNum/ciTokFloat/ciTokOff/ciTokLen registers and
+// step ciPos forward. Past the end -> ciCur=0 (EOF), ciPos parked (repeat calls inert).
+// This replaces the per-call character scan; span-replay is now a pointer reset.
+#define(ciAdvance) {
+    #req[ciPos] ciPos;
+    #req[ciTokCount] ciTokCount;
+    #req[ciTokCode] ciTokCode;
+    #req[ciTokNumA] ciTokNumA;
+    #req[ciTokFlag] ciTokFlag;
+    #req[ciTokOffA] ciTokOffA;
+    #req[ciTokLenA] ciTokLenA;
+    #req[ciCur] ciCur;
+    #req[ciTokNum] ciTokNum;
+    #req[ciTokFloat] ciTokFloat;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    if (ciPos >= ciTokCount) {
+        ciCur = 0;
+    }
+    if (ciPos < ciTokCount) {
+        ciCur = cssc::peek8(ciTokCode + ciPos);
+        ciTokNum = cssc::peek64(ciTokNumA + ciPos * 8);
+        ciTokFloat = cssc::peek8(ciTokFlag + ciPos);
+        ciTokOff = cssc::peek32(ciTokOffA + ciPos * 4);
+        ciTokLen = cssc::peek32(ciTokLenA + ciPos * 4);
+        ciPos = ciPos + 1;
+    }
+}
+
+#define(ciIdentIs) {
+    #scanp(ciIdentIs, int, 0) off;
+    #scanp(ciIdentIs, int, 1) len;
+    #scanp(ciIdentIs, string, 2) lit;
+    #req[ciSrc] ciSrc;
+    #stack[int, 64] sa = 0;
+    #adress[lit] sa;
+    #stack[int, 64] hdr = cssc::peek64(sa);
+    #stack[int, 64] llen = cssc::peek32(hdr + 4);
+    #stack[int, 64] ldata = hdr + 8;
+    #stack[int, 32] ok = 1;
+    if (llen != len) { ok = 0; }
+    if (ok == 1) {
+        #stack[int, 32] j = 0;
+        while (j < len) {
+            #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+            #stack[int, 64] b = cssc::peek8(ldata + j);
+            if (a != b) { ok = 0; }
+            #delete[a];
+            #delete[b];
+            j = j + 1;
+        }
+        #delete[j];
+    }
+    #delete[ldata];
+    #delete[llen];
+    #delete[hdr];
+    #delete[sa];
+    return ok;
+}
+
+// build "Sector::name" into the scratch buffer, return the qualified length
+// (truncated at 32 = the name-column width). Callers address the scratch via
+// offset (ciQualBuf - ciSrc) so every name helper -- which reads bytes at
+// ciSrc + off -- works unchanged. INVARIANT: the scratch never survives a
+// call into ciExpr/ciStmt; qualify at the last instant before the table scan.
+#define(ciQualify) {
+    #scanp(ciQualify, int, 0) so;
+    #scanp(ciQualify, int, 1) sl;
+    #scanp(ciQualify, int, 2) no;
+    #scanp(ciQualify, int, 3) nl;
+    #req[ciSrc] ciSrc;
+    #req[ciQualBuf] ciQualBuf;
+    #stack[int, 64] q = 0;
+    #stack[int, 32] i = 0;
+    while (i < sl) {
+        if (q < 32) {
+            cssc::poke8(ciQualBuf + q, cssc::peek8(ciSrc + so + i));
+            q = q + 1;
+        }
+        i = i + 1;
+    }
+    #delete[i];
+    if (q < 32) { cssc::poke8(ciQualBuf + q, 58); q = q + 1; }
+    if (q < 32) { cssc::poke8(ciQualBuf + q, 58); q = q + 1; }
+    #stack[int, 32] j = 0;
+    while (j < nl) {
+        if (q < 32) {
+            cssc::poke8(ciQualBuf + q, cssc::peek8(ciSrc + no + j));
+            q = q + 1;
+        }
+        j = j + 1;
+    }
+    #delete[j];
+    return q;
+}
+
+// index of the first "::" inside a token, or -1 for a bare name
+#define(ciTokHasCC) {
+    #scanp(ciTokHasCC, int, 0) off;
+    #scanp(ciTokHasCC, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i + 1 < len) {
+        if (found < 0) {
+            #stack[int, 64] a = cssc::peek8(ciSrc + off + i);
+            if (a == 58) {
+                #stack[int, 64] b = cssc::peek8(ciSrc + off + i + 1);
+                if (b == 58) { found = i; }
+                #delete[b];
+            }
+            #delete[a];
+        }
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// 1 when the token's "Sector" prefix (bytes before the ccp'th char) equals
+// the CURRENT sector context -- used for the private-access exemption
+#define(ciSecPrefixIs) {
+    #scanp(ciSecPrefixIs, int, 0) off;
+    #scanp(ciSecPrefixIs, int, 1) ccp;
+    #req[ciSrc] ciSrc;
+    #req[ciCurSecOff] ciCurSecOff;
+    #req[ciCurSecLen] ciCurSecLen;
+    #stack[int, 32] same = 0;
+    if (ciCurSecLen > 0) {
+        if (ccp == ciCurSecLen) {
+            same = 1;
+            #stack[int, 32] i = 0;
+            while (i < ccp) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + i);
+                #stack[int, 64] b = cssc::peek8(ciSrc + ciCurSecOff + i);
+                if (a != b) { same = 0; }
+                #delete[a];
+                #delete[b];
+                i = i + 1;
+            }
+            #delete[i];
+        }
+    }
+    return same;
+}
+
+// sector-table lookup by NAME (source-span compare) -> row index or -1
+#define(ciSecFind) {
+    #scanp(ciSecFind, int, 0) off;
+    #scanp(ciSecFind, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciSecNameOff] ciSecNameOff;
+    #req[ciSecNameLen] ciSecNameLen;
+    #req[ciSecCount] ciSecCount;
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i < ciSecCount) {
+        #stack[int, 64] nl = cssc::peek64(ciSecNameLen + i * 8);
+        if (nl == len) {
+            #stack[int, 64] noff = cssc::peek64(ciSecNameOff + i * 8);
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(ciSrc + noff + j);
+                if (a != b) { m = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { found = i; }
+            #delete[m];
+            #delete[noff];
+        }
+        #delete[nl];
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// sector-table lookup by DEFERRED LABEL -> row index or -1 (#reserve target)
+#define(ciSecFindLab) {
+    #scanp(ciSecFindLab, int, 0) off;
+    #scanp(ciSecFindLab, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciSecLabOff] ciSecLabOff;
+    #req[ciSecLabLen] ciSecLabLen;
+    #req[ciSecDefer] ciSecDefer;
+    #req[ciSecCount] ciSecCount;
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i < ciSecCount) {
+        #stack[int, 64] dfl = cssc::peek64(ciSecDefer + i * 8);
+        if (dfl == 1) {
+            #stack[int, 64] nl = cssc::peek64(ciSecLabLen + i * 8);
+            if (nl == len) {
+                #stack[int, 64] noff = cssc::peek64(ciSecLabOff + i * 8);
+                #stack[int, 32] m = 1;
+                #stack[int, 32] j = 0;
+                while (j < len) {
+                    #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                    #stack[int, 64] b = cssc::peek8(ciSrc + noff + j);
+                    if (a != b) { m = 0; }
+                    #delete[a];
+                    #delete[b];
+                    j = j + 1;
+                }
+                #delete[j];
+                if (m == 1) { found = i; }
+                #delete[m];
+                #delete[noff];
+            }
+            #delete[nl];
+        }
+        #delete[dfl];
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// object-def lookup by name (source-span compare) -> def index or -1
+#define(ciObjFind) {
+    #scanp(ciObjFind, int, 0) off;
+    #scanp(ciObjFind, int, 1) len;
+    #req[ciSrc] ciSrc;
+    #req[ciObjNameOff] ciObjNameOff;
+    #req[ciObjNameLen] ciObjNameLen;
+    #req[ciObjCount] ciObjCount;
+    #stack[int, 64] found = 0 - 1;
+    #stack[int, 32] i = 0;
+    while (i < ciObjCount) {
+        #stack[int, 64] nl = cssc::peek64(ciObjNameLen + i * 8);
+        if (nl == len) {
+            #stack[int, 64] noff = cssc::peek64(ciObjNameOff + i * 8);
+            #stack[int, 32] m = 1;
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(ciSrc + noff + j);
+                if (a != b) { m = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            if (m == 1) { found = i; }
+            #delete[m];
+            #delete[noff];
+        }
+        #delete[nl];
+        i = i + 1;
+    }
+    #delete[i];
+    return found;
+}
+
+// 1 when the token equals the given object def's name (arrow resolution:
+// `Box->val` inside a Box label targets the CURRENT instance; any other
+// ident before `->` is a variable holding an instance)
+#define(ciObjNameIs) {
+    #scanp(ciObjNameIs, int, 0) objIdx;
+    #scanp(ciObjNameIs, int, 1) off;
+    #scanp(ciObjNameIs, int, 2) len;
+    #req[ciSrc] ciSrc;
+    #req[ciObjNameOff] ciObjNameOff;
+    #req[ciObjNameLen] ciObjNameLen;
+    #stack[int, 32] same = 0;
+    if (objIdx >= 0) {
+        #stack[int, 64] nl = cssc::peek64(ciObjNameLen + objIdx * 8);
+        if (nl == len) {
+            same = 1;
+            #stack[int, 64] noff = cssc::peek64(ciObjNameOff + objIdx * 8);
+            #stack[int, 32] j = 0;
+            while (j < len) {
+                #stack[int, 64] a = cssc::peek8(ciSrc + off + j);
+                #stack[int, 64] b = cssc::peek8(ciSrc + noff + j);
+                if (a != b) { same = 0; }
+                #delete[a];
+                #delete[b];
+                j = j + 1;
+            }
+            #delete[j];
+            #delete[noff];
+        }
+        #delete[nl];
+    }
+    return same;
+}
+
+// 1 when two ciSrc-relative token spans are byte-equal (for select label.pos()
+// span-matching: does the receiver ident equal the active select label?).
+#define(ciSpanEq) {
+    #scanp(ciSpanEq, int, 0) aoff;
+    #scanp(ciSpanEq, int, 1) alen;
+    #scanp(ciSpanEq, int, 2) boff;
+    #scanp(ciSpanEq, int, 3) blen;
+    #req[ciSrc] ciSrc;
+    #stack[int, 32] same = 0;
+    if (alen == blen) {
+        same = 1;
+        #stack[int, 32] j = 0;
+        while (j < alen) {
+            #stack[int, 64] a = cssc::peek8(ciSrc + aoff + j);
+            #stack[int, 64] b = cssc::peek8(ciSrc + boff + j);
+            if (a != b) { same = 0; }
+            #delete[a];
+            #delete[b];
+            j = j + 1;
+        }
+        #delete[j];
+    }
+    return same;
+}
+
+// null out every var-table BORROW (owns=0) of a freed value so no alias
+// dangles into freed heap -- the single use-after-free guard, called from
+// every path that actually frees an owned string (tag 1) or instance (tag 3)
+#define(ciNullBorrows) {
+    #scanp(ciNullBorrows, int, 0) ptr;
+    #scanp(ciNullBorrows, int, 1) vtype;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVOwns] ciVOwns;
+    #req[ciVCount] ciVCount;
+    #stack[int, 32] k = 0;
+    while (k < ciVCount) {
+        #stack[int, 64] bt = cssc::peek64(ciVTypes + k * 8);
+        #stack[int, 64] bo = cssc::peek64(ciVOwns + k * 8);
+        #stack[int, 64] bv = cssc::peek64(ciVVals + k * 8);
+        if (bt == vtype) {
+            if (bo == 0) {
+                if (bv == ptr) {
+                    cssc::poke64(ciVVals + k * 8, 0);
+                    cssc::poke64(ciVTypes + k * 8, 0);
+                }
+            }
+        }
+        #delete[bt];
+        #delete[bo];
+        #delete[bv];
+        k = k + 1;
+    }
+    #delete[k];
+}

@@ -1,0 +1,1267 @@
+// ===========================================================================
+//  compiler/cir.cssc  --  CSSC Intermediate Representation (CIR). Mirrors the
+//  reference native/cir/ops.py: an SSA-value + explicit stack-slot IR. Every
+//  value-producing op has a result SSA id; named variables are SLOTS. The x86
+//  backend gives every SSA id AND every slot its own rbp-relative frame cell
+//  (spill-everything) -- correctness first; register allocation is a later
+//  optimization.
+//
+//  OP STREAM (txCir* columns, one row per op):
+//    txCirOp   op kind (below)
+//    txCirRes  result SSA id (-1 = void op)
+//    txCirImm  CONST_INT value | BINOP op-code | CALL runtime sym id
+//    txCirA    operand: SSA id (values) or slot id (slot ops), -1 = none
+//    txCirB    second operand SSA/slot id, -1 = none
+//    txCirSOff/txCirSLen  CONST_STR source span into txSrc
+//
+//  OP KINDS:
+//    1 CONST_INT   Res, Imm=value
+//    2 CONST_STR   Res, SOff/SLen           (value is a pointer into str-data)
+//    3 SLOT_ALLOC  A=slot id                (reserves a variable's frame cell)
+//    4 SLOT_STORE  A=slot id, B=value SSA
+//    5 SLOT_LOAD   Res, A=slot id
+//    6 BINOP       Res, Imm=op(1+ 2- 3* 4/ 5%), A=lhs SSA, B=rhs SSA
+//    7 CALL        Imm=sym id, A=arg0 SSA, B=arg1 SSA (-1 none)   [void]
+//    8 RET
+//
+//  BINOP op-codes: 1='+' 2='-' 3='*' 4='/' 5='%'.
+// ===========================================================================
+#stack[int, 64] txCirOp = 0;
+#stack[int, 64] txCirRes = 0;
+#stack[int, 64] txCirImm = 0;
+#stack[int, 64] txCirA = 0;
+#stack[int, 64] txCirB = 0;
+#stack[int, 64] txCirSOff = 0;
+#stack[int, 64] txCirSLen = 0;
+#stack[int, 64] txCirCount = 0;
+#stack[int, 64] txCirCap = 0;
+#stack[int, 64] txSsaNext = 0;     // next SSA value id
+#stack[int, 64] txSlotNext = 0;    // next stack-slot id
+#stack[int, 64] txLabelNext = 0;   // next branch-label id
+#stack[int, 64] txValBool = 0;     // per-SSA: 1 if the value is a bool (0/1)
+
+// ---- M5: value-type tracking. Everything is an i64 in the frame; these side
+// tables say what an i64 MEANS, so `outln(x)` can pick print_int vs out_string
+// and `a + b` can pick add vs string_concat. Per-SSA and per-slot tables are
+// RESET per function (ids repeat across functions); per-global and per-function
+// return kinds are module-wide.
+#stack[int, 64] txValStr = 0;      // per-SSA: 1 if the value is a heap string ptr
+// per-SSA: 1 if this value is an OWNED string reference (refcount already +1 for
+// us: string_lit / string_concat / a string-returning call). Ownership is handed
+// over by a slot store, a global store or a `return`; whatever is still owned at
+// the end of a statement is a temporary and gets released there.
+#stack[int, 64] txValOwned = 0;
+
+// M6: the same shape for f64. A float lives in its i64 cell as its BIT PATTERN;
+// these tables say which cells to treat as doubles (SSE ops + conversions).
+#stack[int, 64] txValFloat = 0;    // per-SSA
+#stack[int, 64] txSlotFloat = 0;   // per-slot
+#stack[int, 64] txSlotBool = 0;    // per-slot (prints true/false)
+#stack[int, 64] txSlotAuto = 0;    // per-slot: declared `auto` (accepts a float reassign)
+#stack[int, 64] txGlobFloat = 0;   // per-global
+#stack[int, 64] txFuncRetFloat = 0;
+#stack[int, 64] txFuncRetBool = 0;
+
+// M7: containers. A vector value is a heap pointer to the runtime's cssc_vec;
+// the ELEMENTS are raw 64-bit cells whose meaning the compiler tracks.
+#stack[int, 64] txValVec = 0;      // per-SSA
+#stack[int, 64] txSlotVec = 0;     // per-slot
+// element kind carried alongside the container (0=int 1=string 2=float), so
+// `v.at(i)` can type its result -- a string element must print as text, not as
+// the raw pointer the runtime hands back.
+#stack[int, 64] txValElem = 0;     // per-SSA
+#stack[int, 64] txSlotElem = 0;    // per-slot
+// maps are a distinct container: `at`/`size` dispatch to map_get/map_size
+#stack[int, 64] txValMap = 0;      // per-SSA
+#stack[int, 64] txSlotMap = 0;     // per-slot
+// `bind<K,V>` is a FLAT value list stored like a vector: at(i)/[i] index the
+// flat cells, but size() reports the number of PAIRS (len/2).
+#stack[int, 64] txValBind = 0;     // per-SSA
+#stack[int, 64] txSlotBind = 0;    // per-slot
+// per-SSA NULLABLE companion: 0 = the value is always live; a positive id names a
+// SECOND SSA holding the runtime alive bit (1=present, 0=null). A nullable RHS
+// (e.g. `pk::peek(v,i,a)` out of bounds) carries this so the assignment can store
+// the alive bit into the target slot's alive cell -> a later read prints `0x0`.
+#stack[int, 64] txValAlive = 0;    // per-SSA: companion alive-SSA id (0 = always live)
+#stack[int, 64] txSlotStr = 0;     // per-slot: 1 if the slot holds a heap string
+#stack[int, 64] txGlobStr = 0;     // per-global: 1 if the global holds a string
+#stack[int, 64] txFuncRetStr = 0;  // per-function: 1 if it returns a string
+
+// ---- M4: function table (SoA). One row per emitted function; index 0 is the
+// implicit cssc_user_main (name length 0 so it never resolves as a call target).
+// SsaCount/SlotCount are the per-function frame sizes (counters are RESET to 0
+// at each function's start and captured at its end); EntryOff is filled by the
+// x86 backend. ----
+#stack[int, 64] txFuncNameOff = 0;
+#stack[int, 64] txFuncNameLen = 0;
+#stack[int, 64] txFuncAstNode = 0;   // the FUNC_DEF AST node (0 = main)
+#stack[int, 64] txFuncCirStart = 0;  // [start,end) CIR op range
+#stack[int, 64] txFuncCirEnd = 0;
+#stack[int, 64] txFuncSsaCount = 0;  // per-function SSA cell count (frame sizing)
+#stack[int, 64] txFuncSlotCount = 0; // per-function slot count
+#stack[int, 64] txFuncArity = 0;     // declared parameter count (#scanp max idx+1)
+// M7c/R3 "caller wins": 1 = this parameter is passed BY ADDRESS because the
+// callee assigns or deletes it, so the change must reach the caller's variable
+// (docs/cssc-ownership.md section 3). Flat table, 8 slots per function --
+// indexed fi * 8 + paramIdx. Only ever read for paramIdx < arity <= 6.
+#stack[int, 64] txFuncParamByRef = 0;
+#stack[int, 64] txFuncEntryOff = 0;  // code offset of entry (backend fills)
+#stack[int, 64] txFuncCount = 0;
+#stack[int, 64] txFuncCap = 0;
+
+// ---- M4: call argument side-table. A CALL_USER op references a contiguous
+// [argStart, argStart+argCount) slice of arg SSA ids here (op columns hold only
+// two operands, so >2 args live here). ----
+#stack[int, 64] txCallArg = 0;
+#stack[int, 64] txCallArgCount = 0;
+#stack[int, 64] txCallArgCap = 0;
+
+// ---- M4b: module globals. A top-level `#stack` slot that some function body
+// `#req`s is PROMOTED to a module global: it gets its own 8-byte cell in the
+// data area after the code, addressed rip-relative. `#req[g] alias` then simply
+// binds `alias` to the same global index, so reads AND writes go through the one
+// cell -- that IS the reference's ref-aliasing/write-back semantics. ----
+#stack[int, 64] txGlobNameOff = 0;
+#stack[int, 64] txGlobNameLen = 0;
+#stack[int, 64] txGlobCount = 0;
+#stack[int, 64] txGlobCap = 0;
+
+#stack[int, 64] txCirInit;
+#define(txCirInit) {
+    #req[txCirOp] txCirOp;
+    #req[txCirRes] txCirRes;
+    #req[txCirImm] txCirImm;
+    #req[txCirA] txCirA;
+    #req[txCirB] txCirB;
+    #req[txCirSOff] txCirSOff;
+    #req[txCirSLen] txCirSLen;
+    #req[txCirCount] txCirCount;
+    #req[txCirCap] txCirCap;
+    #req[txSsaNext] txSsaNext;
+    #req[txSlotNext] txSlotNext;
+    #req[txLabelNext] txLabelNext;
+    #req[txValBool] txValBool;
+    #req[txValStr] txValStr;
+    #req[txValOwned] txValOwned;
+    #req[txSlotStr] txSlotStr;
+    #req[txGlobStr] txGlobStr;
+    #req[txFuncRetStr] txFuncRetStr;
+    #req[txValFloat] txValFloat;
+    #req[txSlotFloat] txSlotFloat;
+    #req[txSlotBool] txSlotBool;
+    #req[txSlotAuto] txSlotAuto;
+    #req[txGlobFloat] txGlobFloat;
+    #req[txFuncRetFloat] txFuncRetFloat;
+    #req[txFuncRetBool] txFuncRetBool;
+    #req[txValVec] txValVec;
+    #req[txSlotVec] txSlotVec;
+    #req[txValElem] txValElem;
+    #req[txSlotElem] txSlotElem;
+    #req[txValMap] txValMap;
+    #req[txSlotMap] txSlotMap;
+    #req[txValBind] txValBind;
+    #req[txSlotBind] txSlotBind;
+    #req[txValAlive] txValAlive;
+    #req[txFuncNameOff] txFuncNameOff;
+    #req[txFuncNameLen] txFuncNameLen;
+    #req[txFuncAstNode] txFuncAstNode;
+    #req[txFuncCirStart] txFuncCirStart;
+    #req[txFuncCirEnd] txFuncCirEnd;
+    #req[txFuncSsaCount] txFuncSsaCount;
+    #req[txFuncSlotCount] txFuncSlotCount;
+    #req[txFuncArity] txFuncArity;
+    #req[txFuncParamByRef] txFuncParamByRef;
+    #req[txFuncEntryOff] txFuncEntryOff;
+    #req[txFuncCount] txFuncCount;
+    #req[txFuncCap] txFuncCap;
+    #req[txCallArg] txCallArg;
+    #req[txCallArgCount] txCallArgCount;
+    #req[txCallArgCap] txCallArgCap;
+    #req[txGlobNameOff] txGlobNameOff;
+    #req[txGlobNameLen] txGlobNameLen;
+    #req[txGlobCount] txGlobCount;
+    #req[txGlobCap] txGlobCap;
+    // 22 parallel columns * 8 B each, so this cap dominates the compiler's memory
+    // footprint (131072 was 23 MiB -- on CCOS that plus the rest overflowed the
+    // object heap and alloc returned 0 -> a null write). 65536 is still ~10x what
+    // a 1000-line program needs, and halves both the RAM and the per-compile
+    // memfill cost (which is what makes an on-metal `build` feel slow).
+    txCirCap = 65536;
+    txCirOp = cssc::alloc(txCirCap * 8);
+    txCirRes = cssc::alloc(txCirCap * 8);
+    txCirImm = cssc::alloc(txCirCap * 8);
+    txCirA = cssc::alloc(txCirCap * 8);
+    txCirB = cssc::alloc(txCirCap * 8);
+    txCirSOff = cssc::alloc(txCirCap * 8);
+    txCirSLen = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txCirOp, 0, txCirCap * 2);
+    cssc::memfill32(txCirRes, 0, txCirCap * 2);
+    cssc::memfill32(txCirImm, 0, txCirCap * 2);
+    cssc::memfill32(txCirA, 0, txCirCap * 2);
+    cssc::memfill32(txCirB, 0, txCirCap * 2);
+    cssc::memfill32(txCirSOff, 0, txCirCap * 2);
+    cssc::memfill32(txCirSLen, 0, txCirCap * 2);
+    txCirCount = 0;
+    txSsaNext = 0;
+    txSlotNext = 0;
+    txLabelNext = 0;
+    txValBool = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValBool, 0, txCirCap * 2);
+    txValStr = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValStr, 0, txCirCap * 2);
+    txValOwned = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValOwned, 0, txCirCap * 2);
+    txValFloat = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValFloat, 0, txCirCap * 2);
+    txSlotFloat = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotFloat, 0, txCirCap * 2);
+    txSlotBool = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotBool, 0, txCirCap * 2);
+    txSlotAuto = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotAuto, 0, txCirCap * 2);
+    txValVec = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValVec, 0, txCirCap * 2);
+    txSlotVec = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotVec, 0, txCirCap * 2);
+    txValElem = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValElem, 0, txCirCap * 2);
+    txSlotElem = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotElem, 0, txCirCap * 2);
+    txValMap = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValMap, 0, txCirCap * 2);
+    txSlotMap = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotMap, 0, txCirCap * 2);
+    txValBind = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValBind, 0, txCirCap * 2);
+    txSlotBind = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotBind, 0, txCirCap * 2);
+    txValAlive = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txValAlive, 0, txCirCap * 2);
+    txSlotStr = cssc::alloc(txCirCap * 8);
+    cssc::memfill32(txSlotStr, 0, txCirCap * 2);
+    // M4: function table + call-arg side-table
+    txFuncCap = 16384;
+    txFuncNameOff = cssc::alloc(txFuncCap * 8);
+    txFuncNameLen = cssc::alloc(txFuncCap * 8);
+    txFuncAstNode = cssc::alloc(txFuncCap * 8);
+    txFuncCirStart = cssc::alloc(txFuncCap * 8);
+    txFuncCirEnd = cssc::alloc(txFuncCap * 8);
+    txFuncSsaCount = cssc::alloc(txFuncCap * 8);
+    txFuncSlotCount = cssc::alloc(txFuncCap * 8);
+    txFuncArity = cssc::alloc(txFuncCap * 8);
+    txFuncParamByRef = cssc::alloc(txFuncCap * 64);      // 8 params/function
+    cssc::memfill32(txFuncParamByRef, 0, txFuncCap * 16);
+    txFuncEntryOff = cssc::alloc(txFuncCap * 8);
+    txFuncCount = 0;
+    txCallArgCap = 131072;
+    txCallArg = cssc::alloc(txCallArgCap * 8);
+    txCallArgCount = 0;
+    txGlobCap = 16384;
+    txGlobNameOff = cssc::alloc(txGlobCap * 8);
+    txGlobNameLen = cssc::alloc(txGlobCap * 8);
+    txGlobStr = cssc::alloc(txGlobCap * 8);
+    cssc::memfill32(txGlobStr, 0, txGlobCap * 2);
+    txGlobFloat = cssc::alloc(txGlobCap * 8);
+    cssc::memfill32(txGlobFloat, 0, txGlobCap * 2);
+    txGlobCount = 0;
+    txFuncRetStr = cssc::alloc(txFuncCap * 8);
+    cssc::memfill32(txFuncRetStr, 0, txFuncCap * 2);
+    txFuncRetFloat = cssc::alloc(txFuncCap * 8);
+    cssc::memfill32(txFuncRetFloat, 0, txFuncCap * 2);
+    txFuncRetBool = cssc::alloc(txFuncCap * 8);
+    cssc::memfill32(txFuncRetBool, 0, txFuncCap * 2);
+}
+
+// ---- M6: float-ness accessors (mirror the string ones) ----
+#stack[int, 64] txSetFloat;
+#define(txSetFloat) {
+    #scanp(txSetFloat, int, 0) ssa;
+    #req[txValFloat] txValFloat;
+    cssc::poke64(txValFloat + ssa * 8, 1);
+}
+#stack[int, 64] txIsFloat;
+#define(txIsFloat) {
+    #scanp(txIsFloat, int, 0) ssa;
+    #req[txValFloat] txValFloat;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValFloat + ssa * 8); }
+    return r;
+}
+#stack[int, 64] txSlotSetFloat;
+#define(txSlotSetFloat) {
+    #scanp(txSlotSetFloat, int, 0) slot;
+    #scanp(txSlotSetFloat, int, 1) v;
+    #req[txSlotFloat] txSlotFloat;
+    cssc::poke64(txSlotFloat + slot * 8, v);
+}
+#stack[int, 64] txSlotIsFloat;
+#define(txSlotIsFloat) {
+    #scanp(txSlotIsFloat, int, 0) slot;
+    #req[txSlotFloat] txSlotFloat;
+    #stack[int, 64] r = cssc::peek64(txSlotFloat + slot * 8);
+    return r;
+}
+// per-slot `auto` flag: an auto slot follows the value's kind, so reassigning a
+// float to it is legal (unlike a strict int slot, which traps -- S: strict typing).
+#stack[int, 64] txSlotSetAuto;
+#define(txSlotSetAuto) {
+    #scanp(txSlotSetAuto, int, 0) slot;
+    #scanp(txSlotSetAuto, int, 1) v;
+    #req[txSlotAuto] txSlotAuto;
+    cssc::poke64(txSlotAuto + slot * 8, v);
+}
+#stack[int, 64] txSlotIsAuto;
+#define(txSlotIsAuto) {
+    #scanp(txSlotIsAuto, int, 0) slot;
+    #req[txSlotAuto] txSlotAuto;
+    #stack[int, 64] r = cssc::peek64(txSlotAuto + slot * 8);
+    return r;
+}
+// per-slot bool flag: a slot holding a bool prints true/false, not 1/0.
+#stack[int, 64] txSlotSetBool;
+#define(txSlotSetBool) {
+    #scanp(txSlotSetBool, int, 0) slot;
+    #scanp(txSlotSetBool, int, 1) v;
+    #req[txSlotBool] txSlotBool;
+    cssc::poke64(txSlotBool + slot * 8, v);
+}
+#stack[int, 64] txSlotIsBool;
+#define(txSlotIsBool) {
+    #scanp(txSlotIsBool, int, 0) slot;
+    #req[txSlotBool] txSlotBool;
+    #stack[int, 64] r = cssc::peek64(txSlotBool + slot * 8);
+    return r;
+}
+#stack[int, 64] txGlobSetFloat;
+#define(txGlobSetFloat) {
+    #scanp(txGlobSetFloat, int, 0) idx;
+    #scanp(txGlobSetFloat, int, 1) v;
+    #req[txGlobFloat] txGlobFloat;
+    cssc::poke64(txGlobFloat + idx * 8, v);
+}
+#stack[int, 64] txGlobIsFloat;
+#define(txGlobIsFloat) {
+    #scanp(txGlobIsFloat, int, 0) idx;
+    #req[txGlobFloat] txGlobFloat;
+    #stack[int, 64] r = cssc::peek64(txGlobFloat + idx * 8);
+    return r;
+}
+
+// FBINOP (op 15): f64 arithmetic/compare in SSE. Imm = op-code (same table as
+// BINOP: 1+ 2- 3* 4/ 6< 7<= 8> 9>= 10== 11!=), A/B = operand SSAs.
+#stack[int, 64] txCirFBinOp;
+#define(txCirFBinOp) {
+    #scanp(txCirFBinOp, int, 0) opc;
+    #scanp(txCirFBinOp, int, 1) lhs;
+    #scanp(txCirFBinOp, int, 2) rhs;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    #req[txSetBool] txSetBool;
+    #req[txSetFloat] txSetFloat;
+    txNewSsa() id;
+    txCirEmit(15, id, opc, lhs, rhs, 0, 0) r;
+    if (opc >= 6) { txSetBool(id); } else { txSetFloat(id); }
+    #delete[r];
+    return id;
+}
+
+// CALL3 (op 18): runtime call with THREE integer args (rdi/rsi/rdx) -- the
+// two-operand CALL cannot express e.g. cssc_map_set(m, key, value). The third
+// arg rides in the call-arg side-table so the op columns stay as they are.
+#stack[int, 64] txCirCall3;
+#define(txCirCall3) {
+    #scanp(txCirCall3, int, 0) sym;
+    #scanp(txCirCall3, int, 1) a;
+    #scanp(txCirCall3, int, 2) b;
+    #scanp(txCirCall3, int, 3) c;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(18, 0 - 1, sym, a, b, c, 0) r;
+    #delete[r];
+}
+
+// CALL3 with a RESULT: a 3-arg runtime call (rdi/rsi/rdx) whose rax return is
+// spilled into a fresh SSA. Backs cssc.peek's find_index/contains/count (vec, val,
+// elemKind) -> int. res=-1 in plain txCirCall3 skips the capture (backward-compat).
+#stack[int, 64] txCirCall3R;
+#define(txCirCall3R) {
+    #scanp(txCirCall3R, int, 0) sym;
+    #scanp(txCirCall3R, int, 1) a;
+    #scanp(txCirCall3R, int, 2) b;
+    #scanp(txCirCall3R, int, 3) c;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(18, id, sym, a, b, c, 0) r;
+    #delete[r];
+    return id;
+}
+
+// FCALL (op 17): runtime call whose single argument is a DOUBLE. SysV passes
+// floating-point args in XMM0..7, not RDI -- print_float/out_float would read
+// garbage if marshalled like an integer call.
+#stack[int, 64] txCirFCall;
+#define(txCirFCall) {
+    #scanp(txCirFCall, int, 0) sym;
+    #scanp(txCirFCall, int, 1) a;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(17, 0 - 1, sym, a, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+
+// ITOF (op 16): widen an integer SSA to f64 (cvtsi2sd) for mixed arithmetic.
+#stack[int, 64] txCirIntToFloat;
+#define(txCirIntToFloat) {
+    #scanp(txCirIntToFloat, int, 0) v;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    #req[txSetFloat] txSetFloat;
+    txNewSsa() id;
+    txCirEmit(16, id, 0, v, 0 - 1, 0, 0) r;
+    txSetFloat(id);
+    #delete[r];
+    return id;
+}
+
+// FTOI (op 26): TRUNCATE an f64 SSA to int (cvttsd2si). `/` is float division in
+// CSSC, so `#stack[int] q = 100/7;` stores the truncated 14 -- the int-declared
+// slot narrows the f64 result here. The produced SSA is a plain int (no SetFloat).
+#stack[int, 64] txCirFloatToInt;
+#define(txCirFloatToInt) {
+    #scanp(txCirFloatToInt, int, 0) v;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(26, id, 0, v, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// ---- M5: string-ness accessors (see the tables' comment above) ----
+#stack[int, 64] txSetStr;
+#define(txSetStr) {
+    #scanp(txSetStr, int, 0) ssa;
+    #req[txValStr] txValStr;
+    cssc::poke64(txValStr + ssa * 8, 1);
+}
+#stack[int, 64] txIsStr;
+#define(txIsStr) {
+    #scanp(txIsStr, int, 0) ssa;
+    #req[txValStr] txValStr;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValStr + ssa * 8); }
+    return r;
+}
+// NULLABLE companion: bind an alive-bit SSA to a value SSA (0 = always live), and
+// query it. Set by nullable producers (peek), consumed by assignment + print.
+#stack[int, 64] txSetAliveSsa;
+#define(txSetAliveSsa) {
+    #scanp(txSetAliveSsa, int, 0) ssa;
+    #scanp(txSetAliveSsa, int, 1) av;
+    #req[txValAlive] txValAlive;
+    if (ssa >= 0) { cssc::poke64(txValAlive + ssa * 8, av); }
+}
+#stack[int, 64] txGetAliveSsa;
+#define(txGetAliveSsa) {
+    #scanp(txGetAliveSsa, int, 0) ssa;
+    #req[txValAlive] txValAlive;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValAlive + ssa * 8); }
+    return r;
+}
+// mark / query / clear "this SSA is an owned string reference"
+#stack[int, 64] txSetOwned;
+#define(txSetOwned) {
+    #scanp(txSetOwned, int, 0) ssa;
+    #req[txValOwned] txValOwned;
+    cssc::poke64(txValOwned + ssa * 8, 1);
+}
+#stack[int, 64] txClearOwned;
+#define(txClearOwned) {
+    #scanp(txClearOwned, int, 0) ssa;
+    #req[txValOwned] txValOwned;
+    if (ssa >= 0) { cssc::poke64(txValOwned + ssa * 8, 0); }
+}
+#stack[int, 64] txIsOwned;
+#define(txIsOwned) {
+    #scanp(txIsOwned, int, 0) ssa;
+    #req[txValOwned] txValOwned;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValOwned + ssa * 8); }
+    return r;
+}
+
+#stack[int, 64] txSlotSetStr;
+#define(txSlotSetStr) {
+    #scanp(txSlotSetStr, int, 0) slot;
+    #scanp(txSlotSetStr, int, 1) v;
+    #req[txSlotStr] txSlotStr;
+    cssc::poke64(txSlotStr + slot * 8, v);
+}
+#stack[int, 64] txSlotIsStr;
+#define(txSlotIsStr) {
+    #scanp(txSlotIsStr, int, 0) slot;
+    #req[txSlotStr] txSlotStr;
+    #stack[int, 64] r = cssc::peek64(txSlotStr + slot * 8);
+    return r;
+}
+#stack[int, 64] txGlobSetStr;
+#define(txGlobSetStr) {
+    #scanp(txGlobSetStr, int, 0) idx;
+    #scanp(txGlobSetStr, int, 1) v;
+    #req[txGlobStr] txGlobStr;
+    cssc::poke64(txGlobStr + idx * 8, v);
+}
+#stack[int, 64] txGlobIsStr;
+#define(txGlobIsStr) {
+    #scanp(txGlobIsStr, int, 0) idx;
+    #req[txGlobStr] txGlobStr;
+    #stack[int, 64] r = cssc::peek64(txGlobStr + idx * 8);
+    return r;
+}
+#stack[int, 64] txFuncArityOf;
+#define(txFuncArityOf) {
+    #scanp(txFuncArityOf, int, 0) fi;
+    #req[txFuncArity] txFuncArity;
+    #stack[int, 64] r = cssc::peek64(txFuncArity + fi * 8);
+    return r;
+}
+
+#stack[int, 64] txFuncSetRetStr;
+#define(txFuncSetRetStr) {
+    #scanp(txFuncSetRetStr, int, 0) fi;
+    #req[txFuncRetStr] txFuncRetStr;
+    cssc::poke64(txFuncRetStr + fi * 8, 1);
+}
+#stack[int, 64] txFuncIsRetStr;
+#define(txFuncIsRetStr) {
+    #scanp(txFuncIsRetStr, int, 0) fi;
+    #req[txFuncRetStr] txFuncRetStr;
+    #stack[int, 64] r = cssc::peek64(txFuncRetStr + fi * 8);
+    return r;
+}
+// float / bool return kinds -- so a captured `f() r;` types `r` the way the
+// callee's `return`/`mirror` value is typed (float prints 3.14, bool true/false).
+#stack[int, 64] txFuncSetRetFloat;
+#define(txFuncSetRetFloat) {
+    #scanp(txFuncSetRetFloat, int, 0) fi;
+    #req[txFuncRetFloat] txFuncRetFloat;
+    cssc::poke64(txFuncRetFloat + fi * 8, 1);
+}
+#stack[int, 64] txFuncIsRetFloat;
+#define(txFuncIsRetFloat) {
+    #scanp(txFuncIsRetFloat, int, 0) fi;
+    #req[txFuncRetFloat] txFuncRetFloat;
+    #stack[int, 64] r = cssc::peek64(txFuncRetFloat + fi * 8);
+    return r;
+}
+#stack[int, 64] txFuncSetRetBool;
+#define(txFuncSetRetBool) {
+    #scanp(txFuncSetRetBool, int, 0) fi;
+    #req[txFuncRetBool] txFuncRetBool;
+    cssc::poke64(txFuncRetBool + fi * 8, 1);
+}
+#stack[int, 64] txFuncIsRetBool;
+#define(txFuncIsRetBool) {
+    #scanp(txFuncIsRetBool, int, 0) fi;
+    #req[txFuncRetBool] txFuncRetBool;
+    #stack[int, 64] r = cssc::peek64(txFuncRetBool + fi * 8);
+    return r;
+}
+
+// register a module global (name span into txSrc), return its index.
+#stack[int, 64] txGlobAdd;
+#define(txGlobAdd) {
+    #scanp(txGlobAdd, int, 0) nameOff;
+    #scanp(txGlobAdd, int, 1) nameLen;
+    #req[txGlobNameOff] txGlobNameOff;
+    #req[txGlobNameLen] txGlobNameLen;
+    #req[txGlobCount] txGlobCount;
+    #stack[int, 64] i = txGlobCount;
+    txGlobCount = txGlobCount + 1;
+    cssc::poke64(txGlobNameOff + i * 8, nameOff);
+    cssc::poke64(txGlobNameLen + i * 8, nameLen);
+    return i;
+}
+
+// allocate an ANONYMOUS global cell (not name-registered, so txGlobFind never
+// resolves to it). Object members use this: they are addressed only through the
+// object member table, keyed by (objectId, memberText), never by bare name.
+#stack[int, 64] txGlobAlloc;
+#define(txGlobAlloc) {
+    #req[txGlobNameOff] txGlobNameOff;
+    #req[txGlobNameLen] txGlobNameLen;
+    #req[txGlobCount] txGlobCount;
+    #stack[int, 64] i = txGlobCount;
+    txGlobCount = txGlobCount + 1;
+    cssc::poke64(txGlobNameOff + i * 8, 0);
+    cssc::poke64(txGlobNameLen + i * 8, 0);
+    return i;
+}
+
+// GLOBAL_LOAD (op 13): Res <- global[idx]
+#stack[int, 64] txCirGlobLoad;
+#define(txCirGlobLoad) {
+    #scanp(txCirGlobLoad, int, 0) idx;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(13, id, idx, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// GLOBAL_STORE (op 14): global[idx] <- value SSA
+#stack[int, 64] txCirGlobStore;
+#define(txCirGlobStore) {
+    #scanp(txCirGlobStore, int, 0) idx;
+    #scanp(txCirGlobStore, int, 1) val;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(14, 0 - 1, idx, val, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+
+// ---- M4: function-table builders ----
+// register a function (name span into txSrc, its FUNC_DEF ast node id or 0 for
+// main), return its index. Name-length 0 (main) never matches a call lookup.
+#stack[int, 64] txFuncAdd;
+#define(txFuncAdd) {
+    #scanp(txFuncAdd, int, 0) nameOff;
+    #scanp(txFuncAdd, int, 1) nameLen;
+    #scanp(txFuncAdd, int, 2) astNode;
+    #req[txFuncNameOff] txFuncNameOff;
+    #req[txFuncNameLen] txFuncNameLen;
+    #req[txFuncAstNode] txFuncAstNode;
+    #req[txFuncCirStart] txFuncCirStart;
+    #req[txFuncCirEnd] txFuncCirEnd;
+    #req[txFuncSsaCount] txFuncSsaCount;
+    #req[txFuncSlotCount] txFuncSlotCount;
+    #req[txFuncArity] txFuncArity;
+    #req[txFuncEntryOff] txFuncEntryOff;
+    #req[txFuncCount] txFuncCount;
+    #stack[int, 64] i = txFuncCount;
+    txFuncCount = txFuncCount + 1;
+    #stack[int, 64] o = i * 8;
+    cssc::poke64(txFuncNameOff + o, nameOff);
+    cssc::poke64(txFuncNameLen + o, nameLen);
+    cssc::poke64(txFuncAstNode + o, astNode);
+    cssc::poke64(txFuncCirStart + o, 0);
+    cssc::poke64(txFuncCirEnd + o, 0);
+    cssc::poke64(txFuncSsaCount + o, 0);
+    cssc::poke64(txFuncSlotCount + o, 0);
+    cssc::poke64(txFuncArity + o, 0);
+    cssc::poke64(txFuncEntryOff + o, 0);
+    #delete[o];
+    return i;
+}
+
+// begin lowering function `i`: record its CIR start; RESET the SSA + slot
+// counters to 0 (per-function local id spaces). Labels stay global. Also clear
+// txValBool: SSA ids reset per function, so a bool flag from an earlier function
+// must not be read for the same (reused) SSA id here.
+#stack[int, 64] txFuncBegin;
+#define(txFuncBegin) {
+    #scanp(txFuncBegin, int, 0) i;
+    #req[txFuncCirStart] txFuncCirStart;
+    #req[txCirCount] txCirCount;
+    #req[txSsaNext] txSsaNext;
+    #req[txSlotNext] txSlotNext;
+    #req[txValBool] txValBool;
+    #req[txValStr] txValStr;
+    #req[txValOwned] txValOwned;
+    #req[txSlotStr] txSlotStr;
+    #req[txValFloat] txValFloat;
+    #req[txSlotFloat] txSlotFloat;
+    #req[txValVec] txValVec;
+    #req[txSlotVec] txSlotVec;
+    #req[txValElem] txValElem;
+    #req[txSlotElem] txSlotElem;
+    #req[txValMap] txValMap;
+    #req[txSlotMap] txSlotMap;
+    #req[txValBind] txValBind;
+    #req[txSlotBind] txSlotBind;
+    #req[txValAlive] txValAlive;
+    #req[txCirCap] txCirCap;
+    cssc::poke64(txFuncCirStart + i * 8, txCirCount);
+    txSsaNext = 0;
+    txSlotNext = 0;
+    cssc::memfill32(txValBool, 0, txCirCap * 2);
+    cssc::memfill32(txValStr, 0, txCirCap * 2);
+    cssc::memfill32(txValOwned, 0, txCirCap * 2);
+    cssc::memfill32(txSlotStr, 0, txCirCap * 2);
+    cssc::memfill32(txValFloat, 0, txCirCap * 2);
+    cssc::memfill32(txSlotFloat, 0, txCirCap * 2);
+    cssc::memfill32(txValVec, 0, txCirCap * 2);
+    cssc::memfill32(txSlotVec, 0, txCirCap * 2);
+    cssc::memfill32(txValElem, 0, txCirCap * 2);
+    cssc::memfill32(txSlotElem, 0, txCirCap * 2);
+    cssc::memfill32(txValMap, 0, txCirCap * 2);
+    cssc::memfill32(txSlotMap, 0, txCirCap * 2);
+    cssc::memfill32(txValBind, 0, txCirCap * 2);
+    cssc::memfill32(txSlotBind, 0, txCirCap * 2);
+    cssc::memfill32(txValAlive, 0, txCirCap * 2);
+}
+
+// ---- M7: bind-ness ----
+#stack[int, 64] txSetBind;
+#define(txSetBind) {
+    #scanp(txSetBind, int, 0) ssa;
+    #req[txValBind] txValBind;
+    cssc::poke64(txValBind + ssa * 8, 1);
+}
+#stack[int, 64] txIsBind;
+#define(txIsBind) {
+    #scanp(txIsBind, int, 0) ssa;
+    #req[txValBind] txValBind;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValBind + ssa * 8); }
+    return r;
+}
+#stack[int, 64] txSlotSetBind;
+#define(txSlotSetBind) {
+    #scanp(txSlotSetBind, int, 0) slot;
+    #scanp(txSlotSetBind, int, 1) v;
+    #req[txSlotBind] txSlotBind;
+    cssc::poke64(txSlotBind + slot * 8, v);
+}
+#stack[int, 64] txSlotIsBind;
+#define(txSlotIsBind) {
+    #scanp(txSlotIsBind, int, 0) slot;
+    #req[txSlotBind] txSlotBind;
+    #stack[int, 64] r = cssc::peek64(txSlotBind + slot * 8);
+    return r;
+}
+
+// ---- M7: map-ness ----
+#stack[int, 64] txSetMap;
+#define(txSetMap) {
+    #scanp(txSetMap, int, 0) ssa;
+    #req[txValMap] txValMap;
+    cssc::poke64(txValMap + ssa * 8, 1);
+}
+#stack[int, 64] txIsMap;
+#define(txIsMap) {
+    #scanp(txIsMap, int, 0) ssa;
+    #req[txValMap] txValMap;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValMap + ssa * 8); }
+    return r;
+}
+#stack[int, 64] txSlotSetMap;
+#define(txSlotSetMap) {
+    #scanp(txSlotSetMap, int, 0) slot;
+    #scanp(txSlotSetMap, int, 1) v;
+    #req[txSlotMap] txSlotMap;
+    cssc::poke64(txSlotMap + slot * 8, v);
+}
+#stack[int, 64] txSlotIsMap;
+#define(txSlotIsMap) {
+    #scanp(txSlotIsMap, int, 0) slot;
+    #req[txSlotMap] txSlotMap;
+    #stack[int, 64] r = cssc::peek64(txSlotMap + slot * 8);
+    return r;
+}
+
+// ---- M7: container ELEMENT kind (0=int 1=string 2=float) ----
+#stack[int, 64] txSetElem;
+#define(txSetElem) {
+    #scanp(txSetElem, int, 0) ssa;
+    #scanp(txSetElem, int, 1) k;
+    #req[txValElem] txValElem;
+    cssc::poke64(txValElem + ssa * 8, k);
+}
+#stack[int, 64] txGetElem;
+#define(txGetElem) {
+    #scanp(txGetElem, int, 0) ssa;
+    #req[txValElem] txValElem;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValElem + ssa * 8); }
+    return r;
+}
+#stack[int, 64] txSlotSetElem;
+#define(txSlotSetElem) {
+    #scanp(txSlotSetElem, int, 0) slot;
+    #scanp(txSlotSetElem, int, 1) k;
+    #req[txSlotElem] txSlotElem;
+    cssc::poke64(txSlotElem + slot * 8, k);
+}
+#stack[int, 64] txSlotGetElem;
+#define(txSlotGetElem) {
+    #scanp(txSlotGetElem, int, 0) slot;
+    #req[txSlotElem] txSlotElem;
+    #stack[int, 64] r = cssc::peek64(txSlotElem + slot * 8);
+    return r;
+}
+
+// ---- M7: vector-ness accessors ----
+#stack[int, 64] txSetVec;
+#define(txSetVec) {
+    #scanp(txSetVec, int, 0) ssa;
+    #req[txValVec] txValVec;
+    cssc::poke64(txValVec + ssa * 8, 1);
+}
+#stack[int, 64] txIsVec;
+#define(txIsVec) {
+    #scanp(txIsVec, int, 0) ssa;
+    #req[txValVec] txValVec;
+    #stack[int, 64] r = 0;
+    if (ssa >= 0) { r = cssc::peek64(txValVec + ssa * 8); }
+    return r;
+}
+#stack[int, 64] txSlotSetVec;
+#define(txSlotSetVec) {
+    #scanp(txSlotSetVec, int, 0) slot;
+    #scanp(txSlotSetVec, int, 1) v;
+    #req[txSlotVec] txSlotVec;
+    cssc::poke64(txSlotVec + slot * 8, v);
+}
+#stack[int, 64] txSlotIsVec;
+#define(txSlotIsVec) {
+    #scanp(txSlotIsVec, int, 0) slot;
+    #req[txSlotVec] txSlotVec;
+    #stack[int, 64] r = cssc::peek64(txSlotVec + slot * 8);
+    return r;
+}
+
+// end lowering function `i`: record its CIR end + the final per-function counts.
+#stack[int, 64] txFuncEnd;
+#define(txFuncEnd) {
+    #scanp(txFuncEnd, int, 0) i;
+    #req[txFuncCirEnd] txFuncCirEnd;
+    #req[txFuncSsaCount] txFuncSsaCount;
+    #req[txFuncSlotCount] txFuncSlotCount;
+    #req[txCirCount] txCirCount;
+    #req[txSsaNext] txSsaNext;
+    #req[txSlotNext] txSlotNext;
+    cssc::poke64(txFuncCirEnd + i * 8, txCirCount);
+    cssc::poke64(txFuncSsaCount + i * 8, txSsaNext);
+    cssc::poke64(txFuncSlotCount + i * 8, txSlotNext);
+}
+
+#stack[int, 64] txFuncSetArity;
+#define(txFuncSetArity) {
+    #scanp(txFuncSetArity, int, 0) i;
+    #scanp(txFuncSetArity, int, 1) a;
+    #req[txFuncArity] txFuncArity;
+    cssc::poke64(txFuncArity + i * 8, a);
+}
+
+// "caller wins" per-parameter by-address flag (see txFuncParamByRef).
+#stack[int, 64] txSetParamByRef;
+#define(txSetParamByRef) {
+    #scanp(txSetParamByRef, int, 0) fi;
+    #scanp(txSetParamByRef, int, 1) idx;
+    #req[txFuncParamByRef] txFuncParamByRef;
+    if (idx < 8) { cssc::poke64(txFuncParamByRef + (fi * 8 + idx) * 8, 1); }
+}
+#stack[int, 64] txParamByRef;
+#define(txParamByRef) {
+    #scanp(txParamByRef, int, 0) fi;
+    #scanp(txParamByRef, int, 1) idx;
+    #req[txFuncParamByRef] txFuncParamByRef;
+    #stack[int, 64] r = 0;
+    if (idx < 8) { r = cssc::peek64(txFuncParamByRef + (fi * 8 + idx) * 8); }
+    return r;
+}
+// does this function have ANY by-address parameter? (decides whether the
+// lowerer reserves the hidden param-address slots)
+#stack[int, 64] txFuncHasByRef;
+#define(txFuncHasByRef) {
+    #scanp(txFuncHasByRef, int, 0) fi;
+    #req[txParamByRef] txParamByRef;
+    #req[txFuncArityOf] txFuncArityOf;
+    txFuncArityOf(fi) n;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] r = 0;
+    while (i < n) {
+        txParamByRef(fi, i) b;
+        if (b == 1) { r = 1; }
+        #delete[b];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    return r;
+}
+
+// append an arg SSA id to the call-arg side-table, return its index.
+#stack[int, 64] txCallArgAppend;
+#define(txCallArgAppend) {
+    #scanp(txCallArgAppend, int, 0) sid;
+    #req[txCallArg] txCallArg;
+    #req[txCallArgCount] txCallArgCount;
+    #stack[int, 64] i = txCallArgCount;
+    txCallArgCount = txCallArgCount + 1;
+    cssc::poke64(txCallArg + i * 8, sid);
+    #delete[i];
+    return txCallArgCount - 1;
+}
+
+// CALL_USER (op 12): call user function `funcIdx` with args in the side-table
+// slice [argStart, argStart+argCount); result SSA `res` (-1 = discard).
+#stack[int, 64] txCirCallUser;
+#define(txCirCallUser) {
+    #scanp(txCirCallUser, int, 0) funcIdx;
+    #scanp(txCirCallUser, int, 1) argStart;
+    #scanp(txCirCallUser, int, 2) argCount;
+    #scanp(txCirCallUser, int, 3) res;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(12, res, funcIdx, argStart, argCount, 0, 0) r;
+    #delete[r];
+}
+
+#stack[int, 64] txNewLabel;
+#define(txNewLabel) {
+    #req[txLabelNext] txLabelNext;
+    #stack[int, 64] id = txLabelNext;
+    txLabelNext = txLabelNext + 1;
+    return id;
+}
+
+// mark / query an SSA value as boolean (prints true/false, not 0/1)
+#stack[int, 64] txSetBool;
+#define(txSetBool) {
+    #scanp(txSetBool, int, 0) ssa;
+    #req[txValBool] txValBool;
+    cssc::poke64(txValBool + ssa * 8, 1);
+}
+#stack[int, 64] txIsBool;
+#define(txIsBool) {
+    #scanp(txIsBool, int, 0) ssa;
+    #req[txValBool] txValBool;
+    #stack[int, 64] r = cssc::peek64(txValBool + ssa * 8);
+    return r;
+}
+
+#stack[int, 64] txNewSsa;
+#define(txNewSsa) {
+    #req[txSsaNext] txSsaNext;
+    #stack[int, 64] id = txSsaNext;
+    txSsaNext = txSsaNext + 1;
+    return id;
+}
+
+#stack[int, 64] txNewSlot;
+#define(txNewSlot) {
+    #req[txSlotNext] txSlotNext;
+    #stack[int, 64] id = txSlotNext;
+    txSlotNext = txSlotNext + 1;
+    return id;
+}
+
+// low-level op emitter -> row index
+#stack[int, 64] txCirEmit;
+#define(txCirEmit) {
+    #scanp(txCirEmit, int, 0) op;
+    #scanp(txCirEmit, int, 1) res;
+    #scanp(txCirEmit, int, 2) imm;
+    #scanp(txCirEmit, int, 3) a;
+    #scanp(txCirEmit, int, 4) b;
+    #scanp(txCirEmit, int, 5) soff;
+    #scanp(txCirEmit, int, 6) slen;
+    #req[txCirOp] txCirOp;
+    #req[txCirRes] txCirRes;
+    #req[txCirImm] txCirImm;
+    #req[txCirA] txCirA;
+    #req[txCirB] txCirB;
+    #req[txCirSOff] txCirSOff;
+    #req[txCirSLen] txCirSLen;
+    #req[txCirCount] txCirCount;
+    #req[txCirCap] txCirCap;
+    #stack[int, 64] r = txCirCount;
+    // clamp instead of running off the end of the 22 parallel columns: an
+    // over-cap program then emits WRONG code, but never corrupts the heap
+    // (same warn-not-crash rule txAstNew uses). Without this the only symptom
+    // was memory corruption far from the cause.
+    if (r >= txCirCap) { r = txCirCap - 1; }
+    if (r == txCirCount) { txCirCount = txCirCount + 1; }
+    #stack[int, 64] o = r * 8;
+    cssc::poke64(txCirOp + o, op);
+    cssc::poke64(txCirRes + o, res);
+    cssc::poke64(txCirImm + o, imm);
+    cssc::poke64(txCirA + o, a);
+    cssc::poke64(txCirB + o, b);
+    cssc::poke64(txCirSOff + o, soff);
+    cssc::poke64(txCirSLen + o, slen);
+    #delete[o];
+    return r;
+}
+
+#stack[int, 64] txCirConstInt;
+#define(txCirConstInt) {
+    #scanp(txCirConstInt, int, 0) v;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(1, id, v, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+#stack[int, 64] txCirConstStr;
+#define(txCirConstStr) {
+    #scanp(txCirConstStr, int, 0) off;
+    #scanp(txCirConstStr, int, 1) len;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(2, id, 0, 0 - 1, 0 - 1, off, len) r;
+    #delete[r];
+    return id;
+}
+
+#stack[int, 64] txCirSlotAlloc;
+#define(txCirSlotAlloc) {
+    #scanp(txCirSlotAlloc, int, 0) slot;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(3, 0 - 1, 0, slot, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+
+#stack[int, 64] txCirSlotStore;
+#define(txCirSlotStore) {
+    #scanp(txCirSlotStore, int, 0) slot;
+    #scanp(txCirSlotStore, int, 1) val;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(4, 0 - 1, 0, slot, val, 0, 0) r;
+    #delete[r];
+}
+
+// op 37 SLOT_STORE_ALIVE: slot.alive <- aliveSSA. Writes a RUNTIME alive bit into a
+// slot's `alive` cell so a nullable RHS (peek out of bounds) makes the name unbound
+// -> a later read prints `0x0`. Value is stored separately by SLOT_STORE.
+#stack[int, 64] txCirSlotStoreAlive;
+#define(txCirSlotStoreAlive) {
+    #scanp(txCirSlotStoreAlive, int, 0) slot;
+    #scanp(txCirSlotStoreAlive, int, 1) av;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(37, 0 - 1, 0, slot, av, 0, 0) r;
+    #delete[r];
+}
+
+// op 19 SLOT_ADDR: res = &slot (the frame ADDRESS of a slot cell). Used to pass
+// a caller variable by address to a "caller wins" parameter, so the callee's
+// exit write-back lands in the caller's own cell.
+#stack[int, 64] txCirSlotAddr;
+#define(txCirSlotAddr) {
+    #scanp(txCirSlotAddr, int, 0) slot;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(19, id, slot, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// ops 21-24: the UNBOUND state. `#delete[x]` does not set x to zero -- it makes
+// the NAME unbound, which the reference prints as `0x0` while a variable that
+// merely holds zero prints `0` (docs/cssc-ownership.md section 6). The state
+// lives in the `alive` cell paired with every value cell.
+#stack[int, 64] txCirUnbind;
+#define(txCirUnbind) {
+    #scanp(txCirUnbind, int, 0) slot;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(21, 0 - 1, 0, slot, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+#stack[int, 64] txCirSlotAlive;
+#define(txCirSlotAlive) {
+    #scanp(txCirSlotAlive, int, 0) slot;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(22, id, 0, slot, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+#stack[int, 64] txCirGlobUnbind;
+#define(txCirGlobUnbind) {
+    #scanp(txCirGlobUnbind, int, 0) idx;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(23, 0 - 1, idx, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+#stack[int, 64] txCirGlobAlive;
+#define(txCirGlobAlive) {
+    #scanp(txCirGlobAlive, int, 0) idx;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(24, id, idx, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// op 25 LOAD_IND: res = *(i64*)A  -- dereference an address SSA. Used by the
+// mirror epilogue to re-read a live-ref source at function exit.
+#stack[int, 64] txCirLoadInd;
+#define(txCirLoadInd) {
+    #scanp(txCirLoadInd, int, 0) addr;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(25, id, 0, addr, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// op 27 STORE_IND: *(i64*)A = B  -- write through an address SSA. Backs
+// per-instance object member writes (`inst->m = v`) and ctor member init: the
+// address is the instance BLOCK pointer plus the member's byte offset.
+#stack[int, 64] txCirStoreInd;
+#define(txCirStoreInd) {
+    #scanp(txCirStoreInd, int, 0) addr;
+    #scanp(txCirStoreInd, int, 1) val;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(27, 0 - 1, 0, addr, val, 0, 0) r;
+    #delete[r];
+}
+
+// op 28 TRAP: abort the program with an illegal instruction (ud2). Backs the
+// interpreter's runtime "value exceeds bit limit" error -- emitted at a string
+// decl whose literal overflows its declared bits; fires only WHEN that decl runs.
+#stack[int, 64] txCirTrap;
+#define(txCirTrap) {
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(28, 0 - 1, 0, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+
+// ---- raw-memory + bitwise intrinsics (back cssc::peek*/poke*/band/bor/shl/shr) ----
+// These are what the COMPILER ITSELF is written in, so self-hosting needs them.
+// op 29 AND, 30 OR, 31 SHL, 32 SHR (res = A op B); 33 PEEK8, 35 PEEK32 (res =
+// zero-extended *(uN*)A); 34 POKE8, 36 POKE32 (*(uN*)A = B, no result).
+#stack[int, 64] txCirBitBin;
+#define(txCirBitBin) {
+    #scanp(txCirBitBin, int, 0) opn;
+    #scanp(txCirBitBin, int, 1) a;
+    #scanp(txCirBitBin, int, 2) b;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(opn, id, 0, a, b, 0, 0) r;
+    #delete[r];
+    return id;
+}
+#stack[int, 64] txCirPeekN;
+#define(txCirPeekN) {
+    #scanp(txCirPeekN, int, 0) opn;
+    #scanp(txCirPeekN, int, 1) addr;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(opn, id, 0, addr, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+#stack[int, 64] txCirPokeN;
+#define(txCirPokeN) {
+    #scanp(txCirPokeN, int, 0) opn;
+    #scanp(txCirPokeN, int, 1) addr;
+    #scanp(txCirPokeN, int, 2) val;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(opn, 0 - 1, 0, addr, val, 0, 0) r;
+    #delete[r];
+}
+
+// op 20 GLOB_ADDR: res = &global[idx]. Same purpose as SLOT_ADDR for a module
+// global -- top-level `#stack` variables live in the data section, not the
+// frame, so `f(x)` at module scope needs this form.
+#stack[int, 64] txCirGlobAddr;
+#define(txCirGlobAddr) {
+    #scanp(txCirGlobAddr, int, 0) idx;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(20, id, idx, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+#stack[int, 64] txCirSlotLoad;
+#define(txCirSlotLoad) {
+    #scanp(txCirSlotLoad, int, 0) slot;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(5, id, 0, slot, 0 - 1, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+#stack[int, 64] txCirBinOp;
+#define(txCirBinOp) {
+    #scanp(txCirBinOp, int, 0) opc;
+    #scanp(txCirBinOp, int, 1) lhs;
+    #scanp(txCirBinOp, int, 2) rhs;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    #req[txSetBool] txSetBool;
+    txNewSsa() id;
+    txCirEmit(6, id, opc, lhs, rhs, 0, 0) r;
+    // op-codes >= 6 are comparisons (< <= > >= == !=) and logical (&& ||):
+    // their result is a boolean (0/1) that prints true/false.
+    if (opc >= 6) { txSetBool(id); }
+    #delete[r];
+    return id;
+}
+
+#stack[int, 64] txCirCall;
+#define(txCirCall) {
+    #scanp(txCirCall, int, 0) sym;
+    #scanp(txCirCall, int, 1) a;
+    #scanp(txCirCall, int, 2) b;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(7, 0 - 1, sym, a, b, 0, 0) r;
+    #delete[r];
+}
+
+// M5: runtime call that RETURNS a value (string_lit/string_concat/int_to_str/...).
+// Same op 7, but with a result SSA so the backend captures rax.
+#stack[int, 64] txCirCallR;
+#define(txCirCallR) {
+    #scanp(txCirCallR, int, 0) sym;
+    #scanp(txCirCallR, int, 1) a;
+    #scanp(txCirCallR, int, 2) b;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(7, id, sym, a, b, 0, 0) r;
+    #delete[r];
+    return id;
+}
+
+// RET (op 8): A = return-value SSA id, or -1 for void/default (backend returns 0).
+#stack[int, 64] txCirRet;
+#define(txCirRet) {
+    #scanp(txCirRet, int, 0) val;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(8, 0 - 1, 0, val, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+
+// ---- control flow: labels + branches (op 9 LABEL, 10 BR, 11 BRZ) ----
+// LABEL   Imm = label id            (a jump target; emits no bytes)
+// BR      Imm = label id            (unconditional jump)
+// BRZ     A = value SSA, Imm = label (jump if value == 0)
+#stack[int, 64] txCirLabel;
+#define(txCirLabel) {
+    #scanp(txCirLabel, int, 0) id;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(9, 0 - 1, id, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+#stack[int, 64] txCirBr;
+#define(txCirBr) {
+    #scanp(txCirBr, int, 0) id;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(10, 0 - 1, id, 0 - 1, 0 - 1, 0, 0) r;
+    #delete[r];
+}
+#stack[int, 64] txCirBrz;
+#define(txCirBrz) {
+    #scanp(txCirBrz, int, 0) val;
+    #scanp(txCirBrz, int, 1) id;
+    #req[txCirEmit] txCirEmit;
+    txCirEmit(11, 0 - 1, id, val, 0 - 1, 0, 0) r;
+    #delete[r];
+}

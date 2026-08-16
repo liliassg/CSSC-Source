@@ -1,0 +1,2938 @@
+#define(ciDoPrint) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciSrc] ciSrc;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[termTypeRaw] termTypeRaw;
+    #req[termNum] termNum;
+    #req[termNewline] termNewline;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciContFmt] ciContFmt;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciIdentIs(o, l, "cssc::outln") isln;
+    ciAdvance();
+    if (ciCur == 9) {
+        ciAdvance();
+    }
+    // FX-OUTMULTI: out/outln print EVERY comma-separated arg, single space
+    // between, one trailing newline (outln). Was printing only the first arg.
+    #stack[int, 32] argn = 0;
+    #stack[int, 32] pgo = 1;
+    if (ciCur == 10) { pgo = 0; }                 // empty arg list: out()
+    while (pgo == 1) {
+    if (ciExec == 1) { if (argn > 0) {
+        #stack[int, 64] spb = cssc::alloc(1);
+        cssc::poke8(spb, 32);
+        termTypeRaw(spb, 1, 11843776);
+        cssc::free(spb);
+        #delete[spb];
+    } }
+    ciExpr(0) v;
+    #stack[int, 64] ty = ciEvalType;
+    // if the printed value is a string this expression owns, free it after
+    // printing (the console copies the bytes it needs) -> no per-print leak
+    #stack[int, 64] vo = ciEvalOwns;
+    // program output renders light gray (theme: commands white, strings gold,
+    // results/output light gray 0xB4B8C0)
+    if (ciExec == 1) {
+        if (ty == 1) {
+            // a string value whose pointer is null (e.g. a mis-captured 0) must
+            // not be dereferenced: peek32(0+4) would fault. Print nothing.
+            if (v != 0) {
+                termTypeRaw(v + 8, cssc::peek32(v + 4), 11843776);
+            }
+        }
+        if (ty == 2) {
+            // float: format the f64 bit pattern (6 fixed fractional digits,
+            // matching the CCOS runtime fmt_f64) then emit the bytes
+            #stack[int, 64] fb = cssc::alloc(48);
+            cssc::fToStr(v, fb, 48) fn;
+            termTypeRaw(fb, fn, 11843776);
+            cssc::free(fb);
+            #delete[fn];
+            #delete[fb];
+        }
+        if (ty >= 4) {
+            // container (vector/array 4, map 5, bind 7): format `{a, b, c}` via
+            // ciContFmt then emit -- direct-print parity with the reference (which
+            // prints containers curly-braced). Was printing the raw handle pointer.
+            // Guard a null handle so ciContFmt never walks off address 0. Tag 9
+            // (bool) is >= 4 but is NOT a container -- it renders below.
+            if (ty != 9) {
+                if (v != 0) {
+                    #stack[int, 64] cb = cssc::alloc(4096);
+                    ciContFmt(v, ty, cb, 0, 4096) cn;
+                    termTypeRaw(cb, cn, 11843776);
+                    cssc::free(cb);
+                    #delete[cn];
+                    #delete[cb];
+                }
+            }
+        }
+        if (ty == 9) {
+            // boolean result (tag 9, value 1/0) -> print `true`/`false` to match
+            // the reference. Only method/predicate booleans carry this tag; int
+            // comparisons stay tag 0 (-> 1/0), preserving run.py's floatcmp golden.
+            #stack[int, 64] bb = cssc::alloc(8);
+            #stack[int, 64] bn = 5;
+            if (v != 0) {
+                cssc::poke8(bb + 0, 116); cssc::poke8(bb + 1, 114);
+                cssc::poke8(bb + 2, 117); cssc::poke8(bb + 3, 101);
+                bn = 4;
+            }
+            if (v == 0) {
+                cssc::poke8(bb + 0, 102); cssc::poke8(bb + 1, 97);
+                cssc::poke8(bb + 2, 108); cssc::poke8(bb + 3, 115);
+                cssc::poke8(bb + 4, 101);
+            }
+            termTypeRaw(bb, bn, 11843776);
+            cssc::free(bb);
+            #delete[bb];
+            #delete[bn];
+        }
+        // scalar int (0) / char (3) only -> decimal; strings/floats/containers
+        // handled above (was: any non-string non-float, which mis-printed tags 4-7)
+        #stack[int, 32] isScalarI = 0;
+        if (ty == 0) { isScalarI = 1; }
+        if (isScalarI == 1) { termNum(v, 11843776); }
+        #delete[isScalarI];
+        if (ty == 3) {
+            if (v == 0) {
+                #stack[int, 64] nb = cssc::alloc(4);
+                cssc::poke8(nb + 0, 48);
+                cssc::poke8(nb + 1, 120);
+                cssc::poke8(nb + 2, 48);
+                termTypeRaw(nb, 3, 11843776);
+                cssc::free(nb);
+                #delete[nb];
+            }
+            if (v != 0) { termNum(v, 11843776); }
+        }
+    }
+    // free regardless of exec: the temporary was allocated even in skip mode
+    if (vo == 1) { if (ty == 1) { cssc::free(v); } }
+    #delete[v];
+    #delete[ty];
+    #delete[vo];
+    argn = argn + 1;
+    #stack[int, 32] more = 0;
+    if (ciCur == 21) { more = 1; ciAdvance(); }   // comma -> another arg
+    if (more == 0) { pgo = 0; }
+    #delete[more];
+    }
+    #delete[argn];
+    #delete[pgo];
+    if (ciCur == 10) {
+        ciAdvance();
+    }
+    if (isln == 1) {
+        if (ciExec == 1) {
+            termNewline();
+        }
+    }
+    if (ciCur == 13) {
+        ciAdvance();
+    }
+    #delete[isln];
+    #delete[o];
+    #delete[l];
+}
+
+#define(ciDoPoke) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciIdentIs(o, l, "cssc::poke8") isp8;
+    ciAdvance();
+    if (ciCur == 9) {
+        ciAdvance();
+    }
+    ciExpr(0) a;
+    if (ciCur == 21) {
+        ciAdvance();
+    }
+    ciExpr(0) v;
+    if (ciCur == 10) {
+        ciAdvance();
+    }
+    if (ciExec == 1) {
+        if (isp8 == 1) {
+            cssc::poke8(a, v);
+        }
+        if (isp8 == 0) {
+            cssc::poke32(a, v);
+        }
+    }
+    if (ciCur == 13) {
+        ciAdvance();
+    }
+    #delete[a];
+    #delete[v];
+    #delete[isp8];
+    #delete[o];
+    #delete[l];
+}
+
+// console statement dispatcher: `cons.<method>(args)`. Receiver handle passed in.
+// ciCur sits on '.' at entry (the caller advanced past the receiver ident).
+#define(ciDoConsole) {
+    #scanp(ciDoConsole, int, 0) ch;
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciItoa] ciItoa;
+    #req[ciContFmt] ciContFmt;
+    #req[ciConOut] ciConOut;
+    #req[ciConClearAll] ciConClearAll;
+    #req[ciConClearLine] ciConClearLine;
+    #req[ciConCursorPos] ciConCursorPos;
+    #req[ciConAttr] ciConAttr;
+    #req[ciConSyncAdd] ciConSyncAdd;
+    #req[ciConDesync] ciConDesync;
+    #req[ciConClose] ciConClose;
+    if (ciCur == 33) { ciAdvance(); }
+    #stack[int, 64] moff = ciTokOff;
+    #stack[int, 64] mlen = ciTokLen;
+    if (ciCur == 2) { ciAdvance(); }
+    ciIdentIs(moff, mlen, "out") mOut;
+    ciIdentIs(moff, mlen, "cout") mCout;
+    ciIdentIs(moff, mlen, "clear") mClr;
+    ciIdentIs(moff, mlen, "clear_all") mClrA;
+    ciIdentIs(moff, mlen, "clear_line") mClrL;
+    ciIdentIs(moff, mlen, "cursor_col") mCol;
+    ciIdentIs(moff, mlen, "cursor_set") mSet;
+    ciIdentIs(moff, mlen, "cursor_pos") mPos;
+    ciIdentIs(moff, mlen, "sync") mSync;
+    ciIdentIs(moff, mlen, "desync") mDesync;
+    ciIdentIs(moff, mlen, "close") mClose;
+    if (ciCur == 9) { ciAdvance(); }
+    #stack[int, 64] a1 = 0;
+    #stack[int, 64] a1t = 0;
+    #stack[int, 64] a1o = 0;
+    #stack[int, 64] a2 = 0;
+    #stack[int, 64] a2t = 0;
+    #stack[int, 64] a2o = 0;
+    #stack[int, 32] n = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ciCur == 10) { go = 0; }
+        if (ciCur == 0) { go = 0; }
+        if (go == 1) {
+            if (ciCur == 6) { ciAdvance(); }
+            ciExpr(0) e;
+            if (n == 0) { a1 = e; a1t = ciEvalType; a1o = ciEvalOwns; }
+            if (n == 1) { a2 = e; a2t = ciEvalType; a2o = ciEvalOwns; }
+            if (n > 1) { if (ciEvalOwns == 1) { if (ciEvalType == 1) { cssc::free(e); } } }
+            n = n + 1;
+            #delete[e];
+            if (ciCur == 21) { ciAdvance(); }
+        }
+    }
+    #delete[go];
+    if (ciCur == 10) { ciAdvance(); }
+    if (ciExec == 1) {
+        #stack[int, 32] isOut = 0;
+        if (mOut == 1) { isOut = 1; }
+        if (mCout == 1) { isOut = 1; }
+        if (isOut == 1) {
+            #stack[int, 64] sptr = 0;
+            #stack[int, 64] slen = 0;
+            #stack[int, 32] freeTmp = 0;
+            #stack[int, 64] tmpBuf = 0;
+            if (a1t == 1) {
+                if (a1 != 0) { sptr = a1 + 8; slen = cssc::peek32(a1 + 4); }
+            }
+            if (a1t != 1) {
+                tmpBuf = cssc::alloc(64);
+                #stack[int, 64] nn = 0;
+                if (a1t == 0) { ciItoa(a1, tmpBuf) dn; nn = dn; #delete[dn]; }
+                if (a1t == 2) { cssc::fToStr(a1, tmpBuf, 64) dn; nn = dn; #delete[dn]; }
+                if (a1t >= 4) { ciContFmt(a1, a1t, tmpBuf, 0, 64) dn; nn = dn; #delete[dn]; }
+                sptr = tmpBuf;
+                slen = nn;
+                freeTmp = 1;
+                #delete[nn];
+            }
+            ciConOut(ch, sptr, slen);
+            if (mCout == 1) {
+                #stack[int, 64] nlb = cssc::alloc(1);
+                cssc::poke8(nlb, 10);
+                ciConOut(ch, nlb, 1);
+                cssc::free(nlb);
+                #delete[nlb];
+            }
+            if (freeTmp == 1) { cssc::free(tmpBuf); }
+            #delete[sptr];
+            #delete[slen];
+            #delete[freeTmp];
+            #delete[tmpBuf];
+        }
+        if (mClr == 1) { ciConClearAll(ch); }
+        if (mClrA == 1) { ciConClearAll(ch); }
+        if (mClrL == 1) { ciConClearLine(ch, a1); }
+        if (mCol == 1) { ciConAttr(a1) at; cssc::poke32(ch + 16, at); #delete[at]; }
+        if (mSet == 1) {
+            #stack[int, 64] w = cssc::peek32(ch);
+            #stack[int, 64] h = cssc::peek32(ch + 4);
+            #stack[int, 64] ll = a1;
+            #stack[int, 64] cc = a2;
+            if (ll < 0) { ll = 0; }
+            if (ll >= h) { ll = h - 1; }
+            if (cc < 0) { cc = 0; }
+            if (cc >= w) { cc = w - 1; }
+            cssc::poke32(ch + 8, ll);
+            cssc::poke32(ch + 12, cc);
+            #delete[w];
+            #delete[h];
+            #delete[ll];
+            #delete[cc];
+        }
+        if (mPos == 1) { ciConCursorPos(ch, a1); }
+        if (mSync == 1) { ciConSyncAdd(ch, a1, a2); }
+        if (mDesync == 1) { ciConDesync(ch, a1); }
+        if (mClose == 1) { ciConClose(ch); }
+    }
+    if (a1o == 1) { if (a1t == 1) { if (a1 != 0) { cssc::free(a1); } } }
+    if (a2o == 1) { if (a2t == 1) { if (a2 != 0) { cssc::free(a2); } } }
+    if (ciCur == 13) { ciAdvance(); }
+    #delete[a1];
+    #delete[a1t];
+    #delete[a1o];
+    #delete[a2];
+    #delete[a2t];
+    #delete[a2o];
+    #delete[n];
+    #delete[moff];
+    #delete[mlen];
+    #delete[mOut];
+    #delete[mCout];
+    #delete[mClr];
+    #delete[mClrA];
+    #delete[mClrL];
+    #delete[mCol];
+    #delete[mSet];
+    #delete[mPos];
+    #delete[mSync];
+    #delete[mDesync];
+    #delete[mClose];
+}
+// mouse statement dispatcher: `mouse::update()` (void) / `mouse::m(args) [cap]`.
+#define(ciDoMouse) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciMsUpdate] ciMsUpdate;
+    #req[ciMsMethod] ciMsMethod;
+    #req[ciVarSet] ciVarSet;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "update") mupd;
+    ciIdentIs(moff, mlen, "client") mcli;
+    ciAdvance();
+    if (ciCur == 9) { ciAdvance(); }
+    #stack[int, 64] a1 = 0;
+    #stack[int, 64] a2 = 0;
+    #stack[int, 64] a3 = 0;
+    #stack[int, 64] a4 = 0;
+    #stack[int, 64] a1t = 0;
+    #stack[int, 64] a1o = 0;
+    #stack[int, 32] n = 0;
+    #stack[int, 32] go = 1;
+    if (ciCur == 10) { go = 0; }
+    while (go == 1) {
+        ciExpr(0) e;
+        if (n == 0) { a1 = e; a1t = ciEvalType; a1o = ciEvalOwns; }
+        if (n == 1) { a2 = e; }
+        if (n == 2) { a3 = e; }
+        if (n == 3) { a4 = e; }
+        if (n > 3) { if (ciEvalOwns == 1) { if (ciEvalType == 1) { cssc::free(e); } } }
+        n = n + 1;
+        #delete[e];
+        if (ciCur == 21) { ciAdvance(); }
+        if (ciCur == 10) { go = 0; }
+        if (ciCur == 0) { go = 0; }
+    }
+    #delete[go];
+    if (ciCur == 10) { ciAdvance(); }
+    #stack[int, 32] hasCap = 0;
+    #stack[int, 64] capOff = 0;
+    #stack[int, 64] capLen = 0;
+    if (ciCur == 2) { capOff = ciTokOff; capLen = ciTokLen; hasCap = 1; ciAdvance(); }
+    #stack[int, 64] rv = 0;
+    #stack[int, 64] rt = 0;
+    if (ciExec == 1) {
+        if (mupd == 1) { ciMsUpdate(); rv = 0; rt = 0; }
+        if (mupd == 0) {
+            if (mcli == 1) { rv = a1; rt = 8; }
+            if (mcli == 0) { ciMsMethod(moff, mlen, a1, a2, a3, a4) r; rv = r; rt = 0; #delete[r]; }
+        }
+        if (hasCap == 1) { ciVarSet(capOff, capLen, rv, rt, 0); }
+    }
+    if (a1o == 1) { if (a1t == 1) { if (a1 != 0) { cssc::free(a1); } } }
+    if (ciCur == 13) { ciAdvance(); }
+    #delete[rv];
+    #delete[rt];
+    #delete[hasCap];
+    #delete[capOff];
+    #delete[capLen];
+    #delete[a1];
+    #delete[a2];
+    #delete[a3];
+    #delete[a4];
+    #delete[a1t];
+    #delete[a1o];
+    #delete[n];
+    #delete[mupd];
+    #delete[mcli];
+    #delete[moff];
+    #delete[mlen];
+    #delete[ccp];
+    #delete[o];
+    #delete[l];
+}
+
+// #include("video") module -- draw into the framebuffer via the kernel's gfx.
+// Methods: video::clear(color), video::rect(x,y,w,h,color),
+// video::pixel(x,y,color), video::text(str,x,y,color). Up to 5 args are
+// evaluated generically so one executor serves every arity.
+// video module -- statement-position (void) methods. Called as
+// alias::method(handle, ...) where alias is any #include("video") alias (or the
+// literal "video"). The handle is arg-0. Value methods (getPixel/isOpen) live in
+// ciExpr. See docs/module-parity-spec.md section 1.
+#define(ciDoVideo) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciVidClear] ciVidClear;
+    #req[ciVidStore] ciVidStore;
+    #req[ciVidFill] ciVidFill;
+    #req[ciVidRect] ciVidRect;
+    #req[ciVidDark] ciVidDark;
+    #req[ciVidText] ciVidText;
+    #req[ciVidPresent] ciVidPresent;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    // method name = bytes after '::' (works for video:: and any alias::)
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "clear") mCl;
+    ciIdentIs(moff, mlen, "pixel") mPx;
+    ciIdentIs(moff, mlen, "setPixel") mPx2;
+    ciIdentIs(moff, mlen, "fillRect") mFl;
+    ciIdentIs(moff, mlen, "drawRect") mRc;
+    ciIdentIs(moff, mlen, "darken") mDk;
+    ciIdentIs(moff, mlen, "drawText") mTx;
+    ciIdentIs(moff, mlen, "present") mPr;
+    // lowercase spellings (the game's primary API: vid::fillrect/drawrect/drawtext/
+    // setpixel) fold into the same dispatch. fillRectAlpha/fillrectalpha force blend.
+    #stack[int, 64] mFlA = 0;
+    ciIdentIs(moff, mlen, "fillrect") mFlL;
+    if (mFlL == 1) { mFl = 1; }
+    ciIdentIs(moff, mlen, "fillRectAlpha") mFlA1;
+    if (mFlA1 == 1) { mFl = 1; mFlA = 1; }
+    ciIdentIs(moff, mlen, "fillrectalpha") mFlA2;
+    if (mFlA2 == 1) { mFl = 1; mFlA = 1; }
+    ciIdentIs(moff, mlen, "drawrect") mRcL;
+    if (mRcL == 1) { mRc = 1; }
+    ciIdentIs(moff, mlen, "drawtext") mTxL;
+    if (mTxL == 1) { mTx = 1; }
+    ciIdentIs(moff, mlen, "setpixel") mPxL;
+    if (mPxL == 1) { mPx2 = 1; }
+    #delete[mFlL];
+    #delete[mFlA1];
+    #delete[mFlA2];
+    #delete[mRcL];
+    #delete[mTxL];
+    #delete[mPxL];
+    ciAdvance();
+    if (ciCur == 9) { ciAdvance(); }
+    #stack[int, 64] a1 = 0;
+    #stack[int, 64] a2 = 0;
+    #stack[int, 64] a3 = 0;
+    #stack[int, 64] a4 = 0;
+    #stack[int, 64] a5 = 0;
+    #stack[int, 64] a6 = 0;
+    #stack[int, 64] w1 = 0;
+    #stack[int, 64] w2 = 0;
+    #stack[int, 64] w3 = 0;
+    #stack[int, 64] w4 = 0;
+    #stack[int, 64] w5 = 0;
+    #stack[int, 64] w6 = 0;
+    // per-arg value type (0 int, 1 string, 2 float) -- darken/sprite take floats
+    #stack[int, 64] t1 = 0;
+    #stack[int, 64] t2 = 0;
+    #stack[int, 64] t3 = 0;
+    #stack[int, 64] t4 = 0;
+    #stack[int, 64] t5 = 0;
+    #stack[int, 64] t6 = 0;
+    #stack[int, 32] n = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ciCur == 10) { go = 0; }
+        if (go == 1) {
+            ciExpr(0) e;
+            #stack[int, 64] eo = ciEvalOwns;
+            #stack[int, 64] et = ciEvalType;
+            if (n == 0) { a1 = e; w1 = eo; t1 = et; }
+            if (n == 1) { a2 = e; w2 = eo; t2 = et; }
+            if (n == 2) { a3 = e; w3 = eo; t3 = et; }
+            if (n == 3) { a4 = e; w4 = eo; t4 = et; }
+            if (n == 4) { a5 = e; w5 = eo; t5 = et; }
+            if (n == 5) { a6 = e; w6 = eo; t6 = et; }
+            n = n + 1;
+            #delete[et];
+            #delete[eo];
+            #delete[e];
+            if (ciCur == 21) { ciAdvance(); }
+            if (n >= 6) { go = 0; }
+        }
+    }
+    #delete[go];
+    if (ciCur == 10) { ciAdvance(); }
+    if (ciExec == 1) {
+        if (mCl == 1) { ciVidClear(a1, a2); }
+        if (mPx == 1) { ciVidStore(a1, a2, a3, a4); }
+        if (mPx2 == 1) { ciVidStore(a1, a2, a3, a4); }
+        if (mFl == 1) { ciVidFill(a1, a2, a3, a4, a5, a6); }
+        if (mRc == 1) { ciVidRect(a1, a2, a3, a4, a5, a6); }
+        if (mDk == 1) {
+            // darken(handle, amount): the game passes a FLOAT 0..1 (main.cssc:850,
+            // intro.cssc:44); ciVidDark wants an int 0..255. Coerce float -> floor(a*255).
+            #stack[int, 64] amt = a2;
+            if (t2 == 2) {
+                cssc::iToF(255) f255;
+                cssc::fMul(a2, f255) fm;
+                cssc::fToI(fm) ai;
+                amt = ai;
+                #delete[ai];
+                #delete[fm];
+                #delete[f255];
+            }
+            ciVidDark(a1, amt);
+            #delete[amt];
+        }
+        if (mTx == 1) { ciVidText(a1, a2, a3, a4, a5, a6); }
+        if (mPr == 1) { ciVidPresent(a1); }
+        // open/openTitled/begin/close: no-op (isOpen already 1 from #video)
+    }
+    // release any owned string args (drawText text literal etc.), exec or not
+    if (w1 == 1) { cssc::free(a1); }
+    if (w2 == 1) { cssc::free(a2); }
+    if (w3 == 1) { cssc::free(a3); }
+    if (w4 == 1) { cssc::free(a4); }
+    if (w5 == 1) { cssc::free(a5); }
+    if (w6 == 1) { cssc::free(a6); }
+    if (ciCur == 13) { ciAdvance(); }
+    #delete[a1];
+    #delete[a2];
+    #delete[a3];
+    #delete[a4];
+    #delete[a5];
+    #delete[a6];
+    #delete[w1];
+    #delete[w2];
+    #delete[w3];
+    #delete[w4];
+    #delete[w5];
+    #delete[w6];
+    #delete[t1];
+    #delete[t2];
+    #delete[t3];
+    #delete[t4];
+    #delete[t5];
+    #delete[t6];
+    #delete[mFlA];
+    #delete[n];
+    #delete[mCl];
+    #delete[mPx];
+    #delete[mPx2];
+    #delete[mFl];
+    #delete[mRc];
+    #delete[mDk];
+    #delete[mTx];
+    #delete[mPr];
+    #delete[moff];
+    #delete[mlen];
+    #delete[ccp];
+    #delete[o];
+    #delete[l];
+}
+
+// ============================================================================
+//  video.sprite (modid 5) statement handler. VOID ops handled inline; value
+//  constructors/queries delegate to ciExpr + trailing-bind capture.
+// ============================================================================
+#define(ciDoSprite) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciVarSet] ciVarSet;
+    #req[ciValFree] ciValFree;
+    #req[ciSprBlit] ciSprBlit;
+    #req[ciSprBlitScaled] ciSprBlitScaled;
+    #req[ciSprBlitTinted] ciSprBlitTinted;
+    #req[ciSprBlitAlpha] ciSprBlitAlpha;
+    #req[ciSprBlitFlip] ciSprBlitFlip;
+    #req[ciSheetDrawFrame] ciSheetDrawFrame;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "setPixel") mSp;
+    ciIdentIs(moff, mlen, "setKey") mSk;
+    ciIdentIs(moff, mlen, "clear") mCl;
+    ciIdentIs(moff, mlen, "draw") mDr;
+    ciIdentIs(moff, mlen, "drawScaled") mDs;
+    ciIdentIs(moff, mlen, "drawTinted") mDt;
+    ciIdentIs(moff, mlen, "drawAlpha") mDa;
+    ciIdentIs(moff, mlen, "drawFlipped") mDf;
+    ciIdentIs(moff, mlen, "sheetDrawFrame") mSd;
+    ciIdentIs(moff, mlen, "animUpdate") mAu;
+    ciIdentIs(moff, mlen, "animDraw") mAd;
+    ciIdentIs(moff, mlen, "animReset") mAr;
+    #stack[int, 32] isVoid = 0;
+    if (mSp == 1) { isVoid = 1; }
+    if (mSk == 1) { isVoid = 1; }
+    if (mCl == 1) { isVoid = 1; }
+    if (mDr == 1) { isVoid = 1; }
+    if (mDs == 1) { isVoid = 1; }
+    if (mDt == 1) { isVoid = 1; }
+    if (mDa == 1) { isVoid = 1; }
+    if (mDf == 1) { isVoid = 1; }
+    if (mSd == 1) { isVoid = 1; }
+    if (mAu == 1) { isVoid = 1; }
+    if (mAd == 1) { isVoid = 1; }
+    if (mAr == 1) { isVoid = 1; }
+    if (isVoid == 1) {
+        ciAdvance();
+        if (ciCur == 9) { ciAdvance(); }
+        #stack[int, 64] a1 = 0; #stack[int, 64] a2 = 0; #stack[int, 64] a3 = 0;
+        #stack[int, 64] a4 = 0; #stack[int, 64] a5 = 0; #stack[int, 64] a6 = 0;
+        #stack[int, 64] w1 = 0; #stack[int, 64] w2 = 0; #stack[int, 64] w3 = 0;
+        #stack[int, 64] w4 = 0; #stack[int, 64] w5 = 0; #stack[int, 64] w6 = 0;
+        #stack[int, 32] n = 0;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (ciCur == 10) { go = 0; }
+            if (ciCur == 0) { go = 0; }
+            if (go == 1) {
+                ciExpr(0) e;
+                #stack[int, 64] eo = ciEvalOwns;
+                if (n == 0) { a1 = e; w1 = eo; }
+                if (n == 1) { a2 = e; w2 = eo; }
+                if (n == 2) { a3 = e; w3 = eo; }
+                if (n == 3) { a4 = e; w4 = eo; }
+                if (n == 4) { a5 = e; w5 = eo; }
+                if (n == 5) { a6 = e; w6 = eo; }
+                n = n + 1;
+                #delete[eo]; #delete[e];
+                if (ciCur == 21) { ciAdvance(); }
+                if (n >= 6) { go = 0; }
+            }
+        }
+        #delete[go];
+        if (ciCur == 10) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (mSp == 1) {
+                #stack[int, 64] w = cssc::peek32(a1);
+                #stack[int, 64] h = cssc::peek32(a1 + 4);
+                #stack[int, 64] data = cssc::peek64(a1 + 16);
+                if (a2 >= 0) { if (a3 >= 0) { if (a2 < w) { if (a3 < h) {
+                    cssc::poke32(data + (a3 * w + a2) * 4, a4);
+                } } } }
+                #delete[w]; #delete[h]; #delete[data];
+            }
+            if (mSk == 1) { cssc::poke32(a1 + 8, 1); cssc::poke32(a1 + 12, a2); }
+            if (mCl == 1) {
+                cssc::memfill32(cssc::peek64(a1 + 16), a2, cssc::peek32(a1) * cssc::peek32(a1 + 4));
+            }
+            if (mDr == 1) { ciSprBlit(a1, a2, a3, a4); }
+            if (mDs == 1) { ciSprBlitScaled(a1, a2, a3, a4, a5, a6); }
+            if (mDt == 1) { ciSprBlitTinted(a1, a2, a3, a4, a5); }
+            if (mDa == 1) { ciSprBlitAlpha(a1, a2, a3, a4, a5); }
+            if (mDf == 1) { ciSprBlitFlip(a1, a2, a3, a4, a5, a6); }
+            if (mSd == 1) { ciSheetDrawFrame(a1, a2, a3, a4, a5); }
+            if (mAu == 1) {
+                // animUpdate(anim, deltaMs): float accumulator step.
+                #stack[int, 64] finished = cssc::peek32(a1 + 44);
+                if (finished == 0) {
+                    #stack[int, 64] count = cssc::peek32(a1 + 16);
+                    #stack[int, 64] fpsB = cssc::peek64(a1 + 24);
+                    #stack[int, 64] accB = cssc::peek64(a1 + 32);
+                    #stack[int, 64] idx = cssc::peek32(a1 + 20);
+                    #stack[int, 64] looping = cssc::peek32(a1 + 40);
+                    cssc::iToF(a2) dms;
+                    cssc::iToF(1000) th;
+                    cssc::fDiv(dms, th) dsec;
+                    cssc::fAdd(accB, dsec) acc2; accB = acc2;
+                    cssc::iToF(1) onef;
+                    cssc::fDiv(onef, fpsB) step;
+                    #stack[int, 32] loop = 1;
+                    while (loop == 1) {
+                        cssc::fCmp(accB, step) cmp;
+                        if (cmp < 0) { loop = 0; }
+                        if (cmp >= 0) {
+                            cssc::fSub(accB, step) a3f; accB = a3f;
+                            idx = idx + 1;
+                            if (idx >= count) {
+                                if (looping == 1) { idx = 0; }
+                                if (looping != 1) { idx = count - 1; finished = 1; loop = 0; }
+                            }
+                            #delete[a3f];
+                        }
+                        #delete[cmp];
+                    }
+                    #delete[loop];
+                    cssc::poke32(a1 + 20, idx);
+                    cssc::poke64(a1 + 32, accB);
+                    cssc::poke32(a1 + 44, finished);
+                    #delete[dms]; #delete[th]; #delete[dsec]; #delete[acc2];
+                    #delete[onef]; #delete[step];
+                    #delete[count]; #delete[fpsB]; #delete[accB]; #delete[idx]; #delete[looping];
+                }
+                #delete[finished];
+            }
+            if (mAd == 1) {
+                #stack[int, 64] sheet = cssc::peek64(a1 + 0);
+                #stack[int, 64] frames = cssc::peek64(a1 + 8);
+                #stack[int, 64] idx = cssc::peek32(a1 + 20);
+                #stack[int, 64] fr = cssc::peek32(frames + idx * 4);
+                ciSheetDrawFrame(sheet, a2, a3, a4, fr);
+                #delete[sheet]; #delete[frames]; #delete[idx]; #delete[fr];
+            }
+            if (mAr == 1) {
+                cssc::poke32(a1 + 20, 0);
+                cssc::iToF(0) z;
+                cssc::poke64(a1 + 32, z);
+                cssc::poke32(a1 + 44, 0);
+                #delete[z];
+            }
+        }
+        if (w1 == 1) { cssc::free(a1); }
+        if (w2 == 1) { cssc::free(a2); }
+        if (w3 == 1) { cssc::free(a3); }
+        if (w4 == 1) { cssc::free(a4); }
+        if (w5 == 1) { cssc::free(a5); }
+        if (w6 == 1) { cssc::free(a6); }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[a1]; #delete[a2]; #delete[a3]; #delete[a4]; #delete[a5]; #delete[a6];
+        #delete[w1]; #delete[w2]; #delete[w3]; #delete[w4]; #delete[w5]; #delete[w6];
+        #delete[n];
+    }
+    if (isVoid == 0) {
+        ciExpr(0) r;
+        #stack[int, 64] rt = ciEvalType;
+        #stack[int, 64] ro = ciEvalOwns;
+        #stack[int, 32] bound = 0;
+        if (ciCur == 2) {
+            #stack[int, 64] cno = ciTokOff;
+            #stack[int, 64] cnl = ciTokLen;
+            ciAdvance();
+            if (ciExec == 1) { ciVarSet(cno, cnl, r, rt, ro); bound = 1; }
+            #delete[cno]; #delete[cnl];
+        }
+        if (bound == 0) {
+            if (ro == 1) { ciValFree(rt, r); }
+        }
+        #delete[bound]; #delete[r]; #delete[rt]; #delete[ro];
+        if (ciCur == 13) { ciAdvance(); }
+    }
+    #delete[isVoid];
+    #delete[mSp]; #delete[mSk]; #delete[mCl]; #delete[mDr]; #delete[mDs]; #delete[mDt];
+    #delete[mDa]; #delete[mDf]; #delete[mSd]; #delete[mAu]; #delete[mAd]; #delete[mAr];
+    #delete[moff]; #delete[mlen]; #delete[ccp]; #delete[o]; #delete[l];
+}
+
+// ============================================================================
+//  video.tilemap (modid 6) statement handler.
+// ============================================================================
+#define(ciDoTilemap) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciVarSet] ciVarSet;
+    #req[ciValFree] ciValFree;
+    #req[ciTmDraw] ciTmDraw;
+    #req[ciVecSize] ciVecSize;
+    #req[ciVecGet] ciVecGet;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "setTile") mSt;
+    ciIdentIs(moff, mlen, "fill") mFi;
+    ciIdentIs(moff, mlen, "setSolid") mSs;
+    ciIdentIs(moff, mlen, "setLayout") mSl;
+    ciIdentIs(moff, mlen, "draw") mDrw;
+    ciIdentIs(moff, mlen, "cameraSet") mCs;
+    ciIdentIs(moff, mlen, "cameraMove") mCm;
+    ciIdentIs(moff, mlen, "cameraFollow") mCf;
+    ciIdentIs(moff, mlen, "cameraSetBounds") mCb;
+    #stack[int, 32] isVoid = 0;
+    if (mSt == 1) { isVoid = 1; }
+    if (mFi == 1) { isVoid = 1; }
+    if (mSs == 1) { isVoid = 1; }
+    if (mSl == 1) { isVoid = 1; }
+    if (mDrw == 1) { isVoid = 1; }
+    if (mCs == 1) { isVoid = 1; }
+    if (mCm == 1) { isVoid = 1; }
+    if (mCf == 1) { isVoid = 1; }
+    if (mCb == 1) { isVoid = 1; }
+    if (isVoid == 1) {
+        ciAdvance();
+        if (ciCur == 9) { ciAdvance(); }
+        #stack[int, 64] a1 = 0; #stack[int, 64] a2 = 0; #stack[int, 64] a3 = 0;
+        #stack[int, 64] a4 = 0; #stack[int, 64] a5 = 0;
+        #stack[int, 64] w1 = 0; #stack[int, 64] w2 = 0; #stack[int, 64] w3 = 0;
+        #stack[int, 64] w4 = 0; #stack[int, 64] w5 = 0;
+        #stack[int, 32] n = 0;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (ciCur == 10) { go = 0; }
+            if (ciCur == 0) { go = 0; }
+            if (go == 1) {
+                ciExpr(0) e;
+                #stack[int, 64] eo = ciEvalOwns;
+                if (n == 0) { a1 = e; w1 = eo; }
+                if (n == 1) { a2 = e; w2 = eo; }
+                if (n == 2) { a3 = e; w3 = eo; }
+                if (n == 3) { a4 = e; w4 = eo; }
+                if (n == 4) { a5 = e; w5 = eo; }
+                n = n + 1;
+                #delete[eo]; #delete[e];
+                if (ciCur == 21) { ciAdvance(); }
+                if (n >= 5) { go = 0; }
+            }
+        }
+        #delete[go];
+        if (ciCur == 10) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (mSt == 1) {
+                #stack[int, 64] cols = cssc::peek32(a1 + 8);
+                #stack[int, 64] rows = cssc::peek32(a1 + 12);
+                #stack[int, 64] data = cssc::peek64(a1 + 24);
+                if (a2 >= 0) { if (a3 >= 0) { if (a2 < cols) { if (a3 < rows) {
+                    cssc::poke32(data + (a3 * cols + a2) * 4, a4);
+                } } } }
+                #delete[cols]; #delete[rows]; #delete[data];
+            }
+            if (mFi == 1) {
+                cssc::memfill32(cssc::peek64(a1 + 24), a2, cssc::peek32(a1 + 8) * cssc::peek32(a1 + 12));
+            }
+            if (mSs == 1) {
+                #stack[int, 64] solids = cssc::peek64(a1 + 32);
+                #stack[int, 64] sv = 1;
+                if (n >= 3) { sv = 0; if (a3 != 0) { sv = 1; } }
+                if (a2 >= 0) { if (a2 < 256) { cssc::poke8(solids + a2, sv); } }
+                #delete[solids]; #delete[sv];
+            }
+            if (mSl == 1) {
+                #stack[int, 64] cols = cssc::peek32(a1 + 8);
+                #stack[int, 64] rows = cssc::peek32(a1 + 12);
+                #stack[int, 64] data = cssc::peek64(a1 + 24);
+                #stack[int, 64] cap = cols * rows;
+                ciVecSize(a2) vs;
+                #stack[int, 64] lim = vs;
+                if (lim > cap) { lim = cap; }
+                #stack[int, 64] i = 0;
+                while (i < lim) {
+                    ciVecGet(a2, i) gv;
+                    cssc::poke32(data + i * 4, gv);
+                    #delete[gv];
+                    i = i + 1;
+                }
+                #delete[i]; #delete[lim]; #delete[vs];
+                #delete[cols]; #delete[rows]; #delete[data]; #delete[cap];
+            }
+            if (mDrw == 1) {
+                // arg-count disambiguation: 3 args -> a3 is a camera handle; 4+ -> camX,camY.
+                #stack[int, 64] cx = 0;
+                #stack[int, 64] cy = 0;
+                if (n == 3) { cx = cssc::peek64(a3 + 0); cy = cssc::peek64(a3 + 8); }
+                if (n >= 4) { cx = a3; cy = a4; }
+                ciTmDraw(a1, a2, cx, cy);
+                #delete[cx]; #delete[cy];
+            }
+            if (mCs == 1) { cssc::poke64(a1 + 0, a2); cssc::poke64(a1 + 8, a3); }
+            if (mCm == 1) {
+                cssc::poke64(a1 + 0, cssc::peek64(a1 + 0) + a2);
+                cssc::poke64(a1 + 8, cssc::peek64(a1 + 8) + a3);
+            }
+            if (mCf == 1) {
+                #stack[int, 64] nx = a2 - a4 / 2;
+                #stack[int, 64] ny = a3 - a5 / 2;
+                #stack[int, 64] hasB = cssc::peek32(a1 + 16);
+                if (hasB == 1) {
+                    #stack[int, 64] bx = cssc::peek32(a1 + 20);
+                    #stack[int, 64] by = cssc::peek32(a1 + 24);
+                    #stack[int, 64] bw = cssc::peek32(a1 + 28);
+                    #stack[int, 64] bh = cssc::peek32(a1 + 32);
+                    if (nx < bx) { nx = bx; }
+                    if (nx > bx + bw - a4) { nx = bx + bw - a4; }
+                    if (ny < by) { ny = by; }
+                    if (ny > by + bh - a5) { ny = by + bh - a5; }
+                    #delete[bx]; #delete[by]; #delete[bw]; #delete[bh];
+                }
+                cssc::poke64(a1 + 0, nx);
+                cssc::poke64(a1 + 8, ny);
+                #delete[nx]; #delete[ny]; #delete[hasB];
+            }
+            if (mCb == 1) {
+                cssc::poke32(a1 + 16, 1);
+                cssc::poke32(a1 + 20, a2);
+                cssc::poke32(a1 + 24, a3);
+                cssc::poke32(a1 + 28, a4);
+                cssc::poke32(a1 + 32, a5);
+            }
+        }
+        if (w1 == 1) { cssc::free(a1); }
+        if (w2 == 1) { cssc::free(a2); }
+        if (w3 == 1) { cssc::free(a3); }
+        if (w4 == 1) { cssc::free(a4); }
+        if (w5 == 1) { cssc::free(a5); }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[a1]; #delete[a2]; #delete[a3]; #delete[a4]; #delete[a5];
+        #delete[w1]; #delete[w2]; #delete[w3]; #delete[w4]; #delete[w5];
+        #delete[n];
+    }
+    if (isVoid == 0) {
+        ciExpr(0) r;
+        #stack[int, 64] rt = ciEvalType;
+        #stack[int, 64] ro = ciEvalOwns;
+        #stack[int, 32] bound = 0;
+        if (ciCur == 2) {
+            #stack[int, 64] cno = ciTokOff;
+            #stack[int, 64] cnl = ciTokLen;
+            ciAdvance();
+            if (ciExec == 1) { ciVarSet(cno, cnl, r, rt, ro); bound = 1; }
+            #delete[cno]; #delete[cnl];
+        }
+        if (bound == 0) {
+            if (ro == 1) { ciValFree(rt, r); }
+        }
+        #delete[bound]; #delete[r]; #delete[rt]; #delete[ro];
+        if (ciCur == 13) { ciAdvance(); }
+    }
+    #delete[isVoid];
+    #delete[mSt]; #delete[mFi]; #delete[mSs]; #delete[mSl]; #delete[mDrw];
+    #delete[mCs]; #delete[mCm]; #delete[mCf]; #delete[mCb];
+    #delete[moff]; #delete[mlen]; #delete[ccp]; #delete[o]; #delete[l];
+}
+
+// ============================================================================
+//  video.font (modid 7) statement handler. drawScaled/drawWrapped take 7 args.
+// ============================================================================
+#define(ciDoFont) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciVarSet] ciVarSet;
+    #req[ciValFree] ciValFree;
+    #req[ciFontBlit] ciFontBlit;
+    #req[ciFontMeasure] ciFontMeasure;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "setKerning") mKe;
+    ciIdentIs(moff, mlen, "setLineGap") mLg;
+    ciIdentIs(moff, mlen, "setScale") mScl;
+    ciIdentIs(moff, mlen, "draw") mDrw;
+    ciIdentIs(moff, mlen, "drawColored") mDc;
+    ciIdentIs(moff, mlen, "drawScaled") mDsc;
+    ciIdentIs(moff, mlen, "drawWrapped") mDw;
+    #stack[int, 32] isVoid = 0;
+    if (mKe == 1) { isVoid = 1; }
+    if (mLg == 1) { isVoid = 1; }
+    if (mScl == 1) { isVoid = 1; }
+    if (mDrw == 1) { isVoid = 1; }
+    if (mDc == 1) { isVoid = 1; }
+    if (mDsc == 1) { isVoid = 1; }
+    if (mDw == 1) { isVoid = 1; }
+    if (isVoid == 1) {
+        ciAdvance();
+        if (ciCur == 9) { ciAdvance(); }
+        #stack[int, 64] a1 = 0; #stack[int, 64] a2 = 0; #stack[int, 64] a3 = 0;
+        #stack[int, 64] a4 = 0; #stack[int, 64] a5 = 0; #stack[int, 64] a6 = 0;
+        #stack[int, 64] a7 = 0;
+        #stack[int, 64] w1 = 0; #stack[int, 64] w2 = 0; #stack[int, 64] w3 = 0;
+        #stack[int, 64] w4 = 0; #stack[int, 64] w5 = 0; #stack[int, 64] w6 = 0;
+        #stack[int, 64] w7 = 0;
+        #stack[int, 32] n = 0;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (ciCur == 10) { go = 0; }
+            if (ciCur == 0) { go = 0; }
+            if (go == 1) {
+                ciExpr(0) e;
+                #stack[int, 64] eo = ciEvalOwns;
+                if (n == 0) { a1 = e; w1 = eo; }
+                if (n == 1) { a2 = e; w2 = eo; }
+                if (n == 2) { a3 = e; w3 = eo; }
+                if (n == 3) { a4 = e; w4 = eo; }
+                if (n == 4) { a5 = e; w5 = eo; }
+                if (n == 5) { a6 = e; w6 = eo; }
+                if (n == 6) { a7 = e; w7 = eo; }
+                n = n + 1;
+                #delete[eo]; #delete[e];
+                if (ciCur == 21) { ciAdvance(); }
+                if (n >= 7) { go = 0; }
+            }
+        }
+        #delete[go];
+        if (ciCur == 10) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (mKe == 1) { cssc::poke32(a1 + 12, a2); }
+            if (mLg == 1) { cssc::poke32(a1 + 16, a2); }
+            if (mScl == 1) { #stack[int, 64] s = a2; if (s < 1) { s = 1; } cssc::poke32(a1 + 20, s); #delete[s]; }
+            if (mDrw == 1) {
+                #stack[int, 64] col = cssc::shl(1, 32) - 1;
+                if (n >= 6) { col = a6; }
+                ciFontBlit(a1, a2, a3, a4, a5, col);
+                #delete[col];
+            }
+            if (mDc == 1) {
+                #stack[int, 64] col = cssc::shl(1, 32) - 1;
+                if (n >= 6) { col = a6; }
+                ciFontBlit(a1, a2, a3, a4, a5, col);
+                #delete[col];
+            }
+            if (mDsc == 1) {
+                // drawScaled(f,target,x,y,text,argb,scale): temporarily set scale.
+                #stack[int, 64] save = cssc::peek32(a1 + 20);
+                #stack[int, 64] s = a7;
+                if (s < 1) { s = 1; }
+                cssc::poke32(a1 + 20, s);
+                ciFontBlit(a1, a2, a3, a4, a5, a6);
+                cssc::poke32(a1 + 20, save);
+                #delete[save]; #delete[s];
+            }
+            if (mDw == 1) {
+                // drawWrapped(f,target,x,y,text,argb,maxWidth): word-wrap on spaces,
+                // '\n' forces a break. Flush each line as a temp string value.
+                #stack[int, 64] glyphW = cssc::peek32(a1);
+                #stack[int, 64] glyphH = cssc::peek32(a1 + 4);
+                #stack[int, 64] kern = cssc::peek32(a1 + 12);
+                #stack[int, 64] lineGap = cssc::peek32(a1 + 16);
+                #stack[int, 64] scale = cssc::peek32(a1 + 20);
+                #stack[int, 64] advance = (glyphW + kern) * scale;
+                #stack[int, 64] lineStep = (glyphH + lineGap) * scale;
+                #stack[int, 64] slen = cssc::peek32(a5 + 4);
+                #stack[int, 64] lb = cssc::alloc(slen + 9);
+                cssc::poke32(lb, 1);
+                #stack[int, 64] lineLen = 0;
+                #stack[int, 64] cy = a4;
+                #stack[int, 64] i = 0;
+                #stack[int, 32] more = 1;
+                while (more == 1) {
+                    #stack[int, 64] ws = i;
+                    #stack[int, 32] scan = 1;
+                    while (scan == 1) {
+                        if (i >= slen) { scan = 0; }
+                        if (scan == 1) {
+                            #stack[int, 64] c = cssc::peek8(a5 + 8 + i);
+                            if (c == 32) { scan = 0; }
+                            if (c == 10) { scan = 0; }
+                            if (scan == 1) { i = i + 1; }
+                            #delete[c];
+                        }
+                    }
+                    #delete[scan];
+                    #stack[int, 64] wlen = i - ws;
+                    if (wlen > 0) {
+                        #stack[int, 64] sep = 0;
+                        if (lineLen > 0) { sep = 1; }
+                        #stack[int, 64] newChars = lineLen + sep + wlen;
+                        #stack[int, 64] wpx = newChars * advance - kern * scale;
+                        #stack[int, 32] flush = 0;
+                        if (wpx > a7) { if (lineLen > 0) { flush = 1; } }
+                        if (flush == 1) {
+                            cssc::poke32(lb + 4, lineLen);
+                            ciFontBlit(a1, a2, a3, cy, lb, a6);
+                            cy = cy + lineStep;
+                            lineLen = 0;
+                        }
+                        if (lineLen > 0) { cssc::poke8(lb + 8 + lineLen, 32); lineLen = lineLen + 1; }
+                        #stack[int, 64] k = 0;
+                        while (k < wlen) {
+                            cssc::poke8(lb + 8 + lineLen, cssc::peek8(a5 + 8 + ws + k));
+                            lineLen = lineLen + 1;
+                            k = k + 1;
+                        }
+                        #delete[k];
+                        #delete[sep]; #delete[newChars]; #delete[wpx]; #delete[flush];
+                    }
+                    #delete[wlen];
+                    #delete[ws];
+                    if (i >= slen) { more = 0; }
+                    if (more == 1) {
+                        #stack[int, 64] d = cssc::peek8(a5 + 8 + i);
+                        if (d == 10) {
+                            cssc::poke32(lb + 4, lineLen);
+                            ciFontBlit(a1, a2, a3, cy, lb, a6);
+                            cy = cy + lineStep;
+                            lineLen = 0;
+                            i = i + 1;
+                        }
+                        if (d == 32) { i = i + 1; }
+                        #delete[d];
+                    }
+                }
+                #delete[more];
+                if (lineLen > 0) {
+                    cssc::poke32(lb + 4, lineLen);
+                    ciFontBlit(a1, a2, a3, cy, lb, a6);
+                }
+                cssc::free(lb);
+                #delete[i]; #delete[lineLen]; #delete[cy]; #delete[lb];
+                #delete[glyphW]; #delete[glyphH]; #delete[kern]; #delete[lineGap];
+                #delete[scale]; #delete[advance]; #delete[lineStep]; #delete[slen];
+            }
+        }
+        if (w1 == 1) { cssc::free(a1); }
+        if (w2 == 1) { cssc::free(a2); }
+        if (w3 == 1) { cssc::free(a3); }
+        if (w4 == 1) { cssc::free(a4); }
+        if (w5 == 1) { cssc::free(a5); }
+        if (w6 == 1) { cssc::free(a6); }
+        if (w7 == 1) { cssc::free(a7); }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[a1]; #delete[a2]; #delete[a3]; #delete[a4]; #delete[a5]; #delete[a6]; #delete[a7];
+        #delete[w1]; #delete[w2]; #delete[w3]; #delete[w4]; #delete[w5]; #delete[w6]; #delete[w7];
+        #delete[n];
+    }
+    if (isVoid == 0) {
+        ciExpr(0) r;
+        #stack[int, 64] rt = ciEvalType;
+        #stack[int, 64] ro = ciEvalOwns;
+        #stack[int, 32] bound = 0;
+        if (ciCur == 2) {
+            #stack[int, 64] cno = ciTokOff;
+            #stack[int, 64] cnl = ciTokLen;
+            ciAdvance();
+            if (ciExec == 1) { ciVarSet(cno, cnl, r, rt, ro); bound = 1; }
+            #delete[cno]; #delete[cnl];
+        }
+        if (bound == 0) {
+            if (ro == 1) { ciValFree(rt, r); }
+        }
+        #delete[bound]; #delete[r]; #delete[rt]; #delete[ro];
+        if (ciCur == 13) { ciAdvance(); }
+    }
+    #delete[isVoid];
+    #delete[mKe]; #delete[mLg]; #delete[mScl]; #delete[mDrw]; #delete[mDc]; #delete[mDsc]; #delete[mDw];
+    #delete[moff]; #delete[mlen]; #delete[ccp]; #delete[o]; #delete[l];
+}
+
+// keyboard module -- statement position. update() drains the ring + snapshots;
+// query methods appear in ciExpr, but if used as statements they parse+discard.
+#define(ciDoKey) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciKbUpdate] ciKbUpdate;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "update") mup;
+    ciAdvance();
+    if (ciCur == 9) { ciAdvance(); }
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ciCur == 10) { go = 0; }
+        if (ciCur == 0) { go = 0; }
+        if (go == 1) {
+            ciExpr(0) e;
+            #stack[int, 64] eo = ciEvalOwns;
+            if (eo == 1) { cssc::free(e); }
+            #delete[eo];
+            #delete[e];
+            if (ciCur == 21) { ciAdvance(); }
+        }
+    }
+    #delete[go];
+    if (ciCur == 10) { ciAdvance(); }
+    if (ciExec == 1) {
+        if (mup == 1) { ciKbUpdate(); }
+    }
+    if (ciCur == 13) { ciAdvance(); }
+    #delete[mup];
+    #delete[moff];
+    #delete[mlen];
+    #delete[ccp];
+    #delete[o];
+    #delete[l];
+}
+
+// sound module -- statement position. setVolume clamps+stores; load performs
+// the (inert) slot alloc + nextId bump; play/stop/stopAll/loop/pause/resume are
+// no-ops. Value methods (new/load/isPlaying) live in ciExpr. Spec section 3.
+#define(ciDoSound) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExec] ciExec;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciSndLoad] ciSndLoad;
+    #req[ciSndVolume] ciSndVolume;
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciTokHasCC(o, l) ccp;
+    #stack[int, 64] moff = o;
+    #stack[int, 64] mlen = l;
+    if (ccp >= 0) { moff = o + ccp + 2; mlen = l - ccp - 2; }
+    ciIdentIs(moff, mlen, "setVolume") msv;
+    ciIdentIs(moff, mlen, "load") mld;
+    ciAdvance();
+    if (ciCur == 9) { ciAdvance(); }
+    #stack[int, 64] a1 = 0;
+    #stack[int, 64] a1t = 0;
+    #stack[int, 64] a1o = 0;
+    #stack[int, 32] n = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ciCur == 10) { go = 0; }
+        if (ciCur == 0) { go = 0; }
+        if (go == 1) {
+            ciExpr(0) e;
+            if (n == 0) { a1 = e; a1t = ciEvalType; a1o = ciEvalOwns; }
+            if (n != 0) { if (ciEvalOwns == 1) { cssc::free(e); } }
+            n = n + 1;
+            #delete[e];
+            if (ciCur == 21) { ciAdvance(); }
+        }
+    }
+    #delete[go];
+    if (ciCur == 10) { ciAdvance(); }
+    if (ciExec == 1) {
+        if (msv == 1) {
+            #stack[int, 64] vv = a1;
+            if (vv < 0) { vv = 0; }
+            if (vv > 100) { vv = 100; }
+            ciSndVolume = vv;
+            #delete[vv];
+        }
+        if (mld == 1) {
+            ciSndLoad(a1) r;
+            if (r != 0) { cssc::free(r); }
+            #delete[r];
+        }
+    }
+    if (a1o == 1) { if (a1t == 1) { cssc::free(a1); } }
+    if (ciCur == 13) { ciAdvance(); }
+    #delete[a1];
+    #delete[a1t];
+    #delete[a1o];
+    #delete[n];
+    #delete[msv];
+    #delete[mld];
+    #delete[moff];
+    #delete[mlen];
+    #delete[ccp];
+    #delete[o];
+    #delete[l];
+}
+
+// ini module -- statement position. Every ini method returns a value; as a
+// statement we evaluate through ciExpr (which performs write/delete side
+// effects) and discard the result.
+#define(ciDoIni) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciExec] ciExec;
+    #req[ciVarSet] ciVarSet;
+    #req[ciAdvance] ciAdvance;
+    ciExpr(0) r;
+    #stack[int, 64] rt = ciEvalType;
+    #stack[int, 64] ro = ciEvalOwns;
+    // a trailing ident is a result capture (`ini::add_section(f,s) ok;`). Without
+    // consuming + binding it the parser desyncs onto the ident as its own stray
+    // statement (the capture reads as undefined 0).
+    #stack[int, 32] took = 0;
+    if (ciCur == 2) {
+        #stack[int, 64] cO = ciTokOff;
+        #stack[int, 64] cL = ciTokLen;
+        ciAdvance();
+        if (ciExec == 1) { ciVarSet(cO, cL, r, rt, ro); took = 1; }
+        #delete[cO];
+        #delete[cL];
+    }
+    if (took == 0) { if (ro == 1) { if (rt == 1) { cssc::free(r); } } }
+    #delete[took];
+    #delete[ro];
+    #delete[rt];
+    #delete[r];
+    if (ciCur == 13) { ciAdvance(); }
+}
+
+// statement-position stdio call: io::createfile(f) ok; / io::write(f, s); /
+// io::removefile(f); ...  Evaluate via ciExpr (runs the mvmod==14 value block),
+// then adopt a trailing capture ident if present, else discard the temp. Unlike
+// ciDoIni, stdio DOES use the capture form (stdio::createfile(x) ok;).
+#stack[int, 64] ciDoStdio;
+#define(ciDoStdio) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciExpr] ciExpr;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciEvalType] ciEvalType;
+    #req[ciExec] ciExec;
+    #req[ciVarSet] ciVarSet;
+    #req[ciAdvance] ciAdvance;
+    ciExpr(0) r;
+    #stack[int, 64] rt = ciEvalType;
+    #stack[int, 64] ro = ciEvalOwns;
+    #stack[int, 32] took = 0;
+    if (ciCur == 2) {
+        #stack[int, 64] cO = ciTokOff;
+        #stack[int, 64] cL = ciTokLen;
+        ciAdvance();
+        if (ciExec == 1) { ciVarSet(cO, cL, r, rt, ro); took = 1; }
+        #delete[cO];
+        #delete[cL];
+    }
+    if (took == 0) { if (ro == 1) { if (rt == 1) { cssc::free(r); } } }
+    #delete[took];
+    #delete[ro];
+    #delete[rt];
+    #delete[r];
+    if (ciCur == 13) { ciAdvance(); }
+}
+
+#define(ciDoAssign) {
+    #scanp(ciDoAssign, int, 0) o;
+    #scanp(ciDoAssign, int, 1) l;
+    #req[ciCur] ciCur;
+    #req[ciExec] ciExec;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciSetMode] ciSetMode;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciVarSet] ciVarSet;
+    #req[ciVarGet] ciVarGet;
+    #req[ciStrConcat] ciStrConcat;
+    // NOTE: the caller (ciStmt fallback) has ALREADY advanced past the
+    // target ident and passes its token span in -- the fallback needs the
+    // next token to route dot/arrow/instantiation forms first
+    if (ciCur == 14) {
+        ciAdvance();
+        ciExpr(0) v;
+        #stack[int, 64] vt = ciEvalType;
+        #stack[int, 64] vo = ciEvalOwns;
+        if (ciExec == 1) {
+            // ASSIGNMENT mode: a bare-name frame miss inside a sector method
+            // writes through to the qualified member (declarations never do)
+            ciSetMode = 1;
+            ciVarSet(o, l, v, vt, vo);
+            ciSetMode = 0;
+        }
+        if (ciExec == 0) {
+            // skip mode: nobody adopts the owned temporary -> free it
+            if (vo == 1) { if (vt == 1) { cssc::free(v); } }
+        }
+        #delete[v];
+        #delete[vt];
+        #delete[vo];
+    }
+    // '++' / '+=' -- '++' lexes as two '+' tokens (4), there is no dedicated
+    // increment token. Without this a bare `x++` and every `for (...; x++)`
+    // silently never advances -> the loop spins forever.
+    if (ciCur == 4) {
+        ciAdvance();
+        if (ciCur == 4) {                       // x++
+            ciAdvance();
+            if (ciExec == 1) {
+                ciVarGet(o, l) cur;
+                #stack[int, 64] ct = ciEvalType;
+                #stack[int, 64] nv = cur + 1;
+                if (ct == 2) { nv = cssc::fAdd(cur, cssc::iToF(1)); }
+                ciVarSet(o, l, nv, ct, 0);
+                #delete[nv];
+                #delete[ct];
+                #delete[cur];
+            }
+        }
+        if (ciCur == 14) {                      // x += expr
+            ciAdvance();
+            ciExpr(0) rhs;
+            #stack[int, 64] rt = ciEvalType;
+            #stack[int, 64] ro = ciEvalOwns;
+            if (ciExec == 1) {
+                ciVarGet(o, l) cur;
+                #stack[int, 64] ct = ciEvalType;
+                #stack[int, 64] nv = 0;
+                #stack[int, 64] nt = 0;
+                #stack[int, 64] no = 0;
+                if (ct == 1) {
+                    ciStrConcat(cur, 1, rhs, rt) cc;
+                    nv = cc; nt = 1; no = 1;
+                    #delete[cc];
+                }
+                if (ct != 1) {
+                    #stack[int, 32] anyF = 0;
+                    if (ct == 2) { anyF = 1; }
+                    if (rt == 2) { anyF = 1; }
+                    if (anyF == 1) {
+                        #stack[int, 64] la = cur;
+                        #stack[int, 64] ra = rhs;
+                        if (ct != 2) { cssc::iToF(cur) t; la = t; #delete[t]; }
+                        if (rt != 2) { cssc::iToF(rhs) t; ra = t; #delete[t]; }
+                        nv = cssc::fAdd(la, ra); nt = 2;
+                        #delete[la];
+                        #delete[ra];
+                    }
+                    if (anyF == 0) { nv = cur + rhs; nt = 0; }
+                    #delete[anyF];
+                }
+                ciVarSet(o, l, nv, nt, no);
+                #delete[nv];
+                #delete[nt];
+                #delete[no];
+                #delete[ct];
+                #delete[cur];
+            }
+            if (ciExec == 0) { if (ro == 1) { if (rt == 1) { cssc::free(rhs); } } }
+            #delete[rhs];
+            #delete[rt];
+            #delete[ro];
+        }
+    }
+    // '--' / '-=' (minus lexes as token 5).
+    if (ciCur == 5) {
+        ciAdvance();
+        if (ciCur == 5) {                       // x--
+            ciAdvance();
+            if (ciExec == 1) {
+                ciVarGet(o, l) cur;
+                #stack[int, 64] ct = ciEvalType;
+                #stack[int, 64] nv = cur - 1;
+                if (ct == 2) { nv = cssc::fSub(cur, cssc::iToF(1)); }
+                ciVarSet(o, l, nv, ct, 0);
+                #delete[nv];
+                #delete[ct];
+                #delete[cur];
+            }
+        }
+        if (ciCur == 14) {                      // x -= expr
+            ciAdvance();
+            ciExpr(0) rhs;
+            #stack[int, 64] rt = ciEvalType;
+            #stack[int, 64] ro = ciEvalOwns;
+            if (ciExec == 1) {
+                ciVarGet(o, l) cur;
+                #stack[int, 64] ct = ciEvalType;
+                #stack[int, 64] nv = 0;
+                #stack[int, 64] nt = 0;
+                #stack[int, 32] anyF = 0;
+                if (ct == 2) { anyF = 1; }
+                if (rt == 2) { anyF = 1; }
+                if (anyF == 1) {
+                    #stack[int, 64] la = cur;
+                    #stack[int, 64] ra = rhs;
+                    if (ct != 2) { cssc::iToF(cur) t; la = t; #delete[t]; }
+                    if (rt != 2) { cssc::iToF(rhs) t; ra = t; #delete[t]; }
+                    nv = cssc::fSub(la, ra); nt = 2;
+                    #delete[la];
+                    #delete[ra];
+                }
+                if (anyF == 0) { nv = cur - rhs; nt = 0; }
+                #delete[anyF];
+                ciVarSet(o, l, nv, nt, 0);
+                #delete[nv];
+                #delete[nt];
+                #delete[ct];
+                #delete[cur];
+            }
+            if (ciExec == 0) { if (ro == 1) { if (rt == 1) { cssc::free(rhs); } } }
+            #delete[rhs];
+            #delete[rt];
+            #delete[ro];
+        }
+    }
+    if (ciCur == 13) {
+        ciAdvance();
+    }
+}
+
+// NOTE: the caller (ciStmt) has already consumed the '#' AND positioned the
+// lexer ON the directive-name ident (it pre-reads the name to route #free /
+// #reserve to its own inline handlers -- those replay statement spans and
+// therefore must live in the self-recursive ciStmt, never here: ciDoDecl
+// calling ciStmt would be mutual recursion, forbidden by the ccos backend).
+#define(ciDoDecl) {
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciTokFloat] ciTokFloat;
+    #req[ciTokNum] ciTokNum;
+    #req[ciPos] ciPos;
+    #req[ciSrc] ciSrc;
+    #req[ciExec] ciExec;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciScopeBase] ciScopeBase;
+    #req[ciArgVals] ciArgVals;
+    #req[ciArgTypes] ciArgTypes;
+    #req[ciArgCount] ciArgCount;
+    #req[ciVVals] ciVVals;
+    #req[ciVTypes] ciVTypes;
+    #req[ciVCount] ciVCount;
+    #req[ciSecInit] ciSecInit;
+    #req[ciSecVis] ciSecVis;
+    #req[ciBindVis] ciBindVis;
+    #req[ciBindBits] ciBindBits;
+    #req[ciRegSecOff] ciRegSecOff;
+    #req[ciRegSecLen] ciRegSecLen;
+    #req[ciCurSecOff] ciCurSecOff;
+    #req[ciCurSecLen] ciCurSecLen;
+    #req[ciQualBuf] ciQualBuf;
+    #req[ciAdvance] ciAdvance;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciQualify] ciQualify;
+    #req[ciTokHasCC] ciTokHasCC;
+    #req[ciVarFindGlobal] ciVarFindGlobal;
+    #req[ciVarFind] ciVarFind;
+    #req[ciVReq] ciVReq;
+    #req[ciExpr] ciExpr;
+    #req[ciVarSet] ciVarSet;
+    #req[ciVarGet] ciVarGet;
+    #req[ciVarDrop] ciVarDrop;
+    #req[ciVecNew] ciVecNew;
+    #req[ciStrNew] ciStrNew;
+    #req[ciVecPush] ciVecPush;
+    #req[ciVecFree] ciVecFree;
+    #req[ciMapNew] ciMapNew;
+    #req[ciMapSet] ciMapSet;
+    #req[ciValFree] ciValFree;
+    #req[ciBindNew] ciBindNew;
+    #req[ciBindRawSet] ciBindRawSet;
+    #req[ciBindFree] ciBindFree;
+    #req[ciModConsole] ciModConsole;
+    #req[ciConNew] ciConNew;
+    #req[ciFnRegister] ciFnRegister;
+    #req[ciFnFind] ciFnFind;
+    #req[ciFnInjCnt] ciFnInjCnt;
+    #req[ciFnInjStart] ciFnInjStart;
+    #req[ciFnInjEnd] ciFnInjEnd;
+    #req[ciCdOff] ciCdOff;
+    #req[ciCdLen] ciCdLen;
+    #req[ciFnParCnt] ciFnParCnt;
+    #req[ciFnParOff] ciFnParOff;
+    #req[ciFnParLen] ciFnParLen;
+    #req[ciCurInst] ciCurInst;
+    #req[ciInstMemFind] ciInstMemFind;
+    #req[ciInstMemSet] ciInstMemSet;
+    #req[ciInstFree] ciInstFree;
+    #req[ciDefLoaded] ciDefLoaded;
+    #req[ciLineAt] ciLineAt;
+    #req[ciRaiseMsg] ciRaiseMsg;
+    #req[ciRaise] ciRaise;
+    #req[ciAppLit] ciAppLit;
+    #req[ciItoa] ciItoa;
+    // directive name (current token): stack/heap/auto/delete/define/scanp/req
+    #stack[int, 64] o = ciTokOff;
+    #stack[int, 64] l = ciTokLen;
+    ciIdentIs(o, l, "delete") isdel;
+    ciIdentIs(o, l, "define") isdef;
+    ciIdentIs(o, l, "scanp") isscan;
+    ciIdentIs(o, l, "req") isreq;
+    // def-gated function forms: #cdefine(name, p1, ...) { body } with named params;
+    // #param[type] name / #fvar(type) name are param/local declarations that carry
+    // only a type hint (the interp is dynamically typed) -- parsed and skipped.
+    ciIdentIs(o, l, "cdefine") iscdef;
+    ciIdentIs(o, l, "redefine") isredef;
+    ciIdentIs(o, l, "param") isparam;
+    ciIdentIs(o, l, "fvar") isfvar;
+    ciIdentIs(o, l, "qvar") isqvar;
+    // container directives (#vector/#map/#array/#bind) create a container value
+    // instead of a plain typed slot; the tag is threaded into the isvar bind.
+    ciIdentIs(o, l, "vector") isvec;
+    ciIdentIs(o, l, "map") ismap;
+    // array shares the vector runtime representation (tag 4); the [T, N] size N
+    // is nominal (parsed as declBits, caps the initializer only).
+    ciIdentIs(o, l, "array") isarr;
+    // #video[w,h,fps] name; -- allocate a backbuffer handle (video module).
+    ciIdentIs(o, l, "video") isvid;
+    // #console[w,h] name; -- allocate a grid-backed console handle (tag 6).
+    ciIdentIs(o, l, "console") iscons;
+    ciIdentIs(o, l, "adress") isadr;
+    ciIdentIs(o, l, "reflect") isref;
+    ciIdentIs(o, l, "delmember") isdelm;
+    #stack[int, 32] ctag = 0;
+    if (isvec == 1) { ctag = 4; }
+    if (ismap == 1) { ctag = 5; }
+    if (isarr == 1) { ctag = 4; }
+    ciAdvance();
+    // ---- #video[w,h,fps] name; : allocate a 24-byte handle {w,h,fps,isOpen,buf}
+    // + a w*h*4 zeroed ARGB backbuffer; store the handle pointer in `name`. ----
+    if (isvid == 1) {
+        #stack[int, 64] vw = 0;
+        #stack[int, 64] vh = 0;
+        #stack[int, 64] vfps = 0;
+        if (ciCur == 23) {
+            ciAdvance();
+            ciExpr(0) e0;
+            vw = e0;
+            #delete[e0];
+            if (ciCur == 21) { ciAdvance(); }
+            ciExpr(0) e1;
+            vh = e1;
+            #delete[e1];
+            if (ciCur == 21) { ciAdvance(); }
+            ciExpr(0) e2;
+            vfps = e2;
+            #delete[e2];
+            if (ciCur == 24) { ciAdvance(); }
+        }
+        #stack[int, 64] vno = ciTokOff;
+        #stack[int, 64] vnl = ciTokLen;
+        ciAdvance();
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (vw < 1) { vw = 1; }
+            if (vh < 1) { vh = 1; }
+            if (vfps <= 0) { vfps = 60; }
+            #stack[int, 64] hd = cssc::alloc(24);
+            #stack[int, 64] buf = cssc::alloc(vw * vh * 4);
+            cssc::memfill32(buf, 0, vw * vh);
+            cssc::poke32(hd, vw);
+            cssc::poke32(hd + 4, vh);
+            cssc::poke32(hd + 8, vfps);
+            cssc::poke32(hd + 12, 1);
+            cssc::poke64(hd + 16, buf);
+            ciVarSet(vno, vnl, hd, 0, 0);
+            #delete[hd];
+            #delete[buf];
+        }
+        #delete[vw];
+        #delete[vh];
+        #delete[vfps];
+        #delete[vno];
+        #delete[vnl];
+    }
+    // ---- #console[w,h] name; : allocate a console instance (value tag 6, owns=1
+    // so the cross-run sweep / #delete reclaims it via ciValFree). Defaults 80,25.
+    // Gated on ciModConsole (#include("console")). ----
+    if (iscons == 1) {
+        #stack[int, 64] cw = 80;
+        #stack[int, 64] cvh = 25;
+        if (ciCur == 23) {
+            ciAdvance();
+            ciExpr(0) e0;
+            cw = e0;
+            #delete[e0];
+            if (ciCur == 21) { ciAdvance(); }
+            ciExpr(0) e1;
+            cvh = e1;
+            #delete[e1];
+            if (ciCur == 24) { ciAdvance(); }
+        }
+        #stack[int, 64] cno = ciTokOff;
+        #stack[int, 64] cnl = ciTokLen;
+        ciAdvance();
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (ciModConsole == 1) {
+                if (cw < 1) { cw = 1; }
+                if (cvh < 1) { cvh = 1; }
+                ciConNew(cw, cvh) hd;
+                ciVarSet(cno, cnl, hd, 6, 1);
+                #delete[hd];
+            }
+        }
+        #delete[cw];
+        #delete[cvh];
+        #delete[cno];
+        #delete[cnl];
+    }
+    // ---- #define(name) { body } : register name + body span, skip the body ----
+    if (isdef == 1) {
+        if (ciCur == 9) { ciAdvance(); }
+        #stack[int, 64] dno = ciTokOff;
+        #stack[int, 64] dnl = ciTokLen;
+        ciAdvance();
+        // FX-ARROW-DEF: #define(Owner->member) defines `member` on sector/object
+        // `Owner`, registered as `Owner::member`. The `->` is token 34 (not folded
+        // like `::`), so it must be consumed explicitly or the brace scan mis-starts.
+        #stack[int, 32] arrowM = 0;
+        #stack[int, 64] amOff = 0;
+        #stack[int, 64] amLen = 0;
+        if (ciCur == 34) {
+            ciAdvance();                       // consume '->'
+            amOff = ciTokOff;
+            amLen = ciTokLen;
+            arrowM = 1;
+            ciAdvance();                       // consume member name
+        }
+        if (ciCur == 10) { ciAdvance(); }
+        // cur is now '{'; bstart = first body char (ciPos sits just past '{')
+        #stack[int, 64] bstart = ciPos;
+        #stack[int, 32] depth = 1;
+        #stack[int, 32] scan = 1;
+        while (scan == 1) {
+            ciAdvance();
+            if (ciCur == 0) { scan = 0; }
+            if (ciCur == 11) { depth = depth + 1; }
+            if (ciCur == 12) {
+                depth = depth - 1;
+                if (depth == 0) { scan = 0; }
+            }
+        }
+        #delete[scan];
+        #delete[depth];
+        #stack[int, 64] bend = ciPos;
+        // registration is ciExec-gated: a #define inside if(0){} or a while's
+        // final skip pass must NOT (re)register (ghost-function guard)
+        if (ciExec == 1) {
+            ciTokHasCC(dno, dnl) dcc;
+            ciRegSecOff = 0;
+            ciRegSecLen = 0;
+            ciBindVis = 1;
+            #stack[int, 64] rno = dno;
+            #stack[int, 64] rnl = dnl;
+            if (arrowM == 1) {
+                // FX-ARROW-DEF: register Owner::member; Owner is the sector back-
+                // pointer. Public unless inside the sector's private section.
+                ciQualify(dno, dnl, amOff, amLen) aql;
+                rno = ciQualBuf - ciSrc;
+                rnl = aql;
+                #delete[aql];
+                ciRegSecOff = dno;
+                ciRegSecLen = dnl;
+                if (ciSecInit == 1) { ciBindVis = ciSecVis; }
+            }
+            if (arrowM == 0) {
+            if (ciSecInit == 1) {
+                if (dcc < 0) {
+                    // method inside a sector body: register "Sec::name" with
+                    // the section's visibility + the sector backpointer
+                    ciQualify(ciCurSecOff, ciCurSecLen, dno, dnl) ql;
+                    rno = ciQualBuf - ciSrc;
+                    rnl = ql;
+                    #delete[ql];
+                    ciRegSecOff = ciCurSecOff;
+                    ciRegSecLen = ciCurSecLen;
+                    ciBindVis = ciSecVis;
+                }
+            }
+            if (dcc >= 0) {
+                // explicitly qualified #define(Sec::m): backpointer from the
+                // prefix; defined-from-outside methods are public (reference
+                // cssl_cssc.py:16190-16196)
+                ciRegSecOff = dno;
+                ciRegSecLen = dcc;
+            }
+            }
+            ciFnRegister(rno, rnl, bstart, bend);
+            ciRegSecOff = 0;
+            ciRegSecLen = 0;
+            ciBindVis = 1;
+            #delete[rno];
+            #delete[rnl];
+            #delete[dcc];
+        }
+        if (ciCur == 12) { ciAdvance(); }
+        #delete[bstart];
+        #delete[bend];
+        #delete[dno];
+        #delete[dnl];
+        #delete[arrowM];
+        #delete[amOff];
+        #delete[amLen];
+    }
+    // ---- #cdefine(name, p1, p2, ...) { body } : like #define, but the signature's
+    // named params are pre-bound to arg[i] at call time (no #scanp needed). Registers
+    // through the same path as #define incl. sector-method qualification. def-gated;
+    // firefield defines every function this way. ----
+    if (iscdef == 1) {
+        if (ciExec == 1) {
+            if (ciDefLoaded == 0) {
+                ciRaiseMsg("#cdefine requires #include(\"def\") to be loaded first", ciLineAt(o), 0);
+            }
+        }
+        if (ciCur == 9) { ciAdvance(); }        // '('
+        #stack[int, 64] dno = ciTokOff;         // function name span
+        #stack[int, 64] dnl = ciTokLen;
+        ciAdvance();
+        // collect comma-separated param names into the parse scratch (ciCdOff/Len)
+        #stack[int, 64] pcnt = 0;
+        #stack[int, 32] pc = 1;
+        while (pc == 1) {
+            if (ciCur == 21) {                  // ','
+                ciAdvance();
+                if (ciCur == 2) {
+                    if (pcnt < 8) {
+                        cssc::poke64(ciCdOff + pcnt * 8, ciTokOff);
+                        cssc::poke64(ciCdLen + pcnt * 8, ciTokLen);
+                        pcnt = pcnt + 1;
+                    }
+                    ciAdvance();
+                }
+            }
+            if (ciCur != 21) { pc = 0; }
+        }
+        #delete[pc];
+        if (ciCur == 10) { ciAdvance(); }        // ')'
+        // body span (token indices) via brace scan -- identical to #define
+        #stack[int, 64] bstart = ciPos;
+        #stack[int, 32] depth = 1;
+        #stack[int, 32] scan = 1;
+        while (scan == 1) {
+            ciAdvance();
+            if (ciCur == 0) { scan = 0; }
+            if (ciCur == 11) { depth = depth + 1; }
+            if (ciCur == 12) {
+                depth = depth - 1;
+                if (depth == 0) { scan = 0; }
+            }
+        }
+        #delete[scan];
+        #delete[depth];
+        #stack[int, 64] bend = ciPos;
+        if (ciExec == 1) {
+            ciTokHasCC(dno, dnl) dcc;
+            ciRegSecOff = 0;
+            ciRegSecLen = 0;
+            ciBindVis = 1;
+            #stack[int, 64] rno = dno;
+            #stack[int, 64] rnl = dnl;
+            if (ciSecInit == 1) {
+                if (dcc < 0) {
+                    ciQualify(ciCurSecOff, ciCurSecLen, dno, dnl) ql;
+                    rno = ciQualBuf - ciSrc;
+                    rnl = ql;
+                    #delete[ql];
+                    ciRegSecOff = ciCurSecOff;
+                    ciRegSecLen = ciCurSecLen;
+                    ciBindVis = ciSecVis;
+                }
+            }
+            if (dcc >= 0) {
+                ciRegSecOff = dno;
+                ciRegSecLen = dcc;
+            }
+            ciFnRegister(rno, rnl, bstart, bend) frow;
+            if (frow >= 0) {
+                cssc::poke64(ciFnParCnt + frow * 8, pcnt);
+                #stack[int, 32] cpi = 0;
+                while (cpi < pcnt) {
+                    cssc::poke64(ciFnParOff + (frow * 8 + cpi) * 8, cssc::peek64(ciCdOff + cpi * 8));
+                    cssc::poke64(ciFnParLen + (frow * 8 + cpi) * 8, cssc::peek64(ciCdLen + cpi * 8));
+                    cpi = cpi + 1;
+                }
+                #delete[cpi];
+            }
+            ciRegSecOff = 0;
+            ciRegSecLen = 0;
+            ciBindVis = 1;
+            #delete[frow];
+            #delete[rno];
+            #delete[rnl];
+            #delete[dcc];
+        }
+        if (ciCur == 12) { ciAdvance(); }
+        #delete[bstart];
+        #delete[bend];
+        #delete[pcnt];
+        #delete[dno];
+        #delete[dnl];
+    }
+    // FX-REDEFINE: `#redefine(name) { body }` replaces an existing function's body
+    // (ciFnRegister updates the existing row). The `+<pos>` inject form is parsed
+    // and skipped (positional injection not yet implemented).
+    if (isredef == 1) {
+        if (ciCur == 9) { ciAdvance(); }
+        #stack[int, 64] rdo = ciTokOff;
+        #stack[int, 64] rdl = ciTokLen;
+        ciAdvance();
+        #stack[int, 32] rpc = 1;                       // skip any signature params
+        while (rpc == 1) {
+            if (ciCur == 21) { ciAdvance(); if (ciCur == 2) { ciAdvance(); } }
+            if (ciCur != 21) { rpc = 0; }
+        }
+        #delete[rpc];
+        if (ciCur == 10) { ciAdvance(); }              // ')'
+        #stack[int, 32] rInject = 0;
+        #stack[int, 64] rpos = 0;
+        if (ciCur == 4) {                              // '+<pos>' inject form
+            rInject = 1;
+            ciAdvance();
+            if (ciCur == 17) {
+                ciAdvance();
+                if (ciCur == 1) { rpos = ciTokNum; ciAdvance(); }
+                if (ciCur == 18) { ciAdvance(); }
+            }
+        }
+        #stack[int, 64] rbs = ciPos;
+        #stack[int, 32] rdepth = 1;
+        #stack[int, 32] rscan = 1;
+        while (rscan == 1) {
+            ciAdvance();
+            if (ciCur == 0) { rscan = 0; }
+            if (ciCur == 11) { rdepth = rdepth + 1; }
+            if (ciCur == 12) { rdepth = rdepth - 1; if (rdepth == 0) { rscan = 0; } }
+        }
+        #delete[rscan];
+        #delete[rdepth];
+        #stack[int, 64] rbe = ciPos;
+        if (ciExec == 1) {
+            if (rInject == 0) {
+                ciRegSecOff = 0;
+                ciRegSecLen = 0;
+                ciBindVis = 1;
+                ciFnRegister(rdo, rdl, rbs, rbe);
+            }
+            if (rInject == 1) {
+                ciFnFind(rdo, rdl) frow;
+                if (frow >= 0) {
+                    if (rpos <= 0) {
+                        #stack[int, 64] pc = cssc::peek64(ciFnInjCnt + frow * 8);
+                        if (pc < 8) {
+                            cssc::poke64(ciFnInjStart + (frow * 8 + pc) * 8, rbs);
+                            cssc::poke64(ciFnInjEnd + (frow * 8 + pc) * 8, rbe);
+                            cssc::poke64(ciFnInjCnt + frow * 8, pc + 1);
+                        }
+                        #delete[pc];
+                    }
+                }
+                #delete[frow];
+            }
+        }
+        if (ciCur == 12) { ciAdvance(); }
+        #delete[rInject];
+        #delete[rpos];
+        #delete[rbs];
+        #delete[rbe];
+        #delete[rdo];
+        #delete[rdl];
+    }
+    // ---- #param[type] name : a typed param DECLARATION preceding a #cdefine. The
+    // interp is dynamically typed and #cdefine binds params by signature, so the
+    // type is a hint: parse the [..] group + the name and skip. ----
+    if (isparam == 1) {
+        if (ciCur == 23) {
+            #stack[int, 32] pd = 1;
+            while (pd > 0) {
+                ciAdvance();
+                if (ciCur == 23) { pd = pd + 1; }
+                if (ciCur == 24) { pd = pd - 1; }
+                if (ciCur == 0) { pd = 0; }
+            }
+            #delete[pd];
+            if (ciCur == 24) { ciAdvance(); }
+        }
+        if (ciCur == 2) { ciAdvance(); }
+        if (ciCur == 13) { ciAdvance(); }
+    }
+    // ---- #fvar(type) name : a typed function-local. Declare name = 0 (dynamic
+    // type; first assignment sets the real value). ----
+    if (isfvar == 1) {
+        if (ciCur == 9) {
+            #stack[int, 32] fd = 1;
+            while (fd > 0) {
+                ciAdvance();
+                if (ciCur == 9) { fd = fd + 1; }
+                if (ciCur == 10) { fd = fd - 1; }
+                if (ciCur == 0) { fd = 0; }
+            }
+            #delete[fd];
+            if (ciCur == 10) { ciAdvance(); }
+        }
+        #stack[int, 64] fno = ciTokOff;
+        #stack[int, 64] fnl = ciTokLen;
+        ciAdvance();
+        if (ciExec == 1) { ciVarSet(fno, fnl, 0, 0, 0); }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[fno];
+        #delete[fnl];
+    }
+    // ---- #qvar(type, expr) name : a quick-local bound to an expression's value. ----
+    if (isqvar == 1) {
+        #stack[int, 64] qv = 0;
+        #stack[int, 64] qt = 0;
+        if (ciCur == 9) {
+            ciAdvance();
+            if (ciCur == 2) { ciAdvance(); }     // type ident
+            if (ciCur == 21) { ciAdvance(); }    // ','
+            ciExpr(0) qe;
+            qv = qe;
+            qt = ciEvalType;
+            #delete[qe];
+            if (ciCur == 10) { ciAdvance(); }
+        }
+        #stack[int, 64] qno = ciTokOff;
+        #stack[int, 64] qnl = ciTokLen;
+        ciAdvance();
+        if (ciExec == 1) { ciVarSet(qno, qnl, qv, qt, 0); }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[qv];
+        #delete[qt];
+        #delete[qno];
+        #delete[qnl];
+    }
+    // ---- #scanp(fn, type, pos) name; : bind name = arg[pos] from the call frame --
+    if (isscan == 1) {
+        if (ciCur == 9) { ciAdvance(); }
+        if (ciCur == 2) { ciAdvance(); }
+        if (ciCur == 21) { ciAdvance(); }
+        if (ciCur == 2) { ciAdvance(); }
+        // skip a generic annotation on the type: vector<int>, map<int,int>, ...
+        // (the '<' is token 17, '>' is 18; the inner ',' is inside the depth).
+        if (ciCur == 17) {
+            #stack[int, 32] gd = 1;
+            while (gd > 0) {
+                ciAdvance();
+                if (ciCur == 17) { gd = gd + 1; }
+                if (ciCur == 18) { gd = gd - 1; }
+                if (ciCur == 0) { gd = 0; }
+            }
+            #delete[gd];
+            if (ciCur == 18) { ciAdvance(); }
+        }
+        if (ciCur == 21) { ciAdvance(); }
+        #stack[int, 64] apos = 0;
+        if (ciCur == 1) { apos = ciTokNum; ciAdvance(); }
+        if (ciCur == 10) { ciAdvance(); }
+        // optional &/* ref-hint prefix on the bound name (ignored)
+        if (ciCur == 30) { ciAdvance(); }
+        if (ciCur == 6) { ciAdvance(); }
+        #stack[int, 64] sno = ciTokOff;
+        #stack[int, 64] snl = ciTokLen;
+        ciAdvance();
+        // optional `= <default>` : bound only when arg[apos] was NOT passed
+        // (apos >= ciArgCount). The expr is always parsed to advance the token
+        // stream; its value is used for an omitted arg, else freed.
+        #stack[int, 32] hasDef = 0;
+        #stack[int, 64] dv = 0;
+        #stack[int, 64] dt = 0;
+        #stack[int, 64] dOwns = 0;
+        if (ciCur == 14) {
+            ciAdvance();
+            hasDef = 1;
+            ciExpr(0) de;
+            dv = de;
+            dt = ciEvalType;
+            dOwns = ciEvalOwns;
+            #delete[de];
+        }
+        #stack[int, 64] av = cssc::peek64(ciArgVals + apos * 8);
+        #stack[int, 64] at = cssc::peek64(ciArgTypes + apos * 8);
+        #stack[int, 32] passed = 0;
+        if (apos < ciArgCount) { passed = 1; }
+        // a parameter borrows its value (args are ref by default); owns=0 so
+        // frame-exit never frees it -- the caller keeps a passed arg, and an
+        // omitted-arg default matches the same borrow convention.
+        #stack[int, 32] usedDef = 0;
+        if (ciExec == 1) {
+            if (passed == 1) { ciVarSet(sno, snl, av, at, 0); }
+            if (passed == 0) {
+                if (hasDef == 1) { ciVarSet(sno, snl, dv, dt, 0); usedDef = 1; }
+                if (hasDef == 0) { ciVarSet(sno, snl, av, at, 0); }
+            }
+        }
+        // free the default temp when it was parsed but not bound (arg passed, or
+        // skip mode). A bound default follows the local-borrow convention.
+        if (hasDef == 1) { if (usedDef == 0) { if (dOwns == 1) { if (dt == 1) { cssc::free(dv); } } } }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[usedDef];
+        #delete[hasDef];
+        #delete[dv];
+        #delete[dt];
+        #delete[dOwns];
+        #delete[passed];
+        #delete[apos];
+        #delete[av];
+        #delete[at];
+        #delete[sno];
+        #delete[snl];
+    }
+    // ---- #req[name] alias; : snapshot a global (frame 0) into the current frame ----
+    if (isreq == 1) {
+        if (ciCur == 23) { ciAdvance(); }
+        #stack[int, 64] gno = ciTokOff;
+        #stack[int, 64] gnl = ciTokLen;
+        ciAdvance();
+        if (ciCur == 24) { ciAdvance(); }
+        // FX-REFSNAP: `#req[g] &alias` is a SNAPSHOT (independent copy, no write-
+        // through); plain `#req[g] alias` is a live write-through reference.
+        #stack[int, 32] hasRef = 0;
+        if (ciCur == 30) { hasRef = 1; ciAdvance(); }
+        if (ciCur == 6) { ciAdvance(); }
+        #stack[int, 64] ano = ciTokOff;
+        #stack[int, 64] anl = ciTokLen;
+        ciAdvance();
+        // resolution: inside a sector context, prefer the qualified member
+        // ("#req[m] m;" imports Sec::m), else fall back to the plain global
+        #stack[int, 64] gv = 0;
+        #stack[int, 64] gt = 0;
+        #stack[int, 32] got = 0;
+        #stack[int, 64] targetRow = 0 - 1;
+        if (ciCurSecLen > 0) {
+            ciQualify(ciCurSecOff, ciCurSecLen, gno, gnl) ql;
+            ciVarFindGlobal(ciQualBuf - ciSrc, ql) qi;
+            if (qi >= 0) {
+                gv = cssc::peek64(ciVVals + qi * 8);
+                gt = cssc::peek64(ciVTypes + qi * 8);
+                got = 1;
+                targetRow = qi;
+            }
+            #delete[qi];
+            #delete[ql];
+        }
+        if (got == 0) {
+            // resolve in the global frame (base 0)
+            #stack[int, 64] savedBase = ciScopeBase;
+            ciScopeBase = 0;
+            ciVarGet(gno, gnl) g2;
+            gv = g2;
+            gt = ciEvalType;
+            ciScopeBase = savedBase;
+            #delete[g2];
+            #delete[savedBase];
+            ciVarFindGlobal(gno, gnl) tr;
+            targetRow = tr;
+            #delete[tr];
+        }
+        // the alias binds the target: it borrows the value (owns=0) AND records
+        // a write-through link so `alias = x` mutates the real global.
+        if (ciExec == 1) {
+            ciVarSet(ano, anl, gv, gt, 0);
+            if (hasRef == 0) {                        // snapshot -> no write-through link
+                if (targetRow >= 0) {
+                    ciVarFind(ano, anl) arow;
+                    if (arow >= 0) { cssc::poke64(ciVReq + arow * 8, targetRow + 1); }
+                    #delete[arow];
+                }
+            }
+        }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[hasRef];
+        #delete[targetRow];
+        #delete[got];
+        #delete[gv];
+        #delete[gt];
+        #delete[gno];
+        #delete[gnl];
+        #delete[ano];
+        #delete[anl];
+    }
+    // ---- #stack / #heap / #auto : typed slot declaration ----
+    #stack[int, 32] isvar = 0;
+    if (isdel == 0) { if (isdef == 0) { if (isscan == 0) { if (isreq == 0) { if (isvid == 0) { if (iscons == 0) {
+    if (iscdef == 0) { if (isparam == 0) { if (isfvar == 0) { if (isqvar == 0) { if (isredef == 0) {
+    if (isadr == 0) { if (isref == 0) { if (isdelm == 0) { isvar = 1; } } } } } } } } } } } } } }
+    // parse the [TYPE, BITS] annotation and capture the declared type
+    // (declType: 0 = int/generic, 1 = string)
+    // ---- #delete[name]; / #delete[Obj->member]; : unbind + free ----
+    if (isdel == 1) {
+        if (ciCur == 23) { ciAdvance(); }
+        // the identifier inside [ ] is the variable (or Obj->member) to drop
+        #stack[int, 64] dno = ciTokOff;
+        #stack[int, 64] dnl = ciTokLen;
+        #stack[int, 32] hasName = 0;
+        if (ciCur == 2) { hasName = 1; ciAdvance(); }
+        if (ciCur == 1) { if (ciTokFloat == 2) { hasName = 1; ciAdvance(); } }
+        // arrow form: `#delete[Obj->member];` drops a member of the CURRENT
+        // instance (free{} blocks + ctor cleanup use this)
+        #stack[int, 32] isArrow = 0;
+        #stack[int, 64] dmo = 0;
+        #stack[int, 64] dml = 0;
+        if (ciCur == 34) {
+            ciAdvance();
+            dmo = ciTokOff;
+            dml = ciTokLen;
+            isArrow = 1;
+            if (ciCur == 2) { ciAdvance(); }
+        }
+        // skip any remainder up to and including ]
+        #stack[int, 32] dsk = 1;
+        while (dsk == 1) {
+            if (ciCur == 24) { dsk = 0; }
+            if (ciCur == 0) { dsk = 0; }
+            if (dsk == 1) { ciAdvance(); }
+        }
+        if (ciCur == 24) { ciAdvance(); }
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (isArrow == 1) {
+                if (ciCurInst != 0) {
+                    ciInstMemFind(ciCurInst, dmo, dml) mi;
+                    if (mi >= 0) {
+                        #stack[int, 64] mrow = ciCurInst + 24 + mi * 64;
+                        #stack[int, 64] mo2 = cssc::peek64(mrow + 56);
+                        #stack[int, 64] mt2 = cssc::peek64(mrow + 48);
+                        #stack[int, 64] mv2 = cssc::peek64(mrow + 40);
+                        if (mo2 == 1) {
+                            if (mt2 == 1) { cssc::free(mv2); }
+                            if (mt2 == 3) { if (mv2 != 0) { ciInstFree(mv2); } }
+                        }
+                        // tombstone the member row in place
+                        cssc::poke64(mrow + 32, 0);
+                        cssc::poke64(mrow + 40, 0);
+                        cssc::poke64(mrow + 48, 0);
+                        cssc::poke64(mrow + 56, 0);
+                        #delete[mo2];
+                        #delete[mt2];
+                        #delete[mv2];
+                        #delete[mrow];
+                    }
+                    #delete[mi];
+                }
+            }
+            if (isArrow == 0) {
+                if (hasName == 1) { ciVarDrop(dno, dnl); }
+            }
+        }
+        #delete[dsk];
+        #delete[isArrow];
+        #delete[dmo];
+        #delete[dml];
+        #delete[hasName];
+        #delete[dno];
+        #delete[dnl];
+    }
+    // ---- #adress[var] name; -- bind name to the native address of var's value slot ----
+    if (isadr == 1) {
+        if (ciCur == 23) { ciAdvance(); }
+        #stack[int, 64] tno = ciTokOff;
+        #stack[int, 64] tnl = ciTokLen;
+        if (ciCur == 2) { ciAdvance(); }
+        #stack[int, 32] ask = 1;
+        while (ask == 1) { if (ciCur == 24) { ask = 0; } if (ciCur == 0) { ask = 0; } if (ask == 1) { ciAdvance(); } }
+        #delete[ask];
+        if (ciCur == 24) { ciAdvance(); }
+        #stack[int, 64] ano = ciTokOff;
+        #stack[int, 64] anl = ciTokLen;
+        #stack[int, 32] ahn = 0;
+        if (ciCur == 2) { ahn = 1; ciAdvance(); }
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (ahn == 1) {
+                ciVarFind(tno, tnl) arow;
+                #stack[int, 64] aval = 0;
+                if (arow >= 0) { aval = ciVVals + arow * 8; }
+                ciBindBits = 64;
+                ciVarSet(ano, anl, aval, 0, 0);
+                #delete[aval];
+                #delete[arow];
+            }
+        }
+        #delete[tno];
+        #delete[tnl];
+        #delete[ano];
+        #delete[anl];
+        #delete[ahn];
+    }
+    // ---- #reflect[addr] name; -- reverse-map an #adress pointer to (value, type) ----
+    if (isref == 1) {
+        if (ciCur == 23) { ciAdvance(); }
+        #stack[int, 64] rno = ciTokOff;
+        #stack[int, 64] rnl = ciTokLen;
+        if (ciCur == 2) { ciAdvance(); }
+        #stack[int, 32] rsk = 1;
+        while (rsk == 1) { if (ciCur == 24) { rsk = 0; } if (ciCur == 0) { rsk = 0; } if (rsk == 1) { ciAdvance(); } }
+        #delete[rsk];
+        if (ciCur == 24) { ciAdvance(); }
+        #stack[int, 64] yno = ciTokOff;
+        #stack[int, 64] ynl = ciTokLen;
+        #stack[int, 32] rhn = 0;
+        if (ciCur == 2) { rhn = 1; ciAdvance(); }
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (rhn == 1) {
+                ciVarGet(rno, rnl) rav;
+                #stack[int, 64] rval = 0;
+                #stack[int, 64] rty = 3;
+                if (rav >= ciVVals) {
+                    #stack[int, 64] delta = rav - ciVVals;
+                    if (delta < ciVCount * 8) {
+                        #stack[int, 64] rrow = delta / 8;
+                        if (rrow * 8 == delta) {
+                            rval = cssc::peek64(ciVVals + rrow * 8);
+                            rty = cssc::peek64(ciVTypes + rrow * 8);
+                        }
+                        #delete[rrow];
+                    }
+                    #delete[delta];
+                }
+                ciBindBits = 64;
+                ciVarSet(yno, ynl, rval, rty, 0);
+                #delete[rval];
+                #delete[rty];
+                #delete[rav];
+            }
+        }
+        #delete[rno];
+        #delete[rnl];
+        #delete[yno];
+        #delete[ynl];
+        #delete[rhn];
+    }
+    // ---- #delmember[vec[i]]; -- null element i of a vector, keeping its size ----
+    if (isdelm == 1) {
+        if (ciCur == 23) { ciAdvance(); }
+        #stack[int, 64] dvo = ciTokOff;
+        #stack[int, 64] dvl = ciTokLen;
+        if (ciCur == 2) { ciAdvance(); }
+        #stack[int, 64] dmi = 0;
+        #stack[int, 32] dmHas = 0;
+        if (ciCur == 23) {
+            ciAdvance();
+            ciExpr(0) die;
+            dmi = die;
+            dmHas = 1;
+            #delete[die];
+            if (ciCur == 24) { ciAdvance(); }
+        }
+        if (ciCur == 24) { ciAdvance(); }
+        if (ciCur == 13) { ciAdvance(); }
+        if (ciExec == 1) {
+            if (dmHas == 1) {
+                ciVarGet(dvo, dvl) dvh;
+                if (ciEvalType == 4) {
+                    #stack[int, 64] dsz = cssc::peek32(dvh + 4);
+                    if (dmi >= 0) {
+                        if (dmi < dsz) {
+                            #stack[int, 64] det = cssc::peek32(dvh + 12);
+                            #stack[int, 64] dcap = cssc::peek32(dvh + 8);
+                            #stack[int, 64] dtp = cssc::peek64(dvh + 24);
+                            if (det != 8) {
+                                dtp = cssc::alloc(dcap * 8);
+                                cssc::memfill32(dtp, 0, dcap * 2);
+                                #stack[int, 32] dj = 0;
+                                while (dj < dsz) { cssc::poke32(dtp + dj * 8, det); dj = dj + 1; }
+                                #delete[dj];
+                                cssc::poke32(dvh + 12, 8);
+                                cssc::poke64(dvh + 24, dtp);
+                            }
+                            #stack[int, 64] dd = cssc::peek64(dvh + 16);
+                            #stack[int, 64] octy = cssc::peek32(dtp + dmi * 8);
+                            if (octy == 1) {
+                                #stack[int, 64] osv = cssc::peek64(dd + dmi * 8);
+                                if (osv != 0) { cssc::free(osv); }
+                                #delete[osv];
+                            }
+                            #delete[octy];
+                            cssc::poke64(dd + dmi * 8, 0);
+                            cssc::poke32(dtp + dmi * 8, 3);
+                            #delete[dd];
+                            #delete[det];
+                            #delete[dcap];
+                            #delete[dtp];
+                        }
+                    }
+                    #delete[dsz];
+                }
+                #delete[dvh];
+            }
+        }
+        #delete[dmi];
+        #delete[dmHas];
+        #delete[dvo];
+        #delete[dvl];
+    }
+    // ---- #stack / #heap / #auto : typed slot with optional initializer ----
+    if (isvar == 1) {
+        #stack[int, 32] declType = 0;
+        #stack[int, 32] declIsInt = 0;   // FX-SCALARCOERCE: explicit `int` (coerce) vs auto/bool/char (keep)
+        // declared bit width (second annotation field); 64 = unchecked.
+        // Enforced by ciVarSet on every int write to the slot (reference:
+        // "Value exceeds its bit limit" hard error).
+        #stack[int, 64] declBits = 64;
+        if (ciCur == 23) {
+            ciAdvance();
+            // first identifier inside [ ] is the type name
+            if (ciCur == 2) {
+                #stack[int, 64] to = ciTokOff;
+                #stack[int, 64] tl = ciTokLen;
+                ciIdentIs(to, tl, "string") isstr;
+                ciIdentIs(to, tl, "bind") isbnd;
+                ciIdentIs(to, tl, "float") isflt;
+                // container type-names in the #stack[T, N] form (T = vector<..>/
+                // array<..>/map<..>/bind<..>) create a real container, same as
+                // the #vector/#map/#bind directives. elem type defaults to int;
+                // a `<string>` generic bumps it to string (checked below).
+                ciIdentIs(to, tl, "vector") isvT;
+                ciIdentIs(to, tl, "array") isaT;
+                ciIdentIs(to, tl, "map") ismT;
+                ciIdentIs(to, tl, "int") isintT;
+                if (isstr == 1) { declType = 1; }
+                if (isbnd == 1) { ctag = 7; }
+                if (isflt == 1) { declType = 2; }
+                if (isvT == 1) { ctag = 4; }
+                if (isaT == 1) { ctag = 4; }
+                if (ismT == 1) { ctag = 5; }
+                if (isintT == 1) { declIsInt = 1; }
+                #delete[isintT];
+                #delete[ismT];
+                #delete[isaT];
+                #delete[isvT];
+                #delete[isflt];
+                #delete[isbnd];
+                #delete[isstr];
+                #delete[to];
+                #delete[tl];
+            }
+            // scan the remainder of the annotation up to and including ],
+            // capturing the FIRST number as the declared bit width
+            #stack[int, 32] gotBits = 0;
+            #stack[int, 32] sk = 1;
+            while (sk == 1) {
+                if (ciCur == 24) { sk = 0; }
+                if (ciCur == 0) { sk = 0; }
+                if (sk == 1) {
+                    if (ciCur == 1) {
+                        if (gotBits == 0) {
+                            declBits = ciTokNum;
+                            gotBits = 1;
+                        }
+                    }
+                    // container generic `<T>`: the inner type-name (string/float)
+                    // sets the element type (declType doubles as elem type for a
+                    // container decl, consumed by ciVecNew below). int/auto -> 0.
+                    if (ctag != 0) {
+                        if (ciCur == 2) {
+                            ciIdentIs(ciTokOff, ciTokLen, "string") eS;
+                            ciIdentIs(ciTokOff, ciTokLen, "float") eF;
+                            ciIdentIs(ciTokOff, ciTokLen, "auto") eAuto;
+                            if (eS == 1) { declType = 1; }
+                            if (eF == 1) { declType = 2; }
+                            if (eAuto == 1) { declType = 8; }
+                            #delete[eS];
+                            #delete[eF];
+                            #delete[eAuto];
+                        }
+                    }
+                    ciAdvance();
+                }
+            }
+            #delete[gotBits];
+            if (ciCur == 24) { ciAdvance(); }
+        }
+        // variable name follows the ] annotation
+        #stack[int, 64] no = ciTokOff;
+        #stack[int, 64] nl = ciTokLen;
+        ciAdvance();
+        // `#stack[T, N] Obj->field = init;` declares an INSTANCE MEMBER (the
+        // canonical ctor form); binds into the current instance record
+        #stack[int, 32] isMem = 0;
+        #stack[int, 64] mno = 0;
+        #stack[int, 64] mnl = 0;
+        if (ciCur == 34) {
+            ciAdvance();
+            mno = ciTokOff;
+            mnl = ciTokLen;
+            isMem = 1;
+            if (ciCur == 2) { ciAdvance(); }
+        }
+        #stack[int, 32] didInit = 0;
+        if (ciCur == 14) {
+            ciAdvance();
+            // a `#stack[bind,N] b = {a,b; c,d};` initializer is a BRACE LITERAL,
+            // not a normal expression -- parse it specially (cells via ciExpr,
+            // ',' between cells, ';' between pairs; pairWidth = first group's
+            // width, size = group count). Everything else = the normal init expr.
+            #stack[int, 32] isBindLit = 0;
+            if (ctag == 7) { if (isMem == 0) { if (ciCur == 11) { isBindLit = 1; } } }
+            if (isBindLit == 1) {
+                ciBindNew(0) bh;
+                #stack[int, 64] cellIdx = 0;
+                #stack[int, 64] groupCells = 0;
+                #stack[int, 64] pairCount = 0;
+                #stack[int, 64] pairWidth = 0;
+                #stack[int, 32] firstDone = 0;
+                #stack[int, 32] sawSemi = 0;    // FX-BINDLIT: a flat bind (no `;`) defaults pairWidth=2
+                ciAdvance();
+                #stack[int, 32] go = 1;
+                if (ciCur == 12) { go = 0; ciAdvance(); }
+                while (go == 1) {
+                    ciExpr(0) cv;
+                    #stack[int, 64] ct = ciEvalType;
+                    #stack[int, 64] co = ciEvalOwns;
+                    ciBindRawSet(bh, cellIdx, ct, cv);
+                    if (co == 1) { if (ct == 1) { cssc::free(cv); } }
+                    cellIdx = cellIdx + 1;
+                    groupCells = groupCells + 1;
+                    #stack[int, 32] step = 0;
+                    if (ciCur == 21) { ciAdvance(); step = 1; }
+                    if (step == 0) {
+                        #stack[int, 32] isEnd = 0;
+                        if (ciCur == 12) { isEnd = 1; }
+                        if (ciCur == 13) { sawSemi = 1; ciAdvance(); }
+                        if (groupCells > 0) {
+                            if (firstDone == 0) { pairWidth = groupCells; firstDone = 1; }
+                            pairCount = pairCount + 1;
+                        }
+                        groupCells = 0;
+                        if (isEnd == 1) { ciAdvance(); go = 0; }
+                        if (ciCur == 0) { go = 0; }
+                        #delete[isEnd];
+                    }
+                    #delete[step];
+                    #delete[cv];
+                    #delete[ct];
+                    #delete[co];
+                }
+                if (sawSemi == 0) {
+                    // FX-BINDLIT: flat bind `{a, b, c}` -> pairWidth 2, ceil rows,
+                    // null-pad the trailing odd cell so it renders as 0x0.
+                    pairWidth = 2;
+                    pairCount = (cellIdx + 1) / 2;
+                    if (cellIdx < pairCount * 2) { ciBindRawSet(bh, cellIdx, 3, 0); }
+                }
+                cssc::poke32(bh + 12, pairWidth);
+                cssc::poke32(bh + 4, pairCount);
+                if (ciExec == 1) {
+                    #stack[int, 64] bno = no;
+                    #stack[int, 64] bnl = nl;
+                    if (ciSecInit == 1) {
+                        ciQualify(ciCurSecOff, ciCurSecLen, no, nl) qlb;
+                        bno = ciQualBuf - ciSrc;
+                        bnl = qlb;
+                        #delete[qlb];
+                        ciBindVis = ciSecVis;
+                    }
+                    // owns=1: the declaring slot OWNS this fresh bind, so #delete/
+                    // scope-exit reclaims its handle+data+string cells. Safe because
+                    // ciValFree(7) is borrow-respecting (never frees a container cell
+                    // captured by reference, e.g. a global vector).
+                    ciVarSet(bno, bnl, bh, 7, 1);
+                    ciBindVis = 1;
+                    #delete[bno];
+                    #delete[bnl];
+                }
+                if (ciExec == 0) { ciBindFree(bh); }
+                didInit = 1;
+                #delete[go];
+                #delete[bh];
+                #delete[cellIdx];
+                #delete[groupCells];
+                #delete[pairCount];
+                #delete[pairWidth];
+                #delete[firstDone];
+                #delete[sawSemi];
+            }
+            // FX-MAPLIT: `#stack[map<K,V>,N] m = {k0, v0, k1, v1, ...};` map
+            // brace-initializer -> a fresh owned map (tag 5). Elements are
+            // consumed in (key, value) pairs; ciMapSet clones owned key/values.
+            #stack[int, 32] isMapLit = 0;
+            if (ctag == 5) { if (isMem == 0) { if (ciCur == 11) { isMapLit = 1; } } }
+            if (isMapLit == 1) {
+                ciMapNew() mh;
+                ciAdvance();
+                #stack[int, 32] mgo = 1;
+                if (ciCur == 12) { mgo = 0; ciAdvance(); }
+                while (mgo == 1) {
+                    ciExpr(0) mk;
+                    #stack[int, 64] mkt = ciEvalType;
+                    #stack[int, 64] mko = ciEvalOwns;
+                    if (ciCur == 21) { ciAdvance(); }
+                    ciExpr(0) mv;
+                    #stack[int, 64] mvt = ciEvalType;
+                    #stack[int, 64] mvo = ciEvalOwns;
+                    ciMapSet(mh, mkt, mk, mvt, mv);
+                    if (mko == 1) { if (mkt == 1) { cssc::free(mk); } }
+                    if (mvo == 1) { if (mvt == 1) { cssc::free(mv); } }
+                    #stack[int, 32] mstep = 0;
+                    if (ciCur == 21) { ciAdvance(); mstep = 1; }
+                    if (mstep == 0) {
+                        if (ciCur == 12) { ciAdvance(); }
+                        mgo = 0;
+                    }
+                    if (ciCur == 0) { mgo = 0; }
+                    #delete[mstep];
+                    #delete[mk];
+                    #delete[mkt];
+                    #delete[mko];
+                    #delete[mv];
+                    #delete[mvt];
+                    #delete[mvo];
+                }
+                if (ciExec == 1) {
+                    #stack[int, 64] mno = no;
+                    #stack[int, 64] mnl = nl;
+                    if (ciSecInit == 1) {
+                        ciQualify(ciCurSecOff, ciCurSecLen, no, nl) mql;
+                        mno = ciQualBuf - ciSrc;
+                        mnl = mql;
+                        #delete[mql];
+                        ciBindVis = ciSecVis;
+                    }
+                    ciVarSet(mno, mnl, mh, 5, 1);
+                    ciBindVis = 1;
+                    #delete[mno];
+                    #delete[mnl];
+                }
+                if (ciExec == 0) { ciValFree(5, mh); }
+                didInit = 1;
+                #delete[mgo];
+                #delete[mh];
+            }
+            // `#stack[vector<T>,N] v = [e0, e1, ...];` initializer is a VECTOR
+            // LITERAL (token `[`), not a normal expression -- build the vector
+            // directly (ciExpr per element, ',' between, ']' closes), mirroring
+            // the bind-literal path. This is the dominant firefield container form.
+            // vector literal `[...]` (tokens 23/24) OR array literal `{...}` (tokens
+            // 11/12): both are container tag 4 and print identically, only the
+            // bracketing differs. `{` for a bind is handled above (ctag 7) and for a
+            // map is out of scope (ctag 5), so the ctag==4 guard keeps them apart.
+            #stack[int, 32] isVecLit = 0;
+            #stack[int, 64] vecClose = 24;
+            if (ctag == 4) { if (isMem == 0) {
+                if (ciCur == 23) { isVecLit = 1; vecClose = 24; }
+                if (ciCur == 11) { isVecLit = 1; vecClose = 12; }
+            } }
+            if (isVecLit == 1) {
+                ciVecNew(declType) vh;
+                ciAdvance();
+                #stack[int, 32] vgo = 1;
+                if (ciCur == vecClose) { vgo = 0; ciAdvance(); }
+                while (vgo == 1) {
+                    ciExpr(0) cv;
+                    #stack[int, 64] cvt = ciEvalType;
+                    #stack[int, 64] cvo = ciEvalOwns;
+                    ciVecPush(vh, cv, cvt);
+                    if (cvo == 1) { if (cvt == 1) { cssc::free(cv); } }
+                    #stack[int, 32] vstep = 0;
+                    if (ciCur == 21) { ciAdvance(); vstep = 1; }
+                    if (vstep == 0) {
+                        if (ciCur == vecClose) { ciAdvance(); }
+                        vgo = 0;
+                    }
+                    if (ciCur == 0) { vgo = 0; }
+                    #delete[vstep];
+                    #delete[cv];
+                    #delete[cvt];
+                    #delete[cvo];
+                }
+                if (ciExec == 1) {
+                    #stack[int, 64] vno = no;
+                    #stack[int, 64] vnl = nl;
+                    if (ciSecInit == 1) {
+                        ciQualify(ciCurSecOff, ciCurSecLen, no, nl) vql;
+                        vno = ciQualBuf - ciSrc;
+                        vnl = vql;
+                        #delete[vql];
+                        ciBindVis = ciSecVis;
+                    }
+                    ciVarSet(vno, vnl, vh, 4, 1);
+                    ciBindVis = 1;
+                    #delete[vno];
+                    #delete[vnl];
+                }
+                if (ciExec == 0) { ciVecFree(vh); }
+                didInit = 1;
+                #delete[vgo];
+                #delete[vh];
+            }
+            if (isBindLit == 0) { if (isVecLit == 0) { if (isMapLit == 0) {
+                // the initializer expression runs FIRST (it may itself qualify
+                // into the scratch buffer); the member name is qualified at the
+                // last instant, right before the bind
+                ciExpr(0) e;
+                #stack[int, 64] et = ciEvalType;
+                #stack[int, 64] eo = ciEvalOwns;
+                if (ciExec == 1) {
+                    // FX-SCALARCOERCE: coerce the initializer to the declared
+                    // scalar type (explicit `int` / `float` only; auto/bool keep).
+                    if (declIsInt == 1) {
+                        if (et == 2) { cssc::fToI(e) ci; e = ci; #delete[ci]; et = 0; eo = 0; }
+                        if (et == 3) { e = 0; et = 0; eo = 0; }
+                        if (et == 9) { et = 0; }
+                        if (et == 1) { if (eo == 1) { cssc::free(e); } e = 0; et = 0; eo = 0; }
+                    }
+                    if (declType == 2) {
+                        if (et == 0) { cssc::iToF(e) cf; e = cf; #delete[cf]; et = 2; eo = 0; }
+                        if (et == 9) { cssc::iToF(e) cf; e = cf; #delete[cf]; et = 2; eo = 0; }
+                        if (et == 3) { cssc::iToF(0) cf; e = cf; #delete[cf]; et = 2; eo = 0; }
+                    }
+                    #stack[int, 32] bitBad = 0;
+                    if (declBits < 64) {
+                        #stack[int, 64] reqBits = 0;
+                        if (et == 2) { reqBits = 64; }
+                        if (et == 0) {
+                            #stack[int, 64] av = e;
+                            if (av < 0) { av = 0 - av; }
+                            #stack[int, 64] nb = 1;
+                            while (av >= 256) { av = av / 256; nb = nb + 1; }
+                            reqBits = nb * 8;
+                            #delete[av];
+                            #delete[nb];
+                        }
+                        if (reqBits > declBits) {
+                            bitBad = 1;
+                            #stack[int, 64] mb = cssc::alloc(128);
+                            #stack[int, 64] mn = ciAppLit(mb, 0, "#stack: value exceeds bit limit (");
+                            #stack[int, 64] nbf = cssc::alloc(32);
+                            ciItoa(reqBits, nbf) r1;
+                            #stack[int, 32] i1 = 0;
+                            while (i1 < r1) { cssc::poke8(mb + mn, cssc::peek8(nbf + i1)); mn = mn + 1; i1 = i1 + 1; }
+                            #delete[i1];
+                            #delete[r1];
+                            mn = ciAppLit(mb, mn, " > ");
+                            ciItoa(declBits, nbf) r2;
+                            #stack[int, 32] i2 = 0;
+                            while (i2 < r2) { cssc::poke8(mb + mn, cssc::peek8(nbf + i2)); mn = mn + 1; i2 = i2 + 1; }
+                            #delete[i2];
+                            #delete[r2];
+                            mn = ciAppLit(mb, mn, " bits)");
+                            cssc::free(nbf);
+                            ciRaise(mb, mn, ciLineAt(o), 0);
+                            cssc::free(mb);
+                            #delete[mn];
+                        }
+                        #delete[reqBits];
+                    }
+                    if (bitBad == 1) {
+                        if (eo == 1) { if (et == 1) { cssc::free(e); } }
+                    }
+                    if (bitBad == 0) {
+                    if (isMem == 1) {
+                        if (ciCurInst != 0) {
+                            ciInstMemSet(ciCurInst, mno, mnl, e, et, eo);
+                        }
+                        if (ciCurInst == 0) {
+                            if (eo == 1) { if (et == 1) { cssc::free(e); } }
+                        }
+                    }
+                    if (isMem == 0) {
+                        #stack[int, 64] bno = no;
+                        #stack[int, 64] bnl = nl;
+                        if (ciSecInit == 1) {
+                            ciQualify(ciCurSecOff, ciCurSecLen, no, nl) ql2;
+                            bno = ciQualBuf - ciSrc;
+                            bnl = ql2;
+                            #delete[ql2];
+                            ciBindVis = ciSecVis;
+                        }
+                        ciBindBits = declBits;
+                        ciVarSet(bno, bnl, e, et, eo);
+                        ciBindBits = 64;
+                        ciBindVis = 1;
+                        #delete[bno];
+                        #delete[bnl];
+                    }
+                    }
+                    #delete[bitBad];
+                }
+                if (ciExec == 0) {
+                    if (eo == 1) { if (et == 1) { cssc::free(e); } }
+                }
+                didInit = 1;
+                #delete[e];
+                #delete[et];
+                #delete[eo];
+            } } }
+            #delete[isBindLit];
+            #delete[isVecLit];
+            #delete[isMapLit];
+            #delete[vecClose];
+        }
+        if (didInit == 0) {
+            // no initializer: bind the declared type's default (0), owns=0
+            if (ciExec == 1) {
+                if (isMem == 1) {
+                    if (ciCurInst != 0) {
+                        // uninitialized string member -> fresh empty "" object
+                        // (owns=1), same rationale as the local-variable case.
+                        if (declType == 1) {
+                            ciStrNew(0, 0) esm;
+                            ciInstMemSet(ciCurInst, mno, mnl, esm, 1, 1);
+                            #delete[esm];
+                        }
+                        if (declType != 1) {
+                            ciInstMemSet(ciCurInst, mno, mnl, 0, declType, 0);
+                        }
+                    }
+                }
+                if (isMem == 0) {
+                    #stack[int, 64] bno = no;
+                    #stack[int, 64] bnl = nl;
+                    if (ciSecInit == 1) {
+                        ciQualify(ciCurSecOff, ciCurSecLen, no, nl) ql3;
+                        bno = ciQualBuf - ciSrc;
+                        bnl = ql3;
+                        #delete[ql3];
+                        ciBindVis = ciSecVis;
+                    }
+                    ciBindBits = declBits;
+                    if (ctag == 0) {
+                        // an uninitialized string binds a fresh empty "" object
+                        // (owns=1), NOT a null pointer -- exactly like the empty
+                        // containers below. Every later string op then sees a valid
+                        // object instead of dereferencing 0 and faulting, matching
+                        // the reference (uninit string == "").
+                        if (declType == 1) {
+                            ciStrNew(0, 0) es0;
+                            ciVarSet(bno, bnl, es0, 1, 1);
+                            #delete[es0];
+                        }
+                        if (declType != 1) {
+                            #stack[int, 32] noiBad = 0;
+                            if (declBits < 64) {
+                                #stack[int, 64] noiReq = 0;
+                                if (declType == 2) { noiReq = 64; }
+                                if (declIsInt == 1) { noiReq = 8; }
+                                if (noiReq > declBits) {
+                                    noiBad = 1;
+                                    #stack[int, 64] nmb = cssc::alloc(128);
+                                    #stack[int, 64] nmn = ciAppLit(nmb, 0, "#stack: value exceeds bit limit (");
+                                    #stack[int, 64] nnbf = cssc::alloc(32);
+                                    ciItoa(noiReq, nnbf) nr1;
+                                    #stack[int, 32] ni1 = 0;
+                                    while (ni1 < nr1) { cssc::poke8(nmb + nmn, cssc::peek8(nnbf + ni1)); nmn = nmn + 1; ni1 = ni1 + 1; }
+                                    #delete[ni1];
+                                    #delete[nr1];
+                                    nmn = ciAppLit(nmb, nmn, " > ");
+                                    ciItoa(declBits, nnbf) nr2;
+                                    #stack[int, 32] ni2 = 0;
+                                    while (ni2 < nr2) { cssc::poke8(nmb + nmn, cssc::peek8(nnbf + ni2)); nmn = nmn + 1; ni2 = ni2 + 1; }
+                                    #delete[ni2];
+                                    #delete[nr2];
+                                    nmn = ciAppLit(nmb, nmn, " bits)");
+                                    cssc::free(nnbf);
+                                    ciRaise(nmb, nmn, ciLineAt(o), 0);
+                                    cssc::free(nmb);
+                                    #delete[nmn];
+                                }
+                                #delete[noiReq];
+                            }
+                            if (noiBad == 0) {
+                                ciVarSet(bno, bnl, 0, declType, 0);
+                            }
+                            #delete[noiBad];
+                        }
+                    }
+                    if (ctag != 0) {
+                        // #vector/#map/#array/#bind with no initializer: bind a
+                        // fresh empty container of the directive's tag
+                        #stack[int, 64] ch = 0;
+                        if (ctag == 4) { ciVecNew(declType) vh; ch = vh; #delete[vh]; }
+                        if (ctag == 5) { ciMapNew() mh; ch = mh; #delete[mh]; }
+                        if (ctag == 7) { ciBindNew(0) bh; ch = bh; #delete[bh]; }
+                        // owns=1: this fresh empty container is solely owned by its
+                        // declaring slot, so #delete/scope-exit reclaims it (was
+                        // leaking every declaration -- e.g. ll/hl in test_file)
+                        ciVarSet(bno, bnl, ch, ctag, 1);
+                        #delete[ch];
+                    }
+                    ciBindBits = 64;
+                    ciBindVis = 1;
+                    #delete[bno];
+                    #delete[bnl];
+                }
+            }
+        }
+        if (ciCur == 13) { ciAdvance(); }
+        #delete[didInit];
+        #delete[isMem];
+        #delete[mno];
+        #delete[mnl];
+        #delete[no];
+        #delete[nl];
+        #delete[declBits];
+        #delete[declType];
+    }
+    #delete[isdel];
+    #delete[isdef];
+    #delete[isredef];
+    #delete[isscan];
+    #delete[isreq];
+    #delete[isvec];
+    #delete[ismap];
+    #delete[isarr];
+    #delete[isvid];
+    #delete[iscons];
+    #delete[isadr];
+    #delete[isref];
+    #delete[isdelm];
+    #delete[ctag];
+    #delete[isvar];
+    #delete[o];
+    #delete[l];
+}

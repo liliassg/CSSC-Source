@@ -1,0 +1,23 @@
+// ===========================================================================
+//  compiler/sema_dump_main.cssc  --  DEBUG entry: dump the collected symbol
+//  table for a program on stdin. Used only to verify the symbol collector
+//  (`SYM kind:scope:off:len` per line). Not the LSP diagnostic entry.
+// ===========================================================================
+
+#stack[int, 64] buf = cssc::alloc(1048576);
+#stack[int, 64] n = cssc::hostRead(buf, 1000000);
+
+txLexInit();
+txTokenizeSrc(buf, n);
+
+txAstInit();
+txParseProgram() prog;
+
+txSemaBuildSyms(prog);
+txSemaDumpSyms();
+txSemaDumpScopes();
+txSemaDumpDeletes();
+
+#delete[prog];
+#delete[n];
+#delete[buf];

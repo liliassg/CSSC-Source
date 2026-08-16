@@ -1,0 +1,604 @@
+// ===========================================================================
+// compiler/lex.cssc -- Transembly CSSC compiler, MODULE 1 (milestone M0a).
+//
+// A standalone lexer, ported byte-for-byte from the battle-tested interpreter
+// lexer in kernel/interp.cssc (functions ciLexRaw / ciTokenize / ciAdvance +
+// their token-column globals). Every `ci*` name is renamed to `tx*`; the token
+// scanning logic and token-CODE semantics are IDENTICAL to the interpreter --
+// they are the contract the parser will rely on, so nothing here is "improved".
+//
+// Token codes (unchanged from interp):
+//   0=EOF 1=NUMBER 2=IDENT(incl folded `::`) 3=STRING 4=+ 5=- 6=* 7=/ 8=%
+//   9=( 10=) 11={ 12=} 13=; 14== 15=== 16=!= 17=< 18=> 19=<= 20=>= 21=,
+//   22=# 23=[ 24=] 25=&& 26=|| 27=! 30=& 31=: 32=? 33=. 34=->   (99 = unknown)
+// ===========================================================================
+
+// ---- byte-cursor / current-token registers ----
+#stack[int, 64] txSrc = 0;       // base address of the source bytes
+#stack[int, 64] txSrcLen = 0;    // source length in bytes
+#stack[int, 64] txPos = 0;       // byte cursor (during tokenize) / token index (during advance)
+#stack[int, 64] txCur = 0;       // current token code
+#stack[int, 64] txTokNum = 0;    // int value, or f64 bit-pattern when txTokFloat=1
+#stack[int, 64] txTokFloat = 0;  // 1 = the NUMBER token is a float literal
+#stack[int, 64] txTokOff = 0;    // byte offset of ident/string text
+#stack[int, 64] txTokLen = 0;    // byte length of ident/string text
+
+// ---- pre-tokenized column store (one entry per token) ----
+#stack[int, 64] txTokCode = 0;   // per-token: token code (poke8)
+#stack[int, 64] txTokNumA = 0;   // per-token: int value or f64 bit pattern (poke64)
+#stack[int, 64] txTokFlag = 0;   // per-token: 1 = float literal (poke8)
+#stack[int, 64] txTokOffA = 0;   // per-token: byte offset of ident/string text (poke32)
+#stack[int, 64] txTokLenA = 0;   // per-token: byte length of ident/string text (poke32)
+#stack[int, 64] txTokCount = 0;  // number of tokens currently in the stream
+#stack[int, 64] txTokCap = 0;    // capacity (entries)
+
+// txLexRaw -- the raw single-token lexer. Reads ONE token starting at the BYTE
+// cursor txPos (skipping whitespace/comments), sets txCur/txTokNum/txTokFloat/
+// txTokOff/txTokLen, and advances txPos past it. Called ONLY by txTokenize during
+// the one-time pre-pass. (Verbatim port of ciLexRaw -- byte-for-byte unchanged.)
+#define(txLexRaw) {
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txPos] txPos;
+    #req[txCur] txCur;
+    #req[txTokNum] txTokNum;
+    #req[txTokFloat] txTokFloat;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    txTokFloat = 0;
+    #stack[int, 32] skipping = 1;
+    while (skipping == 1) {
+        if (txPos >= txSrcLen) {
+            skipping = 0;
+        }
+        if (skipping == 1) {
+            #stack[int, 64] c = cssc::peek8(txSrc + txPos);
+            #stack[int, 32] isws = 0;
+            if (c == 32) { isws = 1; }
+            if (c == 10) { isws = 1; }
+            if (c == 13) { isws = 1; }
+            if (c == 9) { isws = 1; }
+            if (isws == 1) {
+                txPos = txPos + 1;
+            }
+            if (isws == 0) {
+                #stack[int, 32] iscomment = 0;
+                if (c == 47) {
+                    if (txPos + 1 < txSrcLen) {
+                        #stack[int, 64] c2 = cssc::peek8(txSrc + txPos + 1);
+                        if (c2 == 47) {
+                            iscomment = 1;
+                        }
+                        #delete[c2];
+                    }
+                }
+                if (iscomment == 1) {
+                    #stack[int, 32] cs = 1;
+                    while (cs == 1) {
+                        if (txPos >= txSrcLen) { cs = 0; }
+                        if (cs == 1) {
+                            #stack[int, 64] cc = cssc::peek8(txSrc + txPos);
+                            if (cc == 10) { cs = 0; }
+                            if (cc != 10) { txPos = txPos + 1; }
+                            #delete[cc];
+                        }
+                    }
+                    #delete[cs];
+                }
+                if (iscomment == 0) {
+                    skipping = 0;
+                }
+                #delete[iscomment];
+            }
+            #delete[isws];
+            #delete[c];
+        }
+    }
+    #delete[skipping];
+    if (txPos >= txSrcLen) {
+        txCur = 0;
+    }
+    if (txPos < txSrcLen) {
+        #stack[int, 64] c = cssc::peek8(txSrc + txPos);
+        #stack[int, 32] done = 0;
+        // NUMBER: decimal, or hex when prefixed with 0x / 0X
+        if (c >= 48) {
+            if (c <= 57) {
+                // detect a 0x / 0X hex prefix
+                #stack[int, 32] ishex = 0;
+                if (c == 48) {
+                    if (txPos + 1 < txSrcLen) {
+                        #stack[int, 64] cx = cssc::peek8(txSrc + txPos + 1);
+                        if (cx == 120) { ishex = 1; }
+                        if (cx == 88) { ishex = 1; }
+                        #delete[cx];
+                    }
+                }
+                if (ishex == 1) {
+                    // hex literal: skip '0x', accumulate base-16 digits
+                    txPos = txPos + 2;
+                    #stack[int, 64] hv = 0;
+                    #stack[int, 32] rd = 1;
+                    while (rd == 1) {
+                        if (txPos >= txSrcLen) { rd = 0; }
+                        if (rd == 1) {
+                            #stack[int, 64] d = cssc::peek8(txSrc + txPos);
+                            #stack[int, 64] hd = 0 - 1;
+                            if (d >= 48) { if (d <= 57) { hd = d - 48; } }
+                            if (d >= 97) { if (d <= 102) { hd = d - 87; } }
+                            if (d >= 65) { if (d <= 70) { hd = d - 55; } }
+                            if (hd >= 0) {
+                                hv = hv * 16 + hd;
+                                txPos = txPos + 1;
+                            }
+                            if (hd < 0) { rd = 0; }
+                            #delete[hd];
+                            #delete[d];
+                        }
+                    }
+                    #delete[rd];
+                    txTokNum = hv;
+                    txCur = 1;
+                    done = 1;
+                    #delete[hv];
+                }
+                if (ishex == 0) {
+                    // decimal literal: DIGIT+ ('.' DIGIT+)? -- a '.' is part of
+                    // the number ONLY when a digit follows (so `3.` = int 3 + '.',
+                    // `3.5` = float). A float token carries the f64 bit pattern in
+                    // txTokNum with txTokFloat=1 (parsed via cssc::strToF).
+                    #stack[int, 64] numStart = txPos;
+                    #stack[int, 64] v = 0;
+                    #stack[int, 32] rd = 1;
+                    while (rd == 1) {
+                        if (txPos >= txSrcLen) { rd = 0; }
+                        if (rd == 1) {
+                            #stack[int, 64] d = cssc::peek8(txSrc + txPos);
+                            #stack[int, 32] dig = 0;
+                            if (d >= 48) { if (d <= 57) { dig = 1; } }
+                            if (dig == 1) {
+                                v = v * 10 + (d - 48);
+                                txPos = txPos + 1;
+                            }
+                            if (dig == 0) { rd = 0; }
+                            #delete[dig];
+                            #delete[d];
+                        }
+                    }
+                    #delete[rd];
+                    #stack[int, 32] isFloat = 0;
+                    if (txPos + 1 < txSrcLen) {
+                        if (cssc::peek8(txSrc + txPos) == 46) {
+                            #stack[int, 64] nd = cssc::peek8(txSrc + txPos + 1);
+                            if (nd >= 48) { if (nd <= 57) { isFloat = 1; } }
+                            #delete[nd];
+                        }
+                    }
+                    if (isFloat == 1) {
+                        txPos = txPos + 1;
+                        // Build an integer mantissa + fractional-digit count so the
+                        // literal can be produced by ONE correctly-rounded f64
+                        // division mant / 10^fdc (Clinger fast path). The native
+                        // cssc::strToF mis-rounds some literals -- e.g. "0.3" comes
+                        // out as 0.30000000000000004 (one ULP high, it scales by an
+                        // inexact 0.1) which then wrongly compares equal to 0.1+0.2.
+                        // iToF/fDiv of exactly-representable operands rounds once and
+                        // matches the reference's compile-time literal parse. Fall
+                        // back to strToF only outside the exact range (mant > 2^53 or
+                        // fdc > 15), preserving prior behavior for huge literals.
+                        #stack[int, 64] mant = v;
+                        #stack[int, 64] fdc = 0;
+                        #stack[int, 32] moflow = 0;
+                        if (v > 900719925474098) { moflow = 1; }
+                        #stack[int, 32] fd = 1;
+                        while (fd == 1) {
+                            if (txPos >= txSrcLen) { fd = 0; }
+                            if (fd == 1) {
+                                #stack[int, 64] d2 = cssc::peek8(txSrc + txPos);
+                                #stack[int, 32] isd = 0;
+                                if (d2 >= 48) { if (d2 <= 57) { isd = 1; } }
+                                if (isd == 1) {
+                                    if (mant > 900719925474098) { moflow = 1; }
+                                    if (moflow == 0) { mant = mant * 10 + (d2 - 48); fdc = fdc + 1; }
+                                    txPos = txPos + 1;
+                                }
+                                if (isd == 0) { fd = 0; }
+                                #delete[isd];
+                                #delete[d2];
+                            }
+                        }
+                        #delete[fd];
+                        if (fdc > 15) { moflow = 1; }
+                        if (moflow == 0) {
+                            #stack[int, 64] p10 = 1;
+                            #stack[int, 64] pi = 0;
+                            while (pi < fdc) { p10 = p10 * 10; pi = pi + 1; }
+                            #delete[pi];
+                            cssc::fDiv(cssc::iToF(mant), cssc::iToF(p10)) fv2;
+                            txTokNum = fv2;
+                            #delete[fv2];
+                            #delete[p10];
+                        }
+                        if (moflow == 1) {
+                            cssc::strToF(txSrc + numStart, txPos - numStart) fb;
+                            txTokNum = fb;
+                            #delete[fb];
+                        }
+                        txTokFloat = 1;
+                        #delete[mant];
+                        #delete[fdc];
+                        #delete[moflow];
+                    }
+                    if (isFloat == 0) { txTokNum = v; }
+                    txCur = 1;
+                    done = 1;
+                    #delete[isFloat];
+                    #delete[numStart];
+                    #delete[v];
+                }
+                #delete[ishex];
+            }
+        }
+        if (done == 0) {
+            #stack[int, 32] isletter = 0;
+            if (c >= 65) { if (c <= 90) { isletter = 1; } }
+            if (c >= 97) { if (c <= 122) { isletter = 1; } }
+            if (c == 95) { isletter = 1; }
+            if (isletter == 1) {
+                #stack[int, 64] start = txPos;
+                #stack[int, 32] rd = 1;
+                while (rd == 1) {
+                    if (txPos >= txSrcLen) { rd = 0; }
+                    if (rd == 1) {
+                        #stack[int, 64] d = cssc::peek8(txSrc + txPos);
+                        #stack[int, 32] idc = 0;
+                        if (d >= 65) { if (d <= 90) { idc = 1; } }
+                        if (d >= 97) { if (d <= 122) { idc = 1; } }
+                        if (d >= 48) { if (d <= 57) { idc = 1; } }
+                        if (d == 95) { idc = 1; }
+                        // ':' folds into the identifier ONLY as a double '::'
+                        // (namespace path: cssc::outln, Sector::member). A
+                        // single ':' ends the ident and lexes as token 31,
+                        // so labels like `public:` / `private:` work (L3).
+                        if (d == 58) {
+                            if (txPos + 1 < txSrcLen) {
+                                #stack[int, 64] d2 = cssc::peek8(txSrc + txPos + 1);
+                                if (d2 == 58) { idc = 2; }
+                                #delete[d2];
+                            }
+                        }
+                        if (idc == 1) { txPos = txPos + 1; }
+                        if (idc == 2) { txPos = txPos + 2; }
+                        if (idc == 0) { rd = 0; }
+                        #delete[idc];
+                        #delete[d];
+                    }
+                }
+                #delete[rd];
+                txTokOff = start;
+                txTokLen = txPos - start;
+                txCur = 2;
+                done = 1;
+                #delete[start];
+            }
+            #delete[isletter];
+        }
+        if (done == 0) {
+            if (c == 34) {
+                txPos = txPos + 1;
+                #stack[int, 64] start = txPos;
+                #stack[int, 32] rd = 1;
+                while (rd == 1) {
+                    if (txPos >= txSrcLen) { rd = 0; }
+                    if (rd == 1) {
+                        #stack[int, 64] d = cssc::peek8(txSrc + txPos);
+                        if (d == 34) { rd = 0; }
+                        if (d != 34) { txPos = txPos + 1; }
+                        #delete[d];
+                    }
+                }
+                #delete[rd];
+                txTokOff = start;
+                txTokLen = txPos - start;
+                if (txPos < txSrcLen) { txPos = txPos + 1; }
+                txCur = 3;
+                done = 1;
+                #delete[start];
+            }
+        }
+        if (done == 0) {
+            if (c == 39) {
+                // single-quote literal. The reference treats single quotes as
+                // STRINGS (like "); CCOS additionally keeps the char-literal 'x'->
+                // ASCII-number form (used by the `char` type). Disambiguate by
+                // scanning to the closing quote and counting LOGICAL chars: exactly
+                // one -> NUMBER (char literal); two or more (or zero) -> STRING
+                // (raw span between the quotes, escapes stored verbatim like ").
+                #stack[int, 64] qstart = txPos + 1;   // first content byte
+                #stack[int, 64] sp = txPos + 1;
+                #stack[int, 64] nch = 0;
+                #stack[int, 64] first = 0;
+                #stack[int, 32] qs = 1;
+                while (qs == 1) {
+                    if (sp >= txSrcLen) { qs = 0; }
+                    if (qs == 1) {
+                        #stack[int, 64] d = cssc::peek8(txSrc + sp);
+                        if (d == 39) { qs = 0; }
+                        if (d != 39) {
+                            if (d == 92) {
+                                #stack[int, 64] e = 0;
+                                if (sp + 1 < txSrcLen) { e = cssc::peek8(txSrc + sp + 1); }
+                                #stack[int, 64] ev = e;
+                                if (e == 110) { ev = 10; }
+                                if (e == 116) { ev = 9; }
+                                if (e == 114) { ev = 13; }
+                                if (e == 48) { ev = 0; }
+                                if (e == 92) { ev = 92; }
+                                if (e == 39) { ev = 39; }
+                                if (e == 34) { ev = 34; }
+                                if (nch == 0) { first = ev; }
+                                sp = sp + 2;
+                                nch = nch + 1;
+                                #delete[ev];
+                                #delete[e];
+                            }
+                            if (d != 92) {
+                                if (nch == 0) { first = d; }
+                                sp = sp + 1;
+                                nch = nch + 1;
+                            }
+                        }
+                        #delete[d];
+                    }
+                }
+                #delete[qs];
+                if (nch == 1) {
+                    txTokNum = first;
+                    txCur = 1;
+                }
+                if (nch != 1) {
+                    txTokOff = qstart;
+                    txTokLen = sp - qstart;
+                    txCur = 3;
+                }
+                txPos = sp;
+                if (txPos < txSrcLen) { if (cssc::peek8(txSrc + txPos) == 39) { txPos = txPos + 1; } }
+                done = 1;
+                #delete[first];
+                #delete[nch];
+                #delete[sp];
+                #delete[qstart];
+            }
+        }
+        if (done == 0) {
+            if (c == 61) {
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 61) { txCur = 15; txPos = txPos + 2; }
+                if (c2 != 61) { txCur = 14; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 33) {
+                // '!' : '!=' comparison (16), or logical-not (27)
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 61) { txCur = 16; txPos = txPos + 2; }
+                if (c2 != 61) { txCur = 27; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 60) {
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 61) { txCur = 19; txPos = txPos + 2; }
+                if (c2 != 61) { txCur = 17; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 62) {
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 61) { txCur = 20; txPos = txPos + 2; }
+                if (c2 != 61) { txCur = 18; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 38) {
+                // '&' : '&&' logical-and (25), or single '&' copy prefix (30)
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 38) { txCur = 25; txPos = txPos + 2; }
+                if (c2 != 38) { txCur = 30; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 124) {
+                // '|' : '||' logical-or (26); single '|' is unsupported (99)
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 124) { txCur = 26; txPos = txPos + 2; }
+                if (c2 != 124) { txCur = 99; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            if (c == 45) {
+                // '-' : '->' arrow member access (34, L4 objects), else minus (5)
+                #stack[int, 64] c2 = 0;
+                if (txPos + 1 < txSrcLen) { c2 = cssc::peek8(txSrc + txPos + 1); }
+                if (c2 == 62) { txCur = 34; txPos = txPos + 2; }
+                if (c2 != 62) { txCur = 5; txPos = txPos + 1; }
+                done = 1;
+                #delete[c2];
+            }
+        }
+        if (done == 0) {
+            #stack[int, 64] t = 99;
+            if (c == 43) { t = 4; }
+            if (c == 42) { t = 6; }
+            if (c == 47) { t = 7; }
+            if (c == 37) { t = 8; }
+            if (c == 40) { t = 9; }
+            if (c == 41) { t = 10; }
+            if (c == 123) { t = 11; }
+            if (c == 125) { t = 12; }
+            if (c == 59) { t = 13; }
+            if (c == 44) { t = 21; }
+            if (c == 35) { t = 22; }
+            if (c == 91) { t = 23; }
+            if (c == 93) { t = 24; }
+            // L3 tokens: single ':' = 31 (labels public:/private:),
+            // '?' = 32 (deferred sector marker `sector Name ?label {..}`)
+            if (c == 58) { t = 31; }
+            if (c == 63) { t = 32; }
+            // L4 token: '.' = 33 (instance access `inst.label(args)` /
+            // `inst.member`); '-'/'->' are handled in their own case above
+            if (c == 46) { t = 33; }
+            txCur = t;
+            txPos = txPos + 1;
+            done = 1;
+            #delete[t];
+        }
+        #delete[done];
+        #delete[c];
+    }
+}
+
+// txTokenize -- APPEND tokens for the byte range [txPos, txSrcLen) onto the stream
+// at txTokCount. The caller sets txPos (BYTE start) + txSrcLen (BYTE end) and, for a
+// fresh program, resets txTokCount to 0 first. Runs txLexRaw in a loop; stops at EOF
+// (txCur==0) or when the byte cursor reaches txSrcLen. (Verbatim port of ciTokenize.)
+#define(txTokenize) {
+    #req[txLexRaw] txLexRaw;
+    #req[txPos] txPos;
+    #req[txSrcLen] txSrcLen;
+    #req[txTokCount] txTokCount;
+    #req[txTokCap] txTokCap;
+    #req[txTokCode] txTokCode;
+    #req[txTokNumA] txTokNumA;
+    #req[txTokFlag] txTokFlag;
+    #req[txTokOffA] txTokOffA;
+    #req[txTokLenA] txTokLenA;
+    #req[txCur] txCur;
+    #req[txTokNum] txTokNum;
+    #req[txTokFloat] txTokFloat;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (txPos >= txSrcLen) { go = 0; }
+        if (go == 1) {
+            txLexRaw();
+            if (txCur == 0) { go = 0; }
+            if (go == 1) {
+                if (txTokCount < txTokCap) {
+                    cssc::poke8(txTokCode + txTokCount, txCur);
+                    cssc::poke64(txTokNumA + txTokCount * 8, txTokNum);
+                    cssc::poke8(txTokFlag + txTokCount, txTokFloat);
+                    cssc::poke32(txTokOffA + txTokCount * 4, txTokOff);
+                    cssc::poke32(txTokLenA + txTokCount * 4, txTokLen);
+                    txTokCount = txTokCount + 1;
+                }
+            }
+        }
+    }
+    #delete[go];
+}
+
+// txAdvance -- the hot-path token reader. txPos is a TOKEN INDEX: load the current
+// token's columns into the txCur/txTokNum/txTokFloat/txTokOff/txTokLen registers and
+// step txPos forward. Past the end -> txCur=0 (EOF), txPos parked (repeat calls inert).
+// (Verbatim port of ciAdvance.)
+#define(txAdvance) {
+    #req[txPos] txPos;
+    #req[txTokCount] txTokCount;
+    #req[txTokCode] txTokCode;
+    #req[txTokNumA] txTokNumA;
+    #req[txTokFlag] txTokFlag;
+    #req[txTokOffA] txTokOffA;
+    #req[txTokLenA] txTokLenA;
+    #req[txCur] txCur;
+    #req[txTokNum] txTokNum;
+    #req[txTokFloat] txTokFloat;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    if (txPos >= txTokCount) {
+        txCur = 0;
+    }
+    if (txPos < txTokCount) {
+        txCur = cssc::peek8(txTokCode + txPos);
+        txTokNum = cssc::peek64(txTokNumA + txPos * 8);
+        txTokFloat = cssc::peek8(txTokFlag + txPos);
+        txTokOff = cssc::peek32(txTokOffA + txPos * 4);
+        txTokLen = cssc::peek32(txTokLenA + txPos * 4);
+        txPos = txPos + 1;
+    }
+}
+
+// txLexInit -- one-time setup: allocate the five token columns (capacity matches
+// interp's ciTokCap = 262144 entries) and zero the cursor/current-token state.
+#define(txLexInit) {
+    #req[txTokCap] txTokCap;
+    #req[txTokCode] txTokCode;
+    #req[txTokNumA] txTokNumA;
+    #req[txTokFlag] txTokFlag;
+    #req[txTokOffA] txTokOffA;
+    #req[txTokLenA] txTokLenA;
+    #req[txTokCount] txTokCount;
+    #req[txPos] txPos;
+    #req[txCur] txCur;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txTokNum] txTokNum;
+    #req[txTokFloat] txTokFloat;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    // 18 B/token across 5 columns. 262144 was 4.7 MiB of pure init-memfill on
+    // every compile; 131072 tokens still covers a ~5000-line source.
+    txTokCap = 131072;
+    txTokCode = cssc::alloc(txTokCap);          // 1 byte / token
+    txTokNumA = cssc::alloc(txTokCap * 8);      // 8 bytes / token
+    txTokFlag = cssc::alloc(txTokCap);          // 1 byte / token
+    txTokOffA = cssc::alloc(txTokCap * 4);      // 4 bytes / token
+    txTokLenA = cssc::alloc(txTokCap * 4);      // 4 bytes / token
+    txTokCount = 0;
+    txPos = 0;
+    txCur = 0;
+    txSrc = 0;
+    txSrcLen = 0;
+    txTokNum = 0;
+    txTokFloat = 0;
+    txTokOff = 0;
+    txTokLen = 0;
+}
+
+// txTokenizeSrc -- tokenize a whole program. Sets txSrc/txSrcLen, resets the byte
+// cursor (txPos=0) and token count, fills the columns via txTokenize, then resets
+// txPos=0 as a TOKEN cursor so txAdvance can walk the stream from the start.
+#define(txTokenizeSrc) {
+    #scanp(txTokenizeSrc, int, 0) srcAddr;
+    #scanp(txTokenizeSrc, int, 1) srcLen;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txPos] txPos;
+    #req[txTokCount] txTokCount;
+    #req[txTokenize] txTokenize;
+    txSrc = srcAddr;
+    txSrcLen = srcLen;
+    txPos = 0;          // BYTE cursor for the tokenize pass
+    txTokCount = 0;     // fresh stream
+    txTokenize();
+    txPos = 0;          // reset as a TOKEN cursor for txAdvance
+}

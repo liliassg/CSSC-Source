@@ -1,0 +1,117 @@
+// ===========================================================================
+// compiler/main.cssc -- Transembly CSSC compiler, milestone M1 ENTRY.
+//
+// Concatenated LAST (after lex/ast/parse/cir/lower/x86/emit); these top-level
+// statements become the program entry. Full pipeline for the M1 subset
+// (`cssc::outln(<int|string literal>)`):
+//
+//   stdin bytes -> lex -> parse (AST) -> lower (CIR) -> x86 (bytes)
+//               -> emit TXB1 text container to stdout
+//
+// harness/run.py parses the container, loads the code into executable memory,
+// patches runtime relocs, and runs it -- its stdout must equal `cssc run`.
+// ===========================================================================
+
+// Module loader: after tokenizing the main program, scan the TOKEN stream (robust
+// vs raw text -- no false hits inside strings/comments) for `#include('name')` and
+// `#load[path]`, read each referenced source, and build a COMBINED buffer
+// [module sources...] + [main] which is re-tokenized once. This keeps lex/parse
+// non-re-entrant (one pass over the combined text); the `#include`/`#load` lines
+// stay in place and become MODALIAS nodes that bind the alias to the module sector.
+#stack[int, 64] txLoadModules;
+#define(txLoadModules) {
+    #scanp(txLoadModules, int, 0) mainBuf;
+    #scanp(txLoadModules, int, 1) mainLen;
+    #scanp(txLoadModules, int, 2) comb;
+    #req[txTokCount] txTokCount;
+    #req[txTokCode] txTokCode;
+    #req[txTokOffA] txTokOffA;
+    #req[txTokLenA] txTokLenA;
+    #req[txSrc] txSrc;
+    #req[txSpanIs] txSpanIs;
+    #stack[int, 64] cn = 0;
+    #stack[int, 64] ti = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (ti + 3 >= txTokCount) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek8(txTokCode + ti) == 22) {                 // '#'
+                #stack[int, 64] koff = cssc::peek32(txTokOffA + (ti + 1) * 4);
+                #stack[int, 64] klen = cssc::peek32(txTokLenA + (ti + 1) * 4);
+                txSpanIs(koff, klen, "include") isInc;
+                txSpanIs(koff, klen, "load") isLoad;
+                #stack[int, 64] soff = cssc::peek32(txTokOffA + (ti + 3) * 4);
+                #stack[int, 64] slen = cssc::peek32(txTokLenA + (ti + 3) * 4);
+                if (isInc == 1) { cssc::modPathInc(txSrc + soff, slen); }
+                if (isLoad == 1) { cssc::modPath(txSrc + soff, slen); }
+                if (isInc + isLoad > 0) {
+                    #stack[int, 64] nr = cssc::modRead(comb + cn, 1000000);
+                    if (nr > 0) { cn = cn + nr; cssc::poke8(comb + cn, 10); cn = cn + 1; }
+                    #delete[nr];
+                }
+                #delete[slen]; #delete[soff];
+                #delete[isLoad]; #delete[isInc]; #delete[klen]; #delete[koff];
+            }
+            ti = ti + 1;
+        }
+    }
+    #delete[go];
+    #delete[ti];
+    #stack[int, 64] mi = 0;                                          // append the main source
+    #stack[int, 32] mg = 1;
+    while (mg == 1) {
+        if (mi >= mainLen) { mg = 0; }
+        if (mg == 1) { cssc::poke8(comb + cn + mi, cssc::peek8(mainBuf + mi)); mi = mi + 1; }
+    }
+    #delete[mg];
+    cn = cn + mainLen;
+    #delete[mi];
+    return cn;
+}
+
+// read the whole program off stdin (1 MiB cap)
+#stack[int, 64] buf = cssc::alloc(1048576);
+#stack[int, 64] n = cssc::hostRead(buf, 1000000);
+
+txLexInit();
+txTokenizeSrc(buf, n);        // fills token columns; sets txSrc = buf
+
+// pull in #include/#load module sources, then re-tokenize the combined text.
+#stack[int, 64] comb = cssc::alloc(4194304);
+#stack[int, 64] cn = txLoadModules(buf, n, comb);
+txTokenizeSrc(comb, cn);      // txSrc now = comb (modules + main)
+
+txAstInit();
+txParseProgram() prog;        // AST root (PROGRAM node)
+
+// E020 is the ONE place this compiler rejects instead of warning: a bare heap
+// literal in a position where nothing can own it. The reference refuses the
+// build here too (probe p_e020_concat, rc=1), so accepting it would make us
+// disagree with the oracle on which programs are legal -- not just on what they
+// print. Emitting no container IS the rejection: run.py cannot load one.
+txValidateLits(prog) litBad;
+if (litBad == 0) {
+    txCirInit();
+    txLower(prog);                // AST -> CIR (may set txIsoBad when a #define
+                                  // body calls an un-#req'd sibling -- isolation)
+
+    // Isolation violation -> reject like the reference: emit NO container, so a
+    // program that calls a strictly-isolated sibling produces no output. (A
+    // `string` literal wider than its declared bits is NOT rejected here -- it
+    // lowers to a RUNTIME trap that fires only if the decl executes.)
+    if (txIsoBad == 0) {
+        txX86Init();
+        txX86Emit();              // CIR -> x86-64 bytes + relocs + string data
+        txEmitContainer(0);       // entry_off = 0
+    }
+}
+if (litBad != 0) {
+    #stack[string, 256] e020 = "E020: Bare-Heap-Literal in Argument-/Operand-Position hat keinen besitzenden Slot. CSSC v5 fordert, dass jeder Heap-Wert in einem deklarierten Slot lebt.";
+    cssc::outln(e020);
+    #delete[e020];
+}
+
+#delete[litBad];
+#delete[prog];
+#delete[n];
+#delete[buf];

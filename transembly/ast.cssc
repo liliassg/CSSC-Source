@@ -1,0 +1,151 @@
+// ===========================================================================
+//  compiler/ast.cssc  --  AST node storage for the Transembly self-hosted
+//  CSSC compiler. Struct-of-Arrays (mirrors interp.cssc's table style): every
+//  node is a row of parallel columns, children referenced by node INDEX (not
+//  pointer). Statement lists are `txAstNext` sibling chains. Ident/string text
+//  is NOT copied -- it stays in txSrc as an (off,len) span (txAstOff/txAstLen),
+//  exactly like the lexer's token spans.
+//
+//  Node kinds (extend as the subset grows M2+):
+//    0 NONE
+//    1 PROGRAM  A = first statement (txAstNext-chain)
+//    2 NSCALL   (legacy M1-M3 single-arg namespace call; superseded by 14 CALL)
+//    3 INT      Num = integer value ; Flag(=B) = 1 if float literal
+//    4 STRING   Off/Len = span into txSrc (unquoted string content)
+//    5 IDENT    Off/Len = identifier span            (M2+)
+//    6 BINARY   Num = op-code ; A = left ; B = right  (M2+)
+//    7 DECL     Off/Len = var name ; Num = decl-type ; A = init expr | 0  (M2+)
+//    8 ASSIGN   Off/Len = var name ; A = value expr   (M2+)
+//    9 IF       A = cond ; B = then-block ; C = else-block|0        (M3)
+//   10 WHILE    A = cond ; B = body-block                           (M3)
+//   11 FOR      A = init ; B = cond ; C = body-block ; Num = post    (M3)
+//   12 BLOCK    A = first stmt (txAstNext-chain)                    (M3)
+//   13 NOT      A = operand                                         (M3)
+//  ---- M4: functions ----
+//   14 CALL     Off/Len = callee name span ; A = first arg (txAstNext-chain).
+//               Value-producing; used in expression OR statement position.
+//   15 RESULT_CAPTURE  A = CALL node ; Off/Len = result-var name span (`f(a) r;`)
+//   16 EXPR_STMT       A = expression (usually a CALL); value discarded (`f(a);`)
+//   17 FUNC_DEF        Off/Len = function name span ; A = body BLOCK  (top-level)
+//   18 SCANP    Off/Len = param-var name span ; Num = positional arg index
+//   19 REQ      Off/Len = bracket (global/func) name span ; B = alias off ;
+//               C = alias len   (`#req[g] alias;`)
+//   20 RETURN   A = value expr | 0 (void)
+//   21 DELETE   Off/Len = name span (int -> machine no-op, scope-unbind only)
+//  ---- M8a: cursor iteration ----
+//   28 BREAK    (stmt) leave the innermost loop / select
+//   29 CONTINUE (stmt) next iteration (for: run the post; select: cursor += 1)
+//   30 SELECT   Off/Len = ?label name span ; A = iterable expr ; B = body BLOCK
+//   31 JUMP     Num = cursor delta (+1 `jump;`, +2 `jump++;`, -1 `!jump;`, -2 `!jump++;`)
+//  ---- M8b: soft return ----
+//   32 MIRROR   A = value expr ; Num = 1 if `mirror &x` (snapshot copy), else 0.
+//               Sets the return value but the body KEEPS running (cleanup after);
+//               a bare-slot mirror is a LIVE REF (re-read at function exit).
+//   33 DESTRUCT (stmt) object self-destruct (M9)
+//  ---- M9: objects (SINGLETON model -- members are object-globals, labels are
+//          functions; matches the reference interpreter, which our gate follows)
+//   34 OBJECT    Off/Len = type name ; A = generic-param chain (GENPARAM) ;
+//                B = top-level init-stmt chain (members + ctor code) ;
+//                C = label chain (LABELDEF, Next-linked) ; Num = free-stmt chain
+//   35 GENPARAM  Off/Len = param name ; Num = 1 if `&copy`, else 0 (scope ref)
+//   36 LABELDEF  Off/Len = label name ; A = param chain (LBLPARAM) ;
+//                B = body-stmt chain ; Next = sibling label
+//   37 LBLPARAM  Off/Len = param name ; Num = decl-type code (0 transfer, 1 int,
+//                2 float, 3 string) ; B = 1 if a required typed param (`type: x`)
+//   38 ARROW     Off/Len = member name ; A = object/instance expr   (read)
+//   39 ARROWSET  Off/Len = member name ; A = object/instance expr ; B = value
+//   40 CALLLABEL Off/Len = label name ; A = arg chain ; B = capture-name off ;
+//                C = capture-name len   (`call lbl<args> cap;`)
+//  ---- Sectors: named, isolated namespaces (docs/cssc-sectors.md) ----
+//   41 SECTOR    Off/Len = sector name ; A = dep chain (GENPARAM, `<stdio, ini>`) ;
+//                B = private-body stmt chain (Next-linked) ;
+//                C = public-body stmt chain (Next-linked) ;
+//                Num = free-body stmt chain. Members: variable DECLs -> sector
+//                globals, `#define` -> sector functions, `object` -> sector-tagged
+//                objects. Constructed once at its position; `#free[name]` runs free.
+//   42 FREE      Off/Len = sector name span (`#free[sector];`) -- runs the sector's
+//                free { } block (the delete-of-sector form; `#delete` is for objects)
+//  All columns are 8 bytes (poke64) indexed by nodeId*8; node id 0 is reserved
+//  as NONE so 0 doubles as "no child".
+// ===========================================================================
+#stack[int, 64] txAstKind = 0;
+#stack[int, 64] txAstA = 0;
+#stack[int, 64] txAstB = 0;
+#stack[int, 64] txAstC = 0;
+#stack[int, 64] txAstNum = 0;
+#stack[int, 64] txAstOff = 0;
+#stack[int, 64] txAstLen = 0;
+#stack[int, 64] txAstNext = 0;
+#stack[int, 64] txDeclTrap = 0;     // per-DECL node: 1 = a `string` literal overflows
+                                    // its declared bits -> emit a RUNTIME trap when the
+                                    // decl executes (matches the interpreter, whose bit
+                                    // limit is a runtime error, NOT a compile rejection --
+                                    // so error-path over-long strings never block build).
+#stack[int, 64] txAstCount = 0;
+#stack[int, 64] txAstCap = 0;
+
+#stack[int, 64] txAstInit;
+#define(txAstInit) {
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    #req[txAstC] txAstC;
+    #req[txAstNum] txAstNum;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstNext] txAstNext;
+    #req[txDeclTrap] txDeclTrap;
+    #req[txAstCount] txAstCount;
+    #req[txAstCap] txAstCap;
+    txAstCap = 65536;
+    txAstKind = cssc::alloc(txAstCap * 8);
+    txAstA = cssc::alloc(txAstCap * 8);
+    txAstB = cssc::alloc(txAstCap * 8);
+    txAstC = cssc::alloc(txAstCap * 8);
+    txAstNum = cssc::alloc(txAstCap * 8);
+    txAstOff = cssc::alloc(txAstCap * 8);
+    txAstLen = cssc::alloc(txAstCap * 8);
+    txAstNext = cssc::alloc(txAstCap * 8);
+    txDeclTrap = cssc::alloc(txAstCap * 8);
+    cssc::memfill32(txDeclTrap, 0, txAstCap * 2);
+    cssc::memfill32(txAstKind, 0, txAstCap * 2);
+    cssc::memfill32(txAstA, 0, txAstCap * 2);
+    cssc::memfill32(txAstB, 0, txAstCap * 2);
+    cssc::memfill32(txAstC, 0, txAstCap * 2);
+    cssc::memfill32(txAstNum, 0, txAstCap * 2);
+    cssc::memfill32(txAstOff, 0, txAstCap * 2);
+    cssc::memfill32(txAstLen, 0, txAstCap * 2);
+    cssc::memfill32(txAstNext, 0, txAstCap * 2);
+    // id 0 reserved as NONE
+    txAstCount = 1;
+}
+
+// allocate a fresh node of `kind`, all other columns zeroed, return its id.
+#stack[int, 64] txAstNew;
+#define(txAstNew) {
+    #scanp(txAstNew, int, 0) kind;
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    #req[txAstC] txAstC;
+    #req[txAstNum] txAstNum;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstNext] txAstNext;
+    #req[txAstCount] txAstCount;
+    #req[txAstCap] txAstCap;
+    #stack[int, 64] id = txAstCount;
+    if (id >= txAstCap) { id = txAstCap - 1; }   // clamp (never OOB; warn-not-crash)
+    if (id == txAstCount) { txAstCount = txAstCount + 1; }
+    #stack[int, 64] o = id * 8;
+    cssc::poke64(txAstKind + o, kind);
+    cssc::poke64(txAstA + o, 0);
+    cssc::poke64(txAstB + o, 0);
+    cssc::poke64(txAstC + o, 0);
+    cssc::poke64(txAstNum + o, 0);
+    cssc::poke64(txAstOff + o, 0);
+    cssc::poke64(txAstLen + o, 0);
+    cssc::poke64(txAstNext + o, 0);
+    #delete[o];
+    return id;
+}

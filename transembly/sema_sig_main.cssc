@@ -1,0 +1,52 @@
+// ===========================================================================
+//  transembly/sema_sig_main.cssc  --  signature-help entry. Reads source with a
+//  cursor marker byte (0x04) inside a call `fn(args...)` on stdin and prints the
+//  callee signature `fn(<type> name, ...)` + `active:<n>` (the argument the
+//  cursor is in). Params are the callee's #scanp declarations.
+//
+//  The marker is removed by shifting the tail left; the cursor offset stays at
+//  `mk`. The call up to the cursor is complete enough to parse, so no
+//  cursor-line blanking is needed.
+// ===========================================================================
+
+// Input: argv[1] file (0x04 marker inside) for the IDE (system::capture, no
+// stdin, no hang); else stdin (harness/manual piping).
+#stack[int, 64] buf = cssc::alloc(1048576);
+#stack[int, 64] n = 0;
+if (cssc::argc() >= 2) {
+    #stack[int, 64] pathBuf = cssc::alloc(4096);
+    #stack[int, 64] plen = cssc::argStr(1, pathBuf, 4096);
+    #stack[int, 64] rn = cssc::osReadFile(pathBuf, plen, buf, 1000000);
+    if (rn < 0) { rn = 0; }
+    n = rn;
+    #delete[pathBuf];
+    #delete[plen];
+    #delete[rn];
+}
+if (cssc::argc() < 2) {
+    #stack[int, 64] sn = cssc::hostRead(buf, 1000000);
+    n = sn;
+    #delete[sn];
+}
+
+txFindMarker(buf, n) mk;
+#stack[int, 64] si = mk;
+while (si < n - 1) {
+    cssc::poke8(buf + si, cssc::peek8(buf + si + 1));
+    si = si + 1;
+}
+#delete[si];
+n = n - 1;
+
+txLexInit();
+txTokenizeSrc(buf, n);
+txAstInit();
+txParseProgram() prog;
+txSemaBuildSyms(prog);
+
+txSignatureAt(mk);
+
+#delete[prog];
+#delete[mk];
+#delete[n];
+#delete[buf];

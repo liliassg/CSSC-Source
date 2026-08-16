@@ -1,0 +1,54 @@
+// ===========================================================================
+//  compiler/sema_main.cssc  --  standalone CSSC analyzer entry.
+//  *i am fucking done ...*
+//  Concatenated LAST after lex/ast/parse/sema. Reads a .cssc program from
+//  stdin, lexes + parses it into the AST, runs the semantic analyzer, and
+//  prints diagnostics (one `line:col:severity:code` per line) to stdout.
+//
+//  Build:  concat (lex, ast, parse, sema, sema_main) -> cssc native exe.
+//  Use:    analyzer.exe < target.cssc         (parity vs `cssc lsp diagnostics`)
+// ===========================================================================
+
+// Input: argv[1] file if given (IDE `system::capture` — no stdin, no hang),
+// else stdin (the parity harness feeds the program on stdin).
+#stack[int, 64] buf = cssc::alloc(1200000);
+#stack[int, 64] n = 0;
+if (cssc::argc() >= 2) {
+    #stack[int, 64] pathBuf = cssc::alloc(4096);
+    #stack[int, 64] plen = cssc::argStr(1, pathBuf, 4096);
+    #stack[int, 64] rn = cssc::osReadFile(pathBuf, plen, buf, 1000000);
+    if (rn < 0) { rn = 0; }
+    n = rn;
+    #delete[pathBuf];
+    #delete[plen];
+    #delete[rn];
+}
+if (cssc::argc() < 2) {
+    #stack[int, 64] sn = cssc::hostRead(buf, 1000000);
+    n = sn;
+    #delete[sn];
+}
+
+txLexInit();
+txTokenizeSrc(buf, n);        // fills token columns; sets txSrc = buf
+
+txAstInit();
+txParseProgram() prog;        // AST root (PROGRAM node)
+
+// argv[2] (optional) = the project directory. Scan its *.cssc siblings for
+// top-level definitions so UNKNOWN_FUNCTION can resolve cross-file calls
+// (concatenated modules with no #load). Absent -> unknown-function stays off.
+if (cssc::argc() >= 3) {
+    #stack[int, 64] dirBuf = cssc::alloc(4096);
+    cssc::argStr(2, dirBuf, 4096) dlen;
+    txExtInit();
+    txScanProject(dirBuf, dlen);
+    #delete[dirBuf];
+    #delete[dlen];
+}
+
+txSemaBuild(prog);            // walk AST -> emit diagnostics
+
+#delete[prog];
+#delete[n];
+#delete[buf];

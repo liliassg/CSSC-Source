@@ -1,0 +1,118 @@
+// ===========================================================================
+//  compiler/emit.cssc  --  emit the compiled result. Writes a TEXT container
+//  (hex-encoded, so binary-stdout newline translation can never corrupt it)
+//  that harness/run.py parses into (code, relocs, data, entry) and executes:
+//
+//    ENTRY <entry_off>
+//    CODE <hex of code bytes>
+//    RELOC <operand_off> <sym_id>        (one line per runtime reloc)
+//    DATA <hex of string-data bytes>
+//
+//  On CCOS (M0c+) emit.cssc instead pokes the bytes into an executable buffer,
+//  patches relocs via cssc::rtsym, and cssc::callAddr's the entry -- same data,
+//  different sink.
+// ===========================================================================
+
+// print a string literal's bytes (no newline)
+#stack[int, 64] txPutLit;
+#define(txPutLit) {
+    #scanp(txPutLit, string, 0) s;
+    #stack[int, 64] sa = 0;
+    #adress[s] sa;
+    #stack[int, 64] hdr = cssc::peek64(sa);
+    #stack[int, 64] len = cssc::peek32(hdr + 4);
+    cssc::printRaw(hdr + 8, len);
+    #delete[len];
+    #delete[hdr];
+    #delete[sa];
+}
+
+// nibble (0..15) -> ascii hex char code
+#stack[int, 64] txHexChar;
+#define(txHexChar) {
+    #scanp(txHexChar, int, 0) n;
+    #stack[int, 64] c = 48 + n;            // '0'..'9'
+    if (n >= 10) { c = 87 + n; }           // 'a'..'f'
+    #stack[int, 64] r = c;
+    #delete[c];
+    return r;
+}
+
+// hex-encode `len` bytes at `src` into a fresh buffer and printRaw it
+#stack[int, 64] txHexDump;
+#define(txHexDump) {
+    #scanp(txHexDump, int, 0) src;
+    #scanp(txHexDump, int, 1) len;
+    #req[txHexChar] txHexChar;
+    #stack[int, 64] hb = cssc::alloc(len * 2 + 2);
+    #stack[int, 64] i = 0;
+    while (i < len) {
+        #stack[int, 64] byte = cssc::band(cssc::peek8(src + i), 255);
+        txHexChar(cssc::band(cssc::shr(byte, 4), 15)) hi;
+        txHexChar(cssc::band(byte, 15)) lo;
+        cssc::poke8(hb + i * 2, hi);
+        cssc::poke8(hb + i * 2 + 1, lo);
+        #delete[hi];
+        #delete[lo];
+        #delete[byte];
+        i = i + 1;
+    }
+    cssc::printRaw(hb, len * 2);
+    cssc::free(hb);
+    #delete[i];
+    #delete[hb];
+}
+
+// write the whole container to stdout
+#stack[int, 64] txEmitContainer;
+#define(txEmitContainer) {
+    #scanp(txEmitContainer, int, 0) entryOff;
+    #req[txPutLit] txPutLit;
+    #req[txHexDump] txHexDump;
+    #req[txCode] txCode;
+    #req[txCodeLen] txCodeLen;
+    #req[txStrData] txStrData;
+    #req[txStrDataLen] txStrDataLen;
+    #req[txRelocOff] txRelocOff;
+    #req[txRelocSym] txRelocSym;
+    #req[txRelocCount] txRelocCount;
+    #req[txGlobCount] txGlobCount;
+    txPutLit("ENTRY ");
+    cssc::out(entryOff);
+    cssc::outln();
+    txPutLit("CODE ");
+    txHexDump(txCode, txCodeLen);
+    cssc::outln();
+    #stack[int, 64] i = 0;
+    while (i < txRelocCount) {
+        txPutLit("RELOC ");
+        cssc::out(cssc::peek64(txRelocOff + i * 8));
+        txPutLit(" ");
+        cssc::out(cssc::peek64(txRelocSym + i * 8));
+        cssc::outln();
+        i = i + 1;
+    }
+    #delete[i];
+    txPutLit("DATA ");
+    txHexDump(txStrData, txStrDataLen);
+    // M4b/M7c: the module-globals area follows the string data -- SIXTEEN bytes
+    // per global: an 8-byte value cell followed by an 8-byte `alive` flag, the
+    // same pairing the frame slots use (see txSlotOff). The flag starts at 1
+    // because an undeclared-but-reserved global reads as 0, not as unbound; only
+    // `#delete` clears it. The backend's rip-relative disps assume exactly this
+    // layout ([code][strData][globals]); declarations initialise the value cells
+    // at runtime, in main's statement order.
+    #stack[int, 64] gi3 = 0;
+    while (gi3 < txGlobCount) {
+        #stack[int, 64] zi = 0;
+        while (zi < 8) { txPutLit("00"); zi = zi + 1; }      // value = 0
+        txPutLit("01");                                      // alive = 1 (LE u64)
+        #stack[int, 64] zj = 0;
+        while (zj < 7) { txPutLit("00"); zj = zj + 1; }
+        #delete[zj];
+        #delete[zi];
+        gi3 = gi3 + 1;
+    }
+    #delete[gi3];
+    cssc::outln();
+}

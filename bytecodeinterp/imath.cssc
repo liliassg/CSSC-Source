@@ -1,0 +1,169 @@
+// ============================================================================
+//  math.accel (modid 12) NATIVE helpers -- bit-exact port of cssc_math_accel.c
+//  (splitmix64 lattice + FNV-1a mix). When interp.cssc is compiled to native
+//  these run at machine speed: one guest ma::fbm2 call collapses ~135 CSSC-level
+//  calls into one native call. Float values are IEEE-754 f64 bit patterns in i64
+//  slots (ciEvalType==2). Callee-first: each helper is defined before any caller,
+//  and the whole block precedes #define(ciExpr) which dispatches them.
+//
+//  CRITICAL: 64-bit hex constants lex to the exact bit pattern (top-bit-set reads
+//  as a negative i64 but band/bxor/shr treat it as uint64); i64 '*'/'+' wrap mod
+//  2^64; cssc::shr is LOGICAL (zero-fill) -- required for splitmix's z>>k. Native
+//  FLOAT LITERALS do NOT lex to doubles (6.0 -> int 6), so every float constant is
+//  built with cssc::iToF (6.0=iToF(6), 2^53=iToF(9007199254740992)).
+// ============================================================================
+// splitmix64(z): z += PHI; z=(z^(z>>30))*MIXA; z=(z^(z>>27))*MIXB; return z^(z>>31)
+#stack[int, 64] ciMaSplitmix;
+#define(ciMaSplitmix) {
+    #scanp(ciMaSplitmix, int, 0) z0;
+    #stack[int, 64] z = z0 + 0x9E3779B97F4A7C15;
+    #stack[int, 64] z1 = cssc::bxor(z, cssc::shr(z, 30)); z = z1 * 0xBF58476D1CE4E5B9; #delete[z1];
+    #stack[int, 64] z2 = cssc::bxor(z, cssc::shr(z, 27)); z = z2 * 0x94D049BB133111EB; #delete[z2];
+    #stack[int, 64] out = cssc::bxor(z, cssc::shr(z, 31));
+    #delete[z];
+    return out;
+}
+// hashN(a,b,c,d,cnt): FNV-1a over cnt args (2/3/4) then splitmix64, masked to 63 bits
+#stack[int, 64] ciMaHashN;
+#define(ciMaHashN) {
+    #scanp(ciMaHashN, int, 0) a;
+    #scanp(ciMaHashN, int, 1) b;
+    #scanp(ciMaHashN, int, 2) c;
+    #scanp(ciMaHashN, int, 3) d;
+    #scanp(ciMaHashN, int, 4) cnt;
+    #req[ciMaSplitmix] ciMaSplitmix;
+    #stack[int, 64] h = 0xCBF29CE484222325;
+    #stack[int, 64] h1 = cssc::bxor(h, a); h = h1 * 0x100000001B3; #delete[h1];
+    #stack[int, 64] h2 = cssc::bxor(h, b); h = h2 * 0x100000001B3; #delete[h2];
+    if (cnt >= 3) { #stack[int, 64] h3 = cssc::bxor(h, c); h = h3 * 0x100000001B3; #delete[h3]; }
+    if (cnt >= 4) { #stack[int, 64] h4 = cssc::bxor(h, d); h = h4 * 0x100000001B3; #delete[h4]; }
+    ciMaSplitmix(h) sm;
+    #stack[int, 64] r = cssc::band(sm, 0x7FFFFFFFFFFFFFFF);
+    #delete[sm]; #delete[h];
+    return r;
+}
+// hashUnit(x,y) -> f64 in [0,1): splitmix64(x*PHI ^ y*MIXA), mantissa/2^53
+#stack[int, 64] ciMaHashUnit;
+#define(ciMaHashUnit) {
+    #scanp(ciMaHashUnit, int, 0) x;
+    #scanp(ciMaHashUnit, int, 1) y;
+    #req[ciMaSplitmix] ciMaSplitmix;
+    #stack[int, 64] px = x * 0x9E3779B97F4A7C15;
+    #stack[int, 64] py = y * 0xBF58476D1CE4E5B9;
+    #stack[int, 64] m = cssc::bxor(px, py);
+    ciMaSplitmix(m) h;
+    #stack[int, 64] mant = cssc::band(h, 0x1FFFFFFFFFFFFF);
+    #stack[int, 64] r = cssc::fDiv(cssc::iToF(mant), cssc::iToF(9007199254740992));
+    #delete[px]; #delete[py]; #delete[m]; #delete[h]; #delete[mant];
+    return r;
+}
+// hashUnit3(x,y,seed) -> f64 in [0,1): the sampler valueNoise2/fbm2 build on
+#stack[int, 64] ciMaHashUnit3;
+#define(ciMaHashUnit3) {
+    #scanp(ciMaHashUnit3, int, 0) x;
+    #scanp(ciMaHashUnit3, int, 1) y;
+    #scanp(ciMaHashUnit3, int, 2) seed;
+    #req[ciMaSplitmix] ciMaSplitmix;
+    #stack[int, 64] px = x * 0x9E3779B97F4A7C15;
+    #stack[int, 64] py = y * 0xBF58476D1CE4E5B9;
+    #stack[int, 64] ps = seed * 0x94D049BB133111EB;
+    #stack[int, 64] m = cssc::bxor(cssc::bxor(px, py), ps);
+    ciMaSplitmix(m) h;
+    #stack[int, 64] mant = cssc::band(h, 0x1FFFFFFFFFFFFF);
+    #stack[int, 64] r = cssc::fDiv(cssc::iToF(mant), cssc::iToF(9007199254740992));
+    #delete[px]; #delete[py]; #delete[ps]; #delete[m]; #delete[h]; #delete[mant];
+    return r;
+}
+// fade(t) = 6t^5-15t^4+10t^3 via Horner t*t*t*(t*(t*6-15)+10); assoc is load-bearing
+#stack[int, 64] ciMaFade;
+#define(ciMaFade) {
+    #scanp(ciMaFade, int, 0) t;
+    #stack[int, 64] e = cssc::fSub(cssc::fMul(t, cssc::iToF(6)), cssc::iToF(15));
+    e = cssc::fAdd(cssc::fMul(t, e), cssc::iToF(10));
+    #stack[int, 64] t3 = cssc::fMul(cssc::fMul(t, t), t);
+    #stack[int, 64] r = cssc::fMul(t3, e);
+    #delete[e]; #delete[t3];
+    return r;
+}
+// lerpf(a,b,t) = a + t*(b-a)
+#stack[int, 64] ciMaLerpf;
+#define(ciMaLerpf) {
+    #scanp(ciMaLerpf, int, 0) a;
+    #scanp(ciMaLerpf, int, 1) b;
+    #scanp(ciMaLerpf, int, 2) t;
+    #stack[int, 64] r = cssc::fAdd(a, cssc::fMul(t, cssc::fSub(b, a)));
+    return r;
+}
+// floori(xf) = fToI(fFloor(xf)) -- floor FIRST so negatives round down (-5.7 -> -6)
+#stack[int, 64] ciMaFloori;
+#define(ciMaFloori) {
+    #scanp(ciMaFloori, int, 0) xf;
+    #stack[int, 64] r = cssc::fToI(cssc::fFloor(xf));
+    return r;
+}
+// valueNoise2(x,y,seed): 4-corner hashUnit3 lattice, quintic fade, bilinear lerp
+#stack[int, 64] ciMaValueNoise2;
+#define(ciMaValueNoise2) {
+    #scanp(ciMaValueNoise2, int, 0) x;
+    #scanp(ciMaValueNoise2, int, 1) y;
+    #scanp(ciMaValueNoise2, int, 2) seed;
+    #req[ciMaFloori] ciMaFloori;
+    #req[ciMaHashUnit3] ciMaHashUnit3;
+    #req[ciMaFade] ciMaFade;
+    #req[ciMaLerpf] ciMaLerpf;
+    ciMaFloori(x) x0;
+    ciMaFloori(y) y0;
+    #stack[int, 64] fx = cssc::fSub(x, cssc::iToF(x0));
+    #stack[int, 64] fy = cssc::fSub(y, cssc::iToF(y0));
+    ciMaHashUnit3(x0, y0, seed) v00;
+    ciMaHashUnit3(x0 + 1, y0, seed) v10;
+    ciMaHashUnit3(x0, y0 + 1, seed) v01;
+    ciMaHashUnit3(x0 + 1, y0 + 1, seed) v11;
+    ciMaFade(fx) u;
+    ciMaFade(fy) v;
+    ciMaLerpf(v00, v10, u) aa;
+    ciMaLerpf(v01, v11, u) bb;
+    ciMaLerpf(aa, bb, v) out;
+    #stack[int, 64] r = out;
+    #delete[x0]; #delete[y0]; #delete[fx]; #delete[fy];
+    #delete[v00]; #delete[v10]; #delete[v01]; #delete[v11];
+    #delete[u]; #delete[v]; #delete[aa]; #delete[bb]; #delete[out];
+    return r;
+}
+// fbm2(x,y,octaves,lacunarity,gain,seed): THE worldgen method. seed varies per
+// octave (seed + o*1013). Accumulation order is last-ULP load-bearing.
+#stack[int, 64] ciMaFbm2;
+#define(ciMaFbm2) {
+    #scanp(ciMaFbm2, int, 0) x;
+    #scanp(ciMaFbm2, int, 1) y;
+    #scanp(ciMaFbm2, int, 2) octaves;
+    #scanp(ciMaFbm2, int, 3) lac;
+    #scanp(ciMaFbm2, int, 4) gain;
+    #scanp(ciMaFbm2, int, 5) seed;
+    #req[ciMaValueNoise2] ciMaValueNoise2;
+    #stack[int, 64] oct = octaves;
+    if (oct < 1) { oct = 1; }
+    if (oct > 16) { oct = 16; }
+    #stack[int, 64] sum = cssc::iToF(0);
+    #stack[int, 64] amp = cssc::iToF(1);
+    #stack[int, 64] freq = cssc::iToF(1);
+    #stack[int, 64] norm = cssc::iToF(0);
+    #stack[int, 64] o = 0;
+    while (o < oct) {
+        #stack[int, 64] sx = cssc::fMul(x, freq);
+        #stack[int, 64] sy = cssc::fMul(y, freq);
+        #stack[int, 64] os = seed + o * 1013;
+        ciMaValueNoise2(sx, sy, os) n;
+        sum = cssc::fAdd(sum, cssc::fMul(n, amp));
+        norm = cssc::fAdd(norm, amp);
+        amp = cssc::fMul(amp, gain);
+        freq = cssc::fMul(freq, lac);
+        #delete[sx]; #delete[sy]; #delete[os]; #delete[n];
+        o = o + 1;
+    }
+    #delete[o];
+    #stack[int, 64] r = cssc::iToF(0);
+    if (cssc::fCmp(norm, cssc::iToF(0)) == 1) { r = cssc::fDiv(sum, norm); }
+    #delete[sum]; #delete[amp]; #delete[freq]; #delete[norm]; #delete[oct];
+    return r;
+}

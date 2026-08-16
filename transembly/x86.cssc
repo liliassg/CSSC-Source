@@ -1,0 +1,1214 @@
+// ===========================================================================
+//  compiler/x86.cssc  --  x86-64 machine-code backend (System V AMD64). Walks
+//  the SSA+slot CIR and emits bytes with a SPILL-EVERYTHING frame: every SSA
+//  value AND every stack slot gets its own rbp-relative cell (correctness over
+//  speed; register allocation is a later optimization). Only rax/rcx/rdx are
+//  live across a single op, all caller-saved. Frame is 16-byte aligned so the
+//  16-byte-at-call SysV invariant holds through every `call`.
+//
+//  Frame layout (all cells 8 bytes, rbp-negative):
+//    SSA id k  -> [rbp - (k+1)*8]
+//    slot  s   -> [rbp - (txSsaNext + s + 1)*8]
+//    frame      = round16((txSsaNext + txSlotNext) * 8)
+//
+//  Encodings (REX.W=0x48; rax=0 rcx=1 rdx=2 rsi=6 rdi=7):
+//    push rbp 55 ; mov rbp,rsp 48 89 E5 ; sub rsp,imm32 48 81 EC <i32> ;
+//    mov reg,imm64 48 B8+reg <i64> ; mov [rbp+d32],reg 48 89 <modrm> <d32> ;
+//    mov reg,[rbp+d32] 48 8B <modrm> <d32>  (modrm = 0x80|(reg<<3)|5) ;
+//    lea reg,[rip+d32] 48 8D <(reg<<3)|5> <d32> ; call rax FF D0 ;
+//    add 48 01 C8 ; sub 48 29 C8 ; imul 48 0F AF C1 ; cqo 48 99 ;
+//    idiv rcx 48 F7 F9 ; leave C9 ; ret C3.
+// ===========================================================================
+#stack[int, 64] txCode = 0;
+#stack[int, 64] txCodeLen = 0;
+#stack[int, 64] txCodeCap = 0;
+#stack[int, 64] txRelocOff = 0;
+#stack[int, 64] txRelocSym = 0;
+#stack[int, 64] txRelocCount = 0;
+#stack[int, 64] txStrData = 0;
+#stack[int, 64] txStrDataLen = 0;
+#stack[int, 64] txStrDataCap = 0;
+#stack[int, 64] txLeaOff = 0;
+#stack[int, 64] txLeaStr = 0;
+#stack[int, 64] txLeaCount = 0;
+#stack[int, 64] txLabelOff = 0;      // label id -> code offset (filled at LABEL)
+#stack[int, 64] txBrOff = 0;         // rel32 operand offset of a jmp/jcc
+#stack[int, 64] txBrLabel = 0;       // branch target label id
+#stack[int, 64] txBrCount = 0;
+#stack[int, 64] txCallFixOff = 0;    // rel32 operand offset of a user `call`
+#stack[int, 64] txCallFixFunc = 0;   // callee function index
+#stack[int, 64] txCallFixCount = 0;
+#stack[int, 64] txGlobFixOff = 0;    // disp32 operand offset of a rip-relative global access
+#stack[int, 64] txGlobFixIdx = 0;    // global index
+#stack[int, 64] txGlobFixCount = 0;
+
+#stack[int, 64] txX86Init;
+#define(txX86Init) {
+    #req[txCode] txCode; #req[txCodeLen] txCodeLen; #req[txCodeCap] txCodeCap;
+    #req[txRelocOff] txRelocOff; #req[txRelocSym] txRelocSym; #req[txRelocCount] txRelocCount;
+    #req[txStrData] txStrData; #req[txStrDataLen] txStrDataLen; #req[txStrDataCap] txStrDataCap;
+    #req[txLeaOff] txLeaOff; #req[txLeaStr] txLeaStr; #req[txLeaCount] txLeaCount;
+    #req[txLabelOff] txLabelOff; #req[txBrOff] txBrOff; #req[txBrLabel] txBrLabel; #req[txBrCount] txBrCount;
+    #req[txCallFixOff] txCallFixOff; #req[txCallFixFunc] txCallFixFunc; #req[txCallFixCount] txCallFixCount;
+    #req[txGlobFixOff] txGlobFixOff; #req[txGlobFixIdx] txGlobFixIdx; #req[txGlobFixCount] txGlobFixCount;
+    txCodeCap = 1048576;
+    txCode = cssc::alloc(txCodeCap);
+    txCodeLen = 0;
+    txRelocOff = cssc::alloc(65536 * 8);
+    txRelocSym = cssc::alloc(65536 * 8);
+    txRelocCount = 0;
+    txStrDataCap = 1048576;
+    txStrData = cssc::alloc(txStrDataCap);
+    txStrDataLen = 0;
+    txLeaOff = cssc::alloc(65536 * 8);
+    txLeaStr = cssc::alloc(65536 * 8);
+    txLeaCount = 0;
+    txLabelOff = cssc::alloc(65536 * 8);
+    txBrOff = cssc::alloc(65536 * 8);
+    txBrLabel = cssc::alloc(65536 * 8);
+    txBrCount = 0;
+    txCallFixOff = cssc::alloc(65536 * 8);
+    txCallFixFunc = cssc::alloc(65536 * 8);
+    txCallFixCount = 0;
+    txGlobFixOff = cssc::alloc(65536 * 8);
+    txGlobFixIdx = cssc::alloc(65536 * 8);
+    txGlobFixCount = 0;
+}
+
+// rip-relative global access. `mov rax,[rip+d32]` = 48 8B 05 <d32>;
+// `mov [rip+d32],rax` = 48 89 05 <d32>  (modrm mod=00 reg=rax rm=101 -> RIP+disp32).
+// The disp32 is recorded as a fixup: the globals block sits after code+string
+// data, so its final address is only known once all functions are emitted.
+#stack[int, 64] txGlobRip;
+// `byteOff` is a BYTE offset into the globals block, not a global index: each
+// global occupies 16 bytes (value at idx*16, `alive` flag at idx*16+8), the same
+// value/alive pairing the frame slots use.
+#define(txGlobRip) {
+    #scanp(txGlobRip, int, 0) isStore;
+    #scanp(txGlobRip, int, 1) byteOff;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #req[txCodeLen] txCodeLen;
+    #req[txGlobFixOff] txGlobFixOff;
+    #req[txGlobFixIdx] txGlobFixIdx;
+    #req[txGlobFixCount] txGlobFixCount;
+    txEmitByte(0x48);
+    // 0 = load rax,[rip+g] ; 1 = store [rip+g],rax ; 2 = lea rax,[rip+g]
+    if (isStore == 1) { txEmitByte(0x89); }
+    if (isStore == 2) { txEmitByte(0x8D); }
+    if (isStore == 0) { txEmitByte(0x8B); }
+    txEmitByte(0x05);
+    cssc::poke64(txGlobFixOff + txGlobFixCount * 8, txCodeLen);
+    cssc::poke64(txGlobFixIdx + txGlobFixCount * 8, byteOff);
+    txGlobFixCount = txGlobFixCount + 1;
+    txEmitLE(0, 4);
+}
+
+#stack[int, 64] txEmitByte;
+#define(txEmitByte) {
+    #scanp(txEmitByte, int, 0) b;
+    #req[txCode] txCode;
+    #req[txCodeLen] txCodeLen;
+    cssc::poke8(txCode + txCodeLen, cssc::band(b, 255));
+    txCodeLen = txCodeLen + 1;
+}
+
+#stack[int, 64] txEmitLE;
+#define(txEmitLE) {
+    #scanp(txEmitLE, int, 0) v;
+    #scanp(txEmitLE, int, 1) n;
+    #req[txEmitByte] txEmitByte;
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        txEmitByte(cssc::band(cssc::shr(v, i * 8), 255));
+        i = i + 1;
+    }
+    #delete[i];
+}
+
+// mov reg, imm64   (reg in {rax0,rcx1,rdx2,rsi6,rdi7})
+#stack[int, 64] txMovRegImm64;
+#define(txMovRegImm64) {
+    #scanp(txMovRegImm64, int, 0) reg;
+    #scanp(txMovRegImm64, int, 1) imm;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    txEmitByte(0x48);
+    txEmitByte(cssc::band(0xB8 + reg, 255));
+    txEmitLE(imm, 8);
+}
+
+// mov [rbp - off], reg   (reg 0..15; r8..r9 get REX.R via prefix 0x4C)
+#stack[int, 64] txStoreRbp;
+#define(txStoreRbp) {
+    #scanp(txStoreRbp, int, 0) reg;
+    #scanp(txStoreRbp, int, 1) off;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #stack[int, 64] rex = 0x48;
+    if (reg >= 8) { rex = 0x4C; }                 // REX.W|REX.R (NOT 0x44: that drops W -> 32-bit)
+    txEmitByte(rex);
+    txEmitByte(0x89);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0x80, cssc::shl(cssc::band(reg, 7), 3)), 5), 255));
+    txEmitLE(0 - off, 4);
+    #delete[rex];
+}
+
+// mov reg, [rbp - off]   (reg 0..15; r8..r9 get REX.R via prefix 0x4C)
+#stack[int, 64] txLoadRbp;
+#define(txLoadRbp) {
+    #scanp(txLoadRbp, int, 0) reg;
+    #scanp(txLoadRbp, int, 1) off;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #stack[int, 64] rex = 0x48;
+    if (reg >= 8) { rex = 0x4C; }
+    txEmitByte(rex);
+    txEmitByte(0x8B);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0x80, cssc::shl(cssc::band(reg, 7), 3)), 5), 255));
+    txEmitLE(0 - off, 4);
+    #delete[rex];
+}
+
+// zero a register via the AMD64 xor-idiom (32-bit write clears bits 63:32).
+// r8/r9 need REX.R|REX.B = 0x45 (both the reg and rm fields hold the reg).
+#stack[int, 64] txZeroReg;
+#define(txZeroReg) {
+    #scanp(txZeroReg, int, 0) reg;
+    #req[txEmitByte] txEmitByte;
+    if (reg >= 8) { txEmitByte(0x45); }
+    txEmitByte(0x31);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0xC0, cssc::shl(cssc::band(reg, 7), 3)), cssc::band(reg, 7)), 255));
+}
+
+// lea reg, [rbp - off]   -- the ADDRESS of a frame cell (SLOT_ADDR / "caller
+// wins" argument passing). Same modrm shape as txLoadRbp, opcode 8D.
+#stack[int, 64] txLeaRbp;
+#define(txLeaRbp) {
+    #scanp(txLeaRbp, int, 0) reg;
+    #scanp(txLeaRbp, int, 1) off;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #stack[int, 64] rex = 0x48;
+    if (reg >= 8) { rex = 0x4C; }
+    txEmitByte(rex);
+    txEmitByte(0x8D);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0x80, cssc::shl(cssc::band(reg, 7), 3)), 5), 255));
+    txEmitLE(0 - off, 4);
+    #delete[rex];
+}
+
+// mov dst, [base + disp8]   -- deref a frame ADDRESS held in a register.
+// The disp8 form (modrm 0x40) is used unconditionally so a zero displacement
+// still encodes a base+disp operand; that keeps rbp/r13 (which cannot use the
+// no-disp form) out of the special cases.
+#stack[int, 64] txLoadInd;
+#define(txLoadInd) {
+    #scanp(txLoadInd, int, 0) dst;
+    #scanp(txLoadInd, int, 1) base;
+    #scanp(txLoadInd, int, 2) disp;
+    #req[txEmitByte] txEmitByte;
+    #stack[int, 64] rex = 0x48;
+    if (dst >= 8) { rex = cssc::bor(rex, 4); }        // REX.R
+    if (base >= 8) { rex = cssc::bor(rex, 1); }       // REX.B
+    txEmitByte(rex);
+    txEmitByte(0x8B);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0x40, cssc::shl(cssc::band(dst, 7), 3)), cssc::band(base, 7)), 255));
+    txEmitByte(cssc::band(disp, 255));
+    #delete[rex];
+}
+
+// mov [base + disp8], src
+#stack[int, 64] txStoreInd;
+#define(txStoreInd) {
+    #scanp(txStoreInd, int, 0) base;
+    #scanp(txStoreInd, int, 1) src;
+    #scanp(txStoreInd, int, 2) disp;
+    #req[txEmitByte] txEmitByte;
+    #stack[int, 64] rex = 0x48;
+    if (src >= 8) { rex = cssc::bor(rex, 4); }        // REX.R
+    if (base >= 8) { rex = cssc::bor(rex, 1); }       // REX.B
+    txEmitByte(rex);
+    txEmitByte(0x89);
+    txEmitByte(cssc::band(cssc::bor(cssc::bor(0x40, cssc::shl(cssc::band(src, 7), 3)), cssc::band(base, 7)), 255));
+    txEmitByte(cssc::band(disp, 255));
+    #delete[rex];
+}
+
+// SysV integer argument register for positional index i (0..5) -> reg id.
+#stack[int, 64] txArgReg;
+#define(txArgReg) {
+    #scanp(txArgReg, int, 0) i;
+    #stack[int, 64] r = 7;                        // rdi
+    if (i == 1) { r = 6; }                         // rsi
+    if (i == 2) { r = 2; }                         // rdx
+    if (i == 3) { r = 1; }                         // rcx
+    if (i == 4) { r = 8; }                         // r8
+    if (i == 5) { r = 9; }                         // r9
+    return r;
+}
+
+// mov rax, imm64=<placeholder 0> ; record a runtime-sym reloc at the operand
+#stack[int, 64] txMovRaxReloc;
+#define(txMovRaxReloc) {
+    #scanp(txMovRaxReloc, int, 0) sym;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #req[txCodeLen] txCodeLen;
+    #req[txRelocOff] txRelocOff;
+    #req[txRelocSym] txRelocSym;
+    #req[txRelocCount] txRelocCount;
+    txEmitByte(0x48);
+    txEmitByte(0xB8);
+    cssc::poke64(txRelocOff + txRelocCount * 8, txCodeLen);
+    cssc::poke64(txRelocSym + txRelocCount * 8, sym);
+    txRelocCount = txRelocCount + 1;
+    txEmitLE(0, 8);
+}
+
+// lea reg, [rip+disp32=<placeholder>] ; record a lea-fixup to string `strOff`
+#stack[int, 64] txLeaRegRip;
+#define(txLeaRegRip) {
+    #scanp(txLeaRegRip, int, 0) reg;
+    #scanp(txLeaRegRip, int, 1) strOff;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #req[txCodeLen] txCodeLen;
+    #req[txLeaOff] txLeaOff;
+    #req[txLeaStr] txLeaStr;
+    #req[txLeaCount] txLeaCount;
+    txEmitByte(0x48);
+    txEmitByte(0x8D);
+    txEmitByte(cssc::band(cssc::bor(cssc::shl(cssc::band(reg, 7), 3), 5), 255));
+    cssc::poke64(txLeaOff + txLeaCount * 8, txCodeLen);
+    cssc::poke64(txLeaStr + txLeaCount * 8, strOff);
+    txLeaCount = txLeaCount + 1;
+    txEmitLE(0, 4);
+}
+
+#stack[int, 64] txAddStrData;
+#define(txAddStrData) {
+    #scanp(txAddStrData, int, 0) srcOff;
+    #scanp(txAddStrData, int, 1) len;
+    #req[txSrc] txSrc;
+    #req[txStrData] txStrData;
+    #req[txStrDataLen] txStrDataLen;
+    #stack[int, 64] at = txStrDataLen;
+    #stack[int, 64] i = 0;
+    while (i < len) {
+        cssc::poke8(txStrData + at + i, cssc::peek8(txSrc + srcOff + i));
+        i = i + 1;
+    }
+    #delete[i];
+    txStrDataLen = txStrDataLen + len;
+    return at;
+}
+
+// frame cell offset (rbp-negative, positive magnitude) of an SSA id / a slot
+#stack[int, 64] txSsaOff;
+#define(txSsaOff) {
+    #scanp(txSsaOff, int, 0) id;
+    #stack[int, 64] r = (id + 1) * 8;
+    return r;
+}
+// Every slot occupies TWO cells: the value, and an `alive` flag right behind it
+// (value_off + 8). `alive` is what distinguishes a variable holding 0 from a
+// variable that was `#delete`d -- the reference prints `0` for the first and
+// `0x0` for the second (docs/cssc-ownership.md section 6). Keeping the flag at a
+// constant +8 means a callee that received only the value's ADDRESS can still
+// reach it, which is what makes the delete-cascade stop after exactly one level
+// (probe p_chain3) while assignments keep cascading (p_chain3_wb).
+#stack[int, 64] txSlotOff;
+#define(txSlotOff) {
+    #scanp(txSlotOff, int, 0) s;
+    #req[txSsaNext] txSsaNext;
+    #stack[int, 64] r = (txSsaNext + s * 2 + 1) * 8;
+    return r;
+}
+#stack[int, 64] txSlotAliveOff;
+#define(txSlotAliveOff) {
+    #scanp(txSlotAliveOff, int, 0) s;
+    #req[txSlotOff] txSlotOff;
+    txSlotOff(s) v;
+    #stack[int, 64] r = v + 8;
+    #delete[v];
+    return r;
+}
+
+// mov qword [rbp - off], imm32   (sign-extended) -- used to seed `alive`.
+#stack[int, 64] txStoreRbpImm;
+#define(txStoreRbpImm) {
+    #scanp(txStoreRbpImm, int, 0) off;
+    #scanp(txStoreRbpImm, int, 1) imm;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    txEmitByte(0x48);
+    txEmitByte(0xC7);
+    txEmitByte(0x85);
+    txEmitLE(0 - off, 4);
+    txEmitLE(imm, 4);
+}
+
+// mov qword [base + disp8], imm32   (sign-extended)
+#stack[int, 64] txStoreIndImm;
+#define(txStoreIndImm) {
+    #scanp(txStoreIndImm, int, 0) base;
+    #scanp(txStoreIndImm, int, 1) disp;
+    #scanp(txStoreIndImm, int, 2) imm;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #stack[int, 64] rex = 0x48;
+    if (base >= 8) { rex = cssc::bor(rex, 1); }
+    txEmitByte(rex);
+    txEmitByte(0xC7);
+    txEmitByte(cssc::band(cssc::bor(0x40, cssc::band(base, 7)), 255));
+    txEmitByte(cssc::band(disp, 255));
+    txEmitLE(imm, 4);
+    #delete[rex];
+}
+
+// cmp qword [rbp - off], 0   -> 48 83 BD <disp32> 00   (8 bytes)
+#stack[int, 64] txCmpRbpZero;
+#define(txCmpRbpZero) {
+    #scanp(txCmpRbpZero, int, 0) off;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    txEmitByte(0x48);
+    txEmitByte(0x83);
+    txEmitByte(0xBD);
+    txEmitLE(0 - off, 4);
+    txEmitByte(0x00);
+}
+
+// emit one function `fi`: set the per-function frame counters, record the entry
+// offset, prologue, marshal incoming SysV arg registers into the param slots,
+// then walk the function's CIR op range [start,end). (Two-phase: fixups run once
+// globally afterwards in txX86Fixup, NOT here -- see the review's Bug 3.)
+#stack[int, 64] txEmitFunc;
+#define(txEmitFunc) {
+    #scanp(txEmitFunc, int, 0) fi;
+    #req[txEmitByte] txEmitByte;
+    #req[txEmitLE] txEmitLE;
+    #req[txMovRegImm64] txMovRegImm64;
+    #req[txStoreRbp] txStoreRbp;
+    #req[txLoadRbp] txLoadRbp;
+    #req[txMovRaxReloc] txMovRaxReloc;
+    #req[txLeaRegRip] txLeaRegRip;
+    #req[txAddStrData] txAddStrData;
+    #req[txZeroReg] txZeroReg;
+    #req[txArgReg] txArgReg;
+    #req[txSsaOff] txSsaOff;
+    #req[txSlotOff] txSlotOff;
+    #req[txLeaRbp] txLeaRbp;
+    #req[txLoadInd] txLoadInd;
+    #req[txStoreInd] txStoreInd;
+    #req[txSlotAliveOff] txSlotAliveOff;
+    #req[txStoreRbpImm] txStoreRbpImm;
+    #req[txStoreIndImm] txStoreIndImm;
+    #req[txCmpRbpZero] txCmpRbpZero;
+    #req[txParamByRef] txParamByRef;
+    #req[txFuncHasByRef] txFuncHasByRef;
+    #req[txSsaNext] txSsaNext;
+    #req[txSlotNext] txSlotNext;
+    #req[txCirOp] txCirOp;
+    #req[txCirRes] txCirRes;
+    #req[txCirImm] txCirImm;
+    #req[txCirA] txCirA;
+    #req[txCirB] txCirB;
+    #req[txCirSOff] txCirSOff;
+    #req[txCirSLen] txCirSLen;
+    #req[txCode] txCode;
+    #req[txCodeLen] txCodeLen;
+    #req[txLabelOff] txLabelOff;
+    #req[txBrOff] txBrOff;
+    #req[txBrLabel] txBrLabel;
+    #req[txBrCount] txBrCount;
+    #req[txFuncSsaCount] txFuncSsaCount;
+    #req[txFuncSlotCount] txFuncSlotCount;
+    #req[txFuncCirStart] txFuncCirStart;
+    #req[txFuncCirEnd] txFuncCirEnd;
+    #req[txFuncArity] txFuncArity;
+    #req[txFuncEntryOff] txFuncEntryOff;
+    #req[txCallArg] txCallArg;
+    #req[txCallFixOff] txCallFixOff;
+    #req[txCallFixFunc] txCallFixFunc;
+    #req[txCallFixCount] txCallFixCount;
+
+    // per-function frame counters (BOTH must be restored: txSlotOff reads
+    // txSsaNext, the frame calc reads txSsaNext+txSlotNext -- review Bug 2).
+    txSsaNext = cssc::peek64(txFuncSsaCount + fi * 8);
+    txSlotNext = cssc::peek64(txFuncSlotCount + fi * 8);
+    #stack[int, 64] arity = cssc::peek64(txFuncArity + fi * 8);
+
+    cssc::poke64(txFuncEntryOff + fi * 8, txCodeLen);   // entry = current code offset
+
+    // frame size (16-aligned): one cell per SSA + TWO per slot (value + alive).
+    // Round up with a bitwise mask, NOT `/16*16`: CSSC `/` is FLOAT division
+    // (6/4 == 1.5), so `x/16*16` truncates back to x for a compiler built by a
+    // float-`/` compiler -- the frame stops being 16-aligned and self-compile
+    // diverges from the reference (which builds with an integer-`/` native). The
+    // `& ~15` form is integer and builder-independent.
+    #stack[int, 64] cells = txSsaNext + txSlotNext * 2;
+    #stack[int, 64] frame = cssc::band((cells * 8) + 15, 0 - 16);
+
+    // prologue: push rbp ; mov rbp, rsp ; sub rsp, frame
+    txEmitByte(0x55);
+    txEmitByte(0x48); txEmitByte(0x89); txEmitByte(0xE5);
+    if (frame > 0) {
+        txEmitByte(0x48); txEmitByte(0x81); txEmitByte(0xEC);
+        txEmitLE(frame, 4);
+    }
+
+    // marshal incoming arg registers -> param slots 0..min(arity,6)-1
+    #stack[int, 64] pn = arity;
+    if (pn > 6) { pn = 6; }
+    #stack[int, 64] pi = 0;
+    while (pi < pn) {
+        txArgReg(pi) areg;
+        txSlotOff(pi) so;
+        txStoreRbp(areg, so);
+        txSlotAliveOff(pi) sao;                 // an incoming parameter is BOUND
+        txStoreRbpImm(sao, 1);
+        #delete[sao];
+        #delete[so];
+        #delete[areg];
+        pi = pi + 1;
+    }
+    #delete[pi];
+
+    // params 6..arity-1 arrive on the STACK (SysV): arg6 at [rbp+16], arg7 at
+    // [rbp+24], ... The compiler's own txCirEmit takes SEVEN params, so without
+    // this the 7th read garbage and self-hosting crashed. txLoadRbp NEGATES its
+    // offset, so a NEGATIVE off addresses [rbp + positive].
+    #stack[int, 64] spi = 6;
+    while (spi < arity) {
+        #stack[int, 64] spOff = 0 - (16 + (spi - 6) * 8);
+        txLoadRbp(0, spOff);                    // rax = stack-passed arg
+        txSlotOff(spi) spso;
+        txStoreRbp(0, spso);                    // slot spi = arg
+        txSlotAliveOff(spi) spao;
+        txStoreRbpImm(spao, 1);                 // bound
+        #delete[spao];
+        #delete[spso];
+        #delete[spOff];
+        spi = spi + 1;
+    }
+    #delete[spi];
+
+    // "caller wins" (docs/cssc-ownership.md section 3): a by-address parameter
+    // arrives as a POINTER to the caller's cell, not as the value. Stash the
+    // pointer in the hidden slot `arity + i`, then pull the pointee into the
+    // parameter slot -- from there on the body treats it as an ordinary local,
+    // so reads and writes inside the body cost exactly what they cost today.
+    // The matching write-back sits in the RET op below.
+    txFuncHasByRef(fi) hasRef;
+    if (hasRef == 1) {
+        #stack[int, 64] bi = 0;
+        while (bi < pn) {
+            txParamByRef(fi, bi) isRef;
+            if (isRef == 1) {
+                txSlotOff(bi) bvo;
+                txSlotOff(arity + bi) bao;
+                txLoadRbp(1, bvo);                  // rcx = incoming pointer
+                txStoreRbp(1, bao);                 // stash it for the epilogue
+                txLoadInd(2, 1, 0);                 // rdx = [rcx]
+                txStoreRbp(2, bvo);                 // param slot = pointee value
+                #delete[bao];
+                #delete[bvo];
+            }
+            #delete[isRef];
+            bi = bi + 1;
+        }
+        #delete[bi];
+    }
+    #delete[pn];
+
+    #stack[int, 64] r = cssc::peek64(txFuncCirStart + fi * 8);
+    #stack[int, 64] rend = cssc::peek64(txFuncCirEnd + fi * 8);
+    while (r < rend) {
+        #stack[int, 64] o = r * 8;
+        #stack[int, 64] op = cssc::peek64(txCirOp + o);
+        if (op == 1) {                                   // CONST_INT
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            txMovRegImm64(0, cssc::peek64(txCirImm + o));  // mov rax, imm
+            txSsaOff(res) off;
+            txStoreRbp(0, off);
+            #delete[off];
+            #delete[res];
+        }
+        if (op == 2) {                                   // CONST_STR -> ptr
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            txAddStrData(cssc::peek64(txCirSOff + o), cssc::peek64(txCirSLen + o)) at;
+            txLeaRegRip(0, at);                          // lea rax, [rip+..]
+            txSsaOff(res) off;
+            txStoreRbp(0, off);
+            #delete[off];
+            #delete[at];
+            #delete[res];
+        }
+        if (op == 3) {                                   // SLOT_ALLOC: seed `alive`
+            // The value cell is reserved by frame sizing, but the alive flag has
+            // to start at 1 -- frame memory is whatever the last call left there.
+            #stack[int, 64] aslot2 = cssc::peek64(txCirA + o);
+            txSlotAliveOff(aslot2) aao;
+            txStoreRbpImm(aao, 1);
+            #delete[aao];
+            #delete[aslot2];
+        }
+        if (op == 4) {                                   // SLOT_STORE slot <- val
+            #stack[int, 64] slot = cssc::peek64(txCirA + o);
+            #stack[int, 64] val = cssc::peek64(txCirB + o);
+            txSsaOff(val) vo;
+            txLoadRbp(0, vo);                            // mov rax, [rbp-val]
+            txSlotOff(slot) so;
+            txStoreRbp(0, so);                           // mov [rbp-slot], rax
+            #delete[so];
+            #delete[vo];
+            #delete[slot];
+            #delete[val];
+        }
+        if (op == 5) {                                   // SLOT_LOAD res <- slot
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] slot = cssc::peek64(txCirA + o);
+            txSlotOff(slot) so;
+            txLoadRbp(0, so);
+            txSsaOff(res) ro;
+            txStoreRbp(0, ro);
+            #delete[ro];
+            #delete[so];
+            #delete[res];
+            #delete[slot];
+        }
+        if (op == 6) {                                   // BINOP
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] opc = cssc::peek64(txCirImm + o);
+            #stack[int, 64] lhs = cssc::peek64(txCirA + o);
+            #stack[int, 64] rhs = cssc::peek64(txCirB + o);
+            txSsaOff(lhs) lo;
+            txSsaOff(rhs) ro2;
+            txLoadRbp(0, lo);                            // mov rax, [rbp-lhs]
+            txLoadRbp(1, ro2);                           // mov rcx, [rbp-rhs]
+            #stack[int, 64] resReg = 0;                  // result reg (rax; rdx for %)
+            if (opc == 1) { txEmitByte(0x48); txEmitByte(0x01); txEmitByte(0xC8); }  // add rax,rcx
+            if (opc == 2) { txEmitByte(0x48); txEmitByte(0x29); txEmitByte(0xC8); }  // sub rax,rcx
+            if (opc == 3) { txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0xAF); txEmitByte(0xC1); } // imul rax,rcx
+            if (opc == 4) { txEmitByte(0x48); txEmitByte(0x99); txEmitByte(0x48); txEmitByte(0xF7); txEmitByte(0xF9); } // cqo; idiv rcx -> rax
+            if (opc == 5) { txEmitByte(0x48); txEmitByte(0x99); txEmitByte(0x48); txEmitByte(0xF7); txEmitByte(0xF9); resReg = 2; } // -> rdx
+            // comparisons (6-11): cmp rax,rcx ; setcc al ; movzx eax,al -> 0/1 in rax
+            if (opc >= 6) { if (opc <= 11) {
+                txEmitByte(0x48); txEmitByte(0x39); txEmitByte(0xC8);            // cmp rax, rcx
+                #stack[int, 64] cc = 0;
+                if (opc == 6) { cc = 0x9C; }                                     // setl
+                if (opc == 7) { cc = 0x9E; }                                     // setle
+                if (opc == 8) { cc = 0x9F; }                                     // setg
+                if (opc == 9) { cc = 0x9D; }                                     // setge
+                if (opc == 10) { cc = 0x94; }                                    // sete
+                if (opc == 11) { cc = 0x95; }                                    // setne
+                txEmitByte(0x0F); txEmitByte(cc); txEmitByte(0xC0);              // setcc al
+                txEmitByte(0x0F); txEmitByte(0xB6); txEmitByte(0xC0);            // movzx eax, al
+                #delete[cc];
+            } }
+            // logical && (12) / || (13): (lhs != 0) and/or (rhs != 0)
+            if (opc >= 12) { if (opc <= 13) {
+                txEmitByte(0x48); txEmitByte(0x85); txEmitByte(0xC0);            // test rax, rax
+                txEmitByte(0x0F); txEmitByte(0x95); txEmitByte(0xC0);            // setne al
+                txEmitByte(0x0F); txEmitByte(0xB6); txEmitByte(0xC0);            // movzx eax, al
+                txEmitByte(0x48); txEmitByte(0x85); txEmitByte(0xC9);            // test rcx, rcx
+                txEmitByte(0x0F); txEmitByte(0x95); txEmitByte(0xC1);            // setne cl
+                txEmitByte(0x0F); txEmitByte(0xB6); txEmitByte(0xC9);            // movzx ecx, cl
+                if (opc == 12) { txEmitByte(0x48); txEmitByte(0x21); txEmitByte(0xC8); }  // and rax, rcx
+                if (opc == 13) { txEmitByte(0x48); txEmitByte(0x09); txEmitByte(0xC8); }  // or rax, rcx
+            } }
+            txSsaOff(res) rro;
+            txStoreRbp(resReg, rro);
+            #delete[rro];
+            #delete[resReg];
+            #delete[lo];
+            #delete[ro2];
+            #delete[res];
+            #delete[opc];
+            #delete[lhs];
+            #delete[rhs];
+        }
+        if (op == 7) {                                   // CALL sym, a, b [-> res]
+            #stack[int, 64] a = cssc::peek64(txCirA + o);
+            #stack[int, 64] b = cssc::peek64(txCirB + o);
+            #stack[int, 64] cres = cssc::peek64(txCirRes + o);
+            if (a >= 0) { txSsaOff(a) ao; txLoadRbp(7, ao); #delete[ao]; }   // rdi
+            if (b >= 0) { txSsaOff(b) bo; txLoadRbp(6, bo); #delete[bo]; }   // rsi
+            txMovRaxReloc(cssc::peek64(txCirImm + o));
+            txEmitByte(0xFF); txEmitByte(0xD0);          // call rax
+            // M5: value-returning runtime calls (string_lit/concat/...) hand the
+            // result back in rax -- spill it into the result cell.
+            if (cres >= 0) { txSsaOff(cres) cro; txStoreRbp(0, cro); #delete[cro]; }
+            #delete[cres];
+            #delete[a];
+            #delete[b];
+        }
+        if (op == 8) {                                   // RET (A = value SSA | -1)
+            // "caller wins" write-back: every by-address parameter's CURRENT
+            // value goes back through the stashed pointer into the caller's
+            // cell. This is what makes `p = 99;` in the callee visible as the
+            // caller's `x` (probe p_callerwins_wb) and -- because an
+            // intermediate frame writes back too -- what makes the assignment
+            // cascade all the way up (p_chain3_wb). Touches only rcx/rdx, so
+            // the return value loaded into rax below stays intact.
+            if (hasRef == 1) {
+                #stack[int, 64] wn = arity;
+                if (wn > 6) { wn = 6; }
+                #stack[int, 64] wi = 0;
+                while (wi < wn) {
+                    txParamByRef(fi, wi) wRef;
+                    if (wRef == 1) {
+                        txSlotOff(arity + wi) wao;
+                        txSlotOff(wi) wvo;
+                        txSlotAliveOff(wi) wal;
+                        // A parameter that was `#delete`d is UNBOUND, and the
+                        // reference skips the write-back for exactly that case
+                        // -- which is why the delete stops after one level
+                        // (p_chain3 -> 7) while an assignment cascades
+                        // (p_chain3_wb -> 99). The delete itself already wrote
+                        // the unbound marker into the caller's cell.
+                        txCmpRbpZero(wal);               // cmp [rbp-alive], 0
+                        txEmitByte(0x74); txEmitByte(18);// je over the 18 bytes below
+                        txLoadRbp(1, wao);               // rcx = caller's cell address  (7)
+                        txLoadRbp(2, wvo);               // rdx = current value          (7)
+                        txStoreInd(1, 2, 0);             // [rcx] = rdx                  (4)
+                        #delete[wal];
+                        #delete[wvo];
+                        #delete[wao];
+                    }
+                    #delete[wRef];
+                    wi = wi + 1;
+                }
+                #delete[wi];
+                #delete[wn];
+            }
+            #stack[int, 64] rv = cssc::peek64(txCirA + o);
+            if (rv >= 0) { txSsaOff(rv) rvo; txLoadRbp(0, rvo); #delete[rvo]; }  // mov rax,[rbp-rv]
+            if (rv < 0) { txEmitByte(0x31); txEmitByte(0xC0); }                  // xor eax,eax
+            txEmitByte(0xC9);                            // leave
+            txEmitByte(0xC3);                            // ret
+            #delete[rv];
+        }
+        if (op == 21) {                                  // UNBIND slot (#delete)
+            // A deleted name is UNBOUND, not zero: value 0 AND alive 0. When the
+            // slot is a by-address parameter the same marker is pushed straight
+            // into the caller's cell -- that is the one-level delete cascade the
+            // reference performs in _delete_cross_frame (p_callerwins_del).
+            #stack[int, 64] uslot = cssc::peek64(txCirA + o);
+            txSlotOff(uslot) uvo;
+            txSlotAliveOff(uslot) uao;
+            txStoreRbpImm(uvo, 0);
+            txStoreRbpImm(uao, 0);
+            if (uslot < arity) {
+                txParamByRef(fi, uslot) uRef;
+                if (uRef == 1) {
+                    txSlotOff(arity + uslot) upa;
+                    txLoadRbp(1, upa);                   // rcx = caller's cell
+                    txStoreIndImm(1, 0, 0);              // [rcx]   = 0
+                    // Frame offsets are SUBTRACTED from rbp, so the alive cell
+                    // -- one cell deeper in the frame -- sits at rcx MINUS 8.
+                    txStoreIndImm(1, 0 - 8, 0);          // [rcx-8] = 0 (unbound)
+                    #delete[upa];
+                }
+                #delete[uRef];
+            }
+            #delete[uao];
+            #delete[uvo];
+            #delete[uslot];
+        }
+        if (op == 22) {                                  // SLOT_ALIVE res <- alive(slot)
+            #stack[int, 64] qslot = cssc::peek64(txCirA + o);
+            #stack[int, 64] qres = cssc::peek64(txCirRes + o);
+            txSlotAliveOff(qslot) qao;
+            txLoadRbp(0, qao);
+            txSsaOff(qres) qro;
+            txStoreRbp(0, qro);
+            #delete[qro];
+            #delete[qao];
+            #delete[qres];
+            #delete[qslot];
+        }
+        if (op == 37) {                                  // SLOT_STORE_ALIVE slot.alive <- val
+            #stack[int, 64] aslot = cssc::peek64(txCirA + o);
+            #stack[int, 64] aval = cssc::peek64(txCirB + o);
+            txSsaOff(aval) avo;
+            txLoadRbp(0, avo);                            // mov rax, [rbp-aliveSSA]
+            txSlotAliveOff(aslot) aao3;
+            txStoreRbp(0, aao3);                          // mov [rbp-slot.alive], rax
+            #delete[aao3];
+            #delete[avo];
+            #delete[aval];
+            #delete[aslot];
+        }
+        if (op == 23) {                                  // GLOB_UNBIND (#delete on a global)
+            #stack[int, 64] gu = cssc::peek64(txCirImm + o);
+            txZeroReg(0);
+            txGlobRip(1, gu * 16);                       // global value = 0
+            txZeroReg(0);
+            txGlobRip(1, gu * 16 + 8);                   // global alive = 0
+            #delete[gu];
+        }
+        if (op == 24) {                                  // GLOB_ALIVE res <- alive(global)
+            #stack[int, 64] ga = cssc::peek64(txCirImm + o);
+            #stack[int, 64] gares2 = cssc::peek64(txCirRes + o);
+            txGlobRip(0, ga * 16 + 8);
+            txSsaOff(gares2) garo2;
+            txStoreRbp(0, garo2);
+            #delete[garo2];
+            #delete[gares2];
+            #delete[ga];
+        }
+        if (op == 20) {                                  // GLOB_ADDR: res = &global
+            #stack[int, 64] gares = cssc::peek64(txCirRes + o);
+            txGlobRip(2, cssc::peek64(txCirImm + o) * 16);   // lea rax,[rip+global]
+            txSsaOff(gares) garo;
+            txStoreRbp(0, garo);
+            #delete[garo];
+            #delete[gares];
+        }
+        if (op == 25) {                                  // LOAD_IND: res = *(i64*)A
+            #stack[int, 64] liA = cssc::peek64(txCirA + o);
+            #stack[int, 64] liRes = cssc::peek64(txCirRes + o);
+            txSsaOff(liA) liao;
+            txLoadRbp(1, liao);                          // rcx = address
+            txLoadInd(0, 1, 0);                          // rax = [rcx]
+            txSsaOff(liRes) liro;
+            txStoreRbp(0, liro);
+            #delete[liro];
+            #delete[liao];
+            #delete[liRes];
+            #delete[liA];
+        }
+        if (op == 27) {                                  // STORE_IND: *(i64*)A = B
+            #stack[int, 64] siA = cssc::peek64(txCirA + o);
+            #stack[int, 64] siB = cssc::peek64(txCirB + o);
+            txSsaOff(siA) siao;
+            txLoadRbp(1, siao);                          // rcx = address
+            txSsaOff(siB) sibo;
+            txLoadRbp(0, sibo);                          // rax = value
+            txStoreInd(1, 0, 0);                         // [rcx] = rax
+            #delete[sibo];
+            #delete[siao];
+            #delete[siB];
+            #delete[siA];
+        }
+        if (op == 28) {                                  // TRAP: ud2 (illegal instr)
+            txEmitByte(0x0F); txEmitByte(0x0B);
+        }
+        if (op >= 29) { if (op <= 32) {                  // AND/OR/SHL/SHR: res = A op B
+            #stack[int, 64] bbA = cssc::peek64(txCirA + o);
+            #stack[int, 64] bbB = cssc::peek64(txCirB + o);
+            #stack[int, 64] bbR = cssc::peek64(txCirRes + o);
+            txSsaOff(bbA) bao; txLoadRbp(0, bao); #delete[bao];   // rax = A
+            txSsaOff(bbB) bbo; txLoadRbp(1, bbo); #delete[bbo];   // rcx = B
+            if (op == 29) { txEmitByte(0x48); txEmitByte(0x21); txEmitByte(0xC8); } // and rax,rcx
+            if (op == 30) { txEmitByte(0x48); txEmitByte(0x09); txEmitByte(0xC8); } // or  rax,rcx
+            if (op == 31) { txEmitByte(0x48); txEmitByte(0xD3); txEmitByte(0xE0); } // shl rax,cl
+            if (op == 32) { txEmitByte(0x48); txEmitByte(0xD3); txEmitByte(0xE8); } // shr rax,cl
+            txSsaOff(bbR) bro; txStoreRbp(0, bro); #delete[bro];
+            #delete[bbR]; #delete[bbB]; #delete[bbA];
+        } }
+        if (op == 33) {                                  // PEEK8: res = *(u8*)A
+            #stack[int, 64] p8A = cssc::peek64(txCirA + o);
+            #stack[int, 64] p8R = cssc::peek64(txCirRes + o);
+            txSsaOff(p8A) p8ao; txLoadRbp(1, p8ao); #delete[p8ao];              // rcx = addr
+            txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0xB6); txEmitByte(0x01); // movzx rax,byte[rcx]
+            txSsaOff(p8R) p8ro; txStoreRbp(0, p8ro); #delete[p8ro];
+            #delete[p8R]; #delete[p8A];
+        }
+        if (op == 34) {                                  // POKE8: *(u8*)A = B
+            #stack[int, 64] k8A = cssc::peek64(txCirA + o);
+            #stack[int, 64] k8B = cssc::peek64(txCirB + o);
+            txSsaOff(k8A) k8ao; txLoadRbp(1, k8ao); #delete[k8ao];   // rcx = addr
+            txSsaOff(k8B) k8bo; txLoadRbp(0, k8bo); #delete[k8bo];   // rax = val
+            txEmitByte(0x88); txEmitByte(0x01);                      // mov [rcx], al
+            #delete[k8B]; #delete[k8A];
+        }
+        if (op == 35) {                                  // PEEK32: res = *(u32*)A
+            #stack[int, 64] p32A = cssc::peek64(txCirA + o);
+            #stack[int, 64] p32R = cssc::peek64(txCirRes + o);
+            txSsaOff(p32A) p32ao; txLoadRbp(1, p32ao); #delete[p32ao];   // rcx = addr
+            txEmitByte(0x8B); txEmitByte(0x01);                          // mov eax,[rcx] (zero-ext)
+            txSsaOff(p32R) p32ro; txStoreRbp(0, p32ro); #delete[p32ro];
+            #delete[p32R]; #delete[p32A];
+        }
+        if (op == 36) {                                  // POKE32: *(u32*)A = B
+            #stack[int, 64] k32A = cssc::peek64(txCirA + o);
+            #stack[int, 64] k32B = cssc::peek64(txCirB + o);
+            txSsaOff(k32A) k32ao; txLoadRbp(1, k32ao); #delete[k32ao];   // rcx = addr
+            txSsaOff(k32B) k32bo; txLoadRbp(0, k32bo); #delete[k32bo];   // rax = val
+            txEmitByte(0x89); txEmitByte(0x01);                          // mov [rcx], eax
+            #delete[k32B]; #delete[k32A];
+        }
+        if (op == 19) {                                  // SLOT_ADDR: res = &slot
+            #stack[int, 64] aslot = cssc::peek64(txCirImm + o);
+            #stack[int, 64] ares = cssc::peek64(txCirRes + o);
+            txSlotOff(aslot) aso;
+            txLeaRbp(0, aso);                            // lea rax,[rbp-slot]
+            txSsaOff(ares) aro;
+            txStoreRbp(0, aro);
+            #delete[aro];
+            #delete[aso];
+            #delete[ares];
+            #delete[aslot];
+        }
+        if (op == 9) {                                   // LABEL: record its offset
+            #stack[int, 64] lid = cssc::peek64(txCirImm + o);
+            cssc::poke64(txLabelOff + lid * 8, txCodeLen);
+            #delete[lid];
+        }
+        if (op == 10) {                                  // BR label -> jmp rel32
+            #stack[int, 64] lid = cssc::peek64(txCirImm + o);
+            txEmitByte(0xE9);
+            cssc::poke64(txBrOff + txBrCount * 8, txCodeLen);
+            cssc::poke64(txBrLabel + txBrCount * 8, lid);
+            txBrCount = txBrCount + 1;
+            txEmitLE(0, 4);
+            #delete[lid];
+        }
+        if (op == 11) {                                  // BRZ val, label -> jz rel32
+            #stack[int, 64] lid = cssc::peek64(txCirImm + o);
+            #stack[int, 64] val = cssc::peek64(txCirA + o);
+            txSsaOff(val) vo;
+            txLoadRbp(0, vo);                            // mov rax, [rbp-val]
+            txEmitByte(0x48); txEmitByte(0x85); txEmitByte(0xC0);   // test rax, rax
+            txEmitByte(0x0F); txEmitByte(0x84);          // jz rel32
+            cssc::poke64(txBrOff + txBrCount * 8, txCodeLen);
+            cssc::poke64(txBrLabel + txBrCount * 8, lid);
+            txBrCount = txBrCount + 1;
+            txEmitLE(0, 4);
+            #delete[vo];
+            #delete[val];
+            #delete[lid];
+        }
+        if (op == 15) {                                  // FBINOP (f64 via SSE)
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] fopc = cssc::peek64(txCirImm + o);
+            #stack[int, 64] flhs = cssc::peek64(txCirA + o);
+            #stack[int, 64] frhs = cssc::peek64(txCirB + o);
+            txSsaOff(flhs) flo;
+            txSsaOff(frhs) fro;
+            txLoadRbp(0, flo);                           // mov rax,[rbp-lhs]
+            txLoadRbp(1, fro);                           // mov rcx,[rbp-rhs]
+            // movq xmm0, rax = 66 48 0F 6E C0 ; movq xmm1, rcx = 66 48 0F 6E C9
+            txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x6E); txEmitByte(0xC0);
+            txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x6E); txEmitByte(0xC9);
+            if (fopc <= 5) {                             // arithmetic -> xmm0
+                if (fopc == 1) { txEmitByte(0xF2); txEmitByte(0x0F); txEmitByte(0x58); txEmitByte(0xC1); } // addsd
+                if (fopc == 2) { txEmitByte(0xF2); txEmitByte(0x0F); txEmitByte(0x5C); txEmitByte(0xC1); } // subsd
+                if (fopc == 3) { txEmitByte(0xF2); txEmitByte(0x0F); txEmitByte(0x59); txEmitByte(0xC1); } // mulsd
+                if (fopc == 4) { txEmitByte(0xF2); txEmitByte(0x0F); txEmitByte(0x5E); txEmitByte(0xC1); } // divsd
+                // movq rax, xmm0 = 66 48 0F 7E C0
+                txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x7E); txEmitByte(0xC0);
+            }
+            if (fopc >= 6) {                             // compare -> 0/1 in rax
+                // ucomisd xmm0, xmm1 = 66 0F 2E C1  (sets CF/ZF, unsigned-style)
+                txEmitByte(0x66); txEmitByte(0x0F); txEmitByte(0x2E); txEmitByte(0xC1);
+                #stack[int, 64] fcc = 0;
+                if (fopc == 6) { fcc = 0x92; }           // setb   (<)
+                if (fopc == 7) { fcc = 0x96; }           // setbe  (<=)
+                if (fopc == 8) { fcc = 0x97; }           // seta   (>)
+                if (fopc == 9) { fcc = 0x93; }           // setae  (>=)
+                if (fopc == 10) { fcc = 0x94; }          // sete   (==)
+                if (fopc == 11) { fcc = 0x95; }          // setne  (!=)
+                txEmitByte(0x0F); txEmitByte(fcc); txEmitByte(0xC0);     // setcc al
+                txEmitByte(0x0F); txEmitByte(0xB6); txEmitByte(0xC0);    // movzx eax, al
+                #delete[fcc];
+            }
+            txSsaOff(res) fres;
+            txStoreRbp(0, fres);
+            #delete[fres];
+            #delete[flo];
+            #delete[fro];
+            #delete[frhs];
+            #delete[flhs];
+            #delete[fopc];
+            #delete[res];
+        }
+        if (op == 18) {                                  // CALL3 sym, a, b, c (rdi/rsi/rdx)
+            #stack[int, 64] q1 = cssc::peek64(txCirA + o);
+            #stack[int, 64] q2 = cssc::peek64(txCirB + o);
+            #stack[int, 64] q3 = cssc::peek64(txCirSOff + o);
+            if (q1 >= 0) { txSsaOff(q1) t1; txLoadRbp(7, t1); #delete[t1]; }   // rdi
+            if (q2 >= 0) { txSsaOff(q2) t2; txLoadRbp(6, t2); #delete[t2]; }   // rsi
+            if (q3 >= 0) { txSsaOff(q3) t3; txLoadRbp(2, t3); #delete[t3]; }   // rdx
+            txMovRaxReloc(cssc::peek64(txCirImm + o));
+            txEmitByte(0xFF); txEmitByte(0xD0);          // call rax
+            #stack[int, 64] c3res = cssc::peek64(txCirRes + o);
+            if (c3res >= 0) { txSsaOff(c3res) c3o; txStoreRbp(0, c3o); #delete[c3o]; }  // capture rax
+            #delete[c3res];
+            #delete[q3];
+            #delete[q2];
+            #delete[q1];
+        }
+        if (op == 17) {                                  // FCALL: single f64 arg in XMM0
+            #stack[int, 64] fa = cssc::peek64(txCirA + o);
+            txSsaOff(fa) fao;
+            txLoadRbp(0, fao);                           // mov rax,[rbp-arg]
+            // movq xmm0, rax = 66 48 0F 6E C0  (SysV passes doubles in XMM0..7)
+            txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x6E); txEmitByte(0xC0);
+            txMovRaxReloc(cssc::peek64(txCirImm + o));
+            txEmitByte(0xFF); txEmitByte(0xD0);          // call rax
+            #delete[fao];
+            #delete[fa];
+        }
+        if (op == 16) {                                  // ITOF: int -> f64
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] src = cssc::peek64(txCirA + o);
+            txSsaOff(src) so2;
+            txLoadRbp(0, so2);                           // mov rax,[rbp-src]
+            // cvtsi2sd xmm0, rax = F2 48 0F 2A C0 ; movq rax, xmm0 = 66 48 0F 7E C0
+            txEmitByte(0xF2); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x2A); txEmitByte(0xC0);
+            txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x7E); txEmitByte(0xC0);
+            txSsaOff(res) ro3;
+            txStoreRbp(0, ro3);
+            #delete[ro3];
+            #delete[so2];
+            #delete[src];
+            #delete[res];
+        }
+        if (op == 26) {                                  // FTOI: f64 -> int (truncate)
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] src = cssc::peek64(txCirA + o);
+            txSsaOff(src) so4;
+            txLoadRbp(0, so4);                           // mov rax,[rbp-src]  (the f64 bits)
+            // movq xmm0, rax = 66 48 0F 6E C0 ; cvttsd2si rax, xmm0 = F2 48 0F 2C C0
+            txEmitByte(0x66); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x6E); txEmitByte(0xC0);
+            txEmitByte(0xF2); txEmitByte(0x48); txEmitByte(0x0F); txEmitByte(0x2C); txEmitByte(0xC0);
+            txSsaOff(res) ro4;
+            txStoreRbp(0, ro4);                          // mov [rbp-res], rax  (truncated int)
+            #delete[ro4];
+            #delete[so4];
+            #delete[src];
+            #delete[res];
+        }
+        if (op == 13) {                                  // GLOBAL_LOAD res <- global[idx]
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            txGlobRip(0, cssc::peek64(txCirImm + o) * 16);   // mov rax, [rip+global]
+            txSsaOff(res) go2;
+            txStoreRbp(0, go2);
+            #delete[go2];
+            #delete[res];
+        }
+        if (op == 14) {                                  // GLOBAL_STORE global[idx] <- val
+            #stack[int, 64] val = cssc::peek64(txCirA + o);
+            txSsaOff(val) vo2;
+            txLoadRbp(0, vo2);                           // mov rax, [rbp-val]
+            txGlobRip(1, cssc::peek64(txCirImm + o) * 16);   // mov [rip+global], rax
+            #delete[vo2];
+            #delete[val];
+        }
+        if (op == 12) {                                  // CALL_USER funcIdx, argStart, argCount -> res
+            #stack[int, 64] funcIdx = cssc::peek64(txCirImm + o);
+            #stack[int, 64] res = cssc::peek64(txCirRes + o);
+            #stack[int, 64] argStart = cssc::peek64(txCirA + o);
+            #stack[int, 64] argCount = cssc::peek64(txCirB + o);
+            #stack[int, 64] calleeArity = cssc::peek64(txFuncArity + funcIdx * 8);
+            // SysV: args 6.. go on the STACK, pushed in REVERSE so arg6 lands at
+            // [rsp] (= the callee's [rbp+16]). Pad with a dummy `sub rsp,8` when the
+            // count is odd, keeping rsp 16-aligned at the call. Register args below
+            // are rbp-relative, so pushing first does not disturb them. Without this
+            // the compiler's own 7-param txCirEmit got garbage -> self-host crash.
+            #stack[int, 64] nstack = 0;
+            if (argCount > 6) { nstack = argCount - 6; }
+            #stack[int, 64] pad = 0;
+            if (nstack > 0) {
+                if (cssc::band(nstack, 1) == 1) { pad = 1; }
+                if (pad == 1) { txEmitByte(0x48); txEmitByte(0x83); txEmitByte(0xEC); txEmitByte(8); } // sub rsp,8
+                #stack[int, 64] pj = argCount - 1;
+                #stack[int, 32] pgo = 1;
+                while (pgo == 1) {
+                    if (pj < 6) { pgo = 0; }
+                    if (pgo == 1) {
+                        #stack[int, 64] psid = cssc::peek64(txCallArg + (argStart + pj) * 8);
+                        txSsaOff(psid) pso;
+                        txLoadRbp(0, pso);                  // rax = arg
+                        txEmitByte(0x50);                   // push rax
+                        #delete[pso];
+                        pj = pj - 1;
+                    }
+                }
+                #delete[pgo];
+                #delete[pj];
+            }
+            // load actual args 0..min(argCount,6)-1 into SysV arg registers
+            #stack[int, 64] nload = argCount;
+            if (nload > 6) { nload = 6; }
+            #stack[int, 64] ai = 0;
+            while (ai < nload) {
+                #stack[int, 64] sid = cssc::peek64(txCallArg + (argStart + ai) * 8);
+                txArgReg(ai) areg;
+                txSsaOff(sid) aso;
+                txLoadRbp(areg, aso);
+                #delete[aso];
+                #delete[areg];
+                #delete[sid];
+                ai = ai + 1;
+            }
+            #delete[ai];
+            // zero-fill missing params [argCount, min(calleeArity,6)) -> 0
+            #stack[int, 64] nfill = calleeArity;
+            if (nfill > 6) { nfill = 6; }
+            #stack[int, 64] zi = argCount;
+            while (zi < nfill) {
+                txArgReg(zi) zreg;
+                txZeroReg(zreg);
+                #delete[zreg];
+                zi = zi + 1;
+            }
+            #delete[zi];
+            #delete[nfill];
+            #delete[nload];
+            // call rel32 (E8 + placeholder disp32), record a call-fixup
+            txEmitByte(0xE8);
+            cssc::poke64(txCallFixOff + txCallFixCount * 8, txCodeLen);
+            cssc::poke64(txCallFixFunc + txCallFixCount * 8, funcIdx);
+            txCallFixCount = txCallFixCount + 1;
+            txEmitLE(0, 4);
+            // capture the return value (rax) into the result cell
+            if (res >= 0) { txSsaOff(res) rso; txStoreRbp(0, rso); #delete[rso]; }
+            // SysV caller cleans up the stack args it pushed (+ the alignment pad).
+            if (nstack > 0) {
+                #stack[int, 64] cleanup = (nstack + pad) * 8;
+                if (cleanup < 128) { txEmitByte(0x48); txEmitByte(0x83); txEmitByte(0xC4); txEmitByte(cssc::band(cleanup, 255)); } // add rsp,imm8
+                if (cleanup >= 128) { txEmitByte(0x48); txEmitByte(0x81); txEmitByte(0xC4); txEmitLE(cleanup, 4); }               // add rsp,imm32
+                #delete[cleanup];
+            }
+            #delete[pad];
+            #delete[nstack];
+            #delete[calleeArity];
+            #delete[argCount];
+            #delete[argStart];
+            #delete[res];
+            #delete[funcIdx];
+        }
+        #delete[op];
+        #delete[o];
+        r = r + 1;
+    }
+    #delete[r];
+    #delete[rend];
+    #delete[frame];
+    #delete[cells];
+    #delete[arity];
+}
+
+// driver: emit every function (main = index 0 first, so its entry stays at
+// offset 0), then run the single global fixup pass over the finished code.
+#stack[int, 64] txX86Emit;
+#define(txX86Emit) {
+    #req[txFuncCount] txFuncCount;
+    #req[txEmitFunc] txEmitFunc;
+    #req[txX86Fixup] txX86Fixup;
+    #stack[int, 64] i = 0;
+    while (i < txFuncCount) {
+        txEmitFunc(i);
+        i = i + 1;
+    }
+    #delete[i];
+    txX86Fixup();
+}
+
+// single global fixup pass, run AFTER all functions are emitted so txCodeLen is
+// final: (1) rip-relative lea disps to the string data appended after all code,
+// (2) branch rel32s to (global) label offsets, (3) call rel32s to callee entries.
+#stack[int, 64] txX86Fixup;
+#define(txX86Fixup) {
+    #req[txCode] txCode;
+    #req[txCodeLen] txCodeLen;
+    #req[txLeaOff] txLeaOff;
+    #req[txLeaStr] txLeaStr;
+    #req[txLeaCount] txLeaCount;
+    #req[txLabelOff] txLabelOff;
+    #req[txBrOff] txBrOff;
+    #req[txBrLabel] txBrLabel;
+    #req[txBrCount] txBrCount;
+    #req[txCallFixOff] txCallFixOff;
+    #req[txCallFixFunc] txCallFixFunc;
+    #req[txCallFixCount] txCallFixCount;
+    #req[txGlobFixOff] txGlobFixOff;
+    #req[txGlobFixIdx] txGlobFixIdx;
+    #req[txGlobFixCount] txGlobFixCount;
+    #req[txStrDataLen] txStrDataLen;
+    #req[txFuncEntryOff] txFuncEntryOff;
+
+    // (1) lea disp32: string data sits right after the final code end.
+    #stack[int, 64] codeEnd = txCodeLen;
+    #stack[int, 64] li = 0;
+    while (li < txLeaCount) {
+        #stack[int, 64] operandOff = cssc::peek64(txLeaOff + li * 8);
+        #stack[int, 64] strOff = cssc::peek64(txLeaStr + li * 8);
+        #stack[int, 64] disp = (codeEnd + strOff) - (operandOff + 4);
+        cssc::poke8(txCode + operandOff, cssc::band(disp, 255));
+        cssc::poke8(txCode + operandOff + 1, cssc::band(cssc::shr(disp, 8), 255));
+        cssc::poke8(txCode + operandOff + 2, cssc::band(cssc::shr(disp, 16), 255));
+        cssc::poke8(txCode + operandOff + 3, cssc::band(cssc::shr(disp, 24), 255));
+        #delete[operandOff];
+        #delete[strOff];
+        #delete[disp];
+        li = li + 1;
+    }
+    #delete[li];
+    #delete[codeEnd];
+
+    // (2) branch rel32: disp = labelOff[target] - (operandOff + 4).
+    #stack[int, 64] bi = 0;
+    while (bi < txBrCount) {
+        #stack[int, 64] boff = cssc::peek64(txBrOff + bi * 8);
+        #stack[int, 64] blab = cssc::peek64(txBrLabel + bi * 8);
+        #stack[int, 64] target = cssc::peek64(txLabelOff + blab * 8);
+        #stack[int, 64] bdisp = target - (boff + 4);
+        cssc::poke8(txCode + boff, cssc::band(bdisp, 255));
+        cssc::poke8(txCode + boff + 1, cssc::band(cssc::shr(bdisp, 8), 255));
+        cssc::poke8(txCode + boff + 2, cssc::band(cssc::shr(bdisp, 16), 255));
+        cssc::poke8(txCode + boff + 3, cssc::band(cssc::shr(bdisp, 24), 255));
+        #delete[boff];
+        #delete[blab];
+        #delete[target];
+        #delete[bdisp];
+        bi = bi + 1;
+    }
+    #delete[bi];
+
+    // (3) call rel32: disp = func[calleeIdx].entryOff - (operandOff + 4).
+    #stack[int, 64] ci = 0;
+    while (ci < txCallFixCount) {
+        #stack[int, 64] coff = cssc::peek64(txCallFixOff + ci * 8);
+        #stack[int, 64] cfn = cssc::peek64(txCallFixFunc + ci * 8);
+        #stack[int, 64] ctarget = cssc::peek64(txFuncEntryOff + cfn * 8);
+        #stack[int, 64] cdisp = ctarget - (coff + 4);
+        cssc::poke8(txCode + coff, cssc::band(cdisp, 255));
+        cssc::poke8(txCode + coff + 1, cssc::band(cssc::shr(cdisp, 8), 255));
+        cssc::poke8(txCode + coff + 2, cssc::band(cssc::shr(cdisp, 16), 255));
+        cssc::poke8(txCode + coff + 3, cssc::band(cssc::shr(cdisp, 24), 255));
+        #delete[coff];
+        #delete[cfn];
+        #delete[ctarget];
+        #delete[cdisp];
+        ci = ci + 1;
+    }
+    #delete[ci];
+
+    // (4) rip-relative global disp32. Exec-buffer layout is [code][strData][globals],
+    // so global `idx` sits at codeEnd + strDataLen + idx*8, and the disp is taken
+    // from the END of the instruction (operandOff + 4), as RIP-relative requires.
+    #stack[int, 64] gbase = txCodeLen + txStrDataLen;
+    #stack[int, 64] gi2 = 0;
+    while (gi2 < txGlobFixCount) {
+        #stack[int, 64] goff = cssc::peek64(txGlobFixOff + gi2 * 8);
+        #stack[int, 64] gidx = cssc::peek64(txGlobFixIdx + gi2 * 8);   // BYTE offset
+        #stack[int, 64] gdisp = (gbase + gidx) - (goff + 4);
+        cssc::poke8(txCode + goff, cssc::band(gdisp, 255));
+        cssc::poke8(txCode + goff + 1, cssc::band(cssc::shr(gdisp, 8), 255));
+        cssc::poke8(txCode + goff + 2, cssc::band(cssc::shr(gdisp, 16), 255));
+        cssc::poke8(txCode + goff + 3, cssc::band(cssc::shr(gdisp, 24), 255));
+        #delete[goff];
+        #delete[gidx];
+        #delete[gdisp];
+        gi2 = gi2 + 1;
+    }
+    #delete[gi2];
+    #delete[gbase];
+}

@@ -1,0 +1,1773 @@
+// ---- vector (value tag 4) : dynamic array, two-level so growth never moves
+// the handle. handle{rc@0,size@4,cap@8,elemType@12,data@16}; data = cap*8 value
+// slots. Elements are homogeneous (`vector<T>`); elemType (0=int,1=string) is in
+// the handle. String elements are OWNED by the vector: push/set CLONE the string
+// and free/clear/set-overwrite RELEASE it, so there is no dangling and no leak.
+#define(ciVecNew) {
+    #scanp(ciVecNew, int, 0) et;
+    #stack[int, 64] cap = 8;
+    #stack[int, 64] h = cssc::alloc(32);
+    #stack[int, 64] d = cssc::alloc(cap * 8);
+    cssc::memfill32(d, 0, cap * 2);
+    cssc::poke32(h, 1);
+    cssc::poke32(h + 4, 0);
+    cssc::poke32(h + 8, cap);
+    cssc::poke32(h + 12, et);
+    cssc::poke64(h + 16, d);
+    #stack[int, 64] tp = 0;
+    if (et == 8) {
+        tp = cssc::alloc(cap * 8);
+        cssc::memfill32(tp, 0, cap * 2);
+    }
+    cssc::poke64(h + 24, tp);
+    #delete[tp];
+    #delete[d];
+    #delete[cap];
+    return h;
+}
+#define(ciVecType) {
+    #scanp(ciVecType, int, 0) h;
+    return cssc::peek32(h + 12);
+}
+#define(ciVecTypeAt) {
+    #scanp(ciVecTypeAt, int, 0) h;
+    #scanp(ciVecTypeAt, int, 1) i;
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] r = et;
+    if (et == 8) {
+        #stack[int, 64] tp = cssc::peek64(h + 24);
+        r = cssc::peek32(tp + i * 8);
+        #delete[tp];
+    }
+    #delete[et];
+    return r;
+}
+#define(ciVecSize) {
+    #scanp(ciVecSize, int, 0) h;
+    return cssc::peek32(h + 4);
+}
+#define(ciVecPush) {
+    #scanp(ciVecPush, int, 0) h;
+    #scanp(ciVecPush, int, 1) x;
+    #scanp(ciVecPush, int, 2) xt;
+    #req[ciStrClone] ciStrClone;
+    #req[ciStrNew] ciStrNew;
+    #req[ciItoa] ciItoa;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] cap = cssc::peek32(h + 8);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    if (size >= cap) {
+        #stack[int, 64] ncap = cap * 2;
+        #stack[int, 64] nd = cssc::alloc(ncap * 8);
+        #stack[int, 64] od = cssc::peek64(h + 16);
+        cssc::memcopy(nd, od, size * 2);
+        cssc::free(od);
+        cssc::poke64(h + 16, nd);
+        cssc::poke32(h + 8, ncap);
+        if (et == 8) {
+            #stack[int, 64] otp = cssc::peek64(h + 24);
+            #stack[int, 64] ntp = cssc::alloc(ncap * 8);
+            cssc::memfill32(ntp, 0, ncap * 2);
+            cssc::memcopy(ntp, otp, size * 2);
+            cssc::free(otp);
+            cssc::poke64(h + 24, ntp);
+            #delete[otp];
+            #delete[ntp];
+        }
+        #delete[od];
+        #delete[nd];
+        #delete[ncap];
+    }
+    #stack[int, 64] sv = x;
+    if (et == 1) {
+        // Push into a vector<string>. The pushed value's type tag (xt) is not
+        // always reliable (e.g. `char = &popped` can leave a string carrying tag
+        // 0), so distinguish by VALUE as well: a real string element is a heap
+        // pointer (always large); a small int/char is < 0x10000; a float is the
+        // one type reliably tagged (2). This both prevents ciStrClone from
+        // dereferencing a non-pointer (float bits -> peek32 fault) and salvages a
+        // stale-tagged string instead of printing its pointer as a number.
+        if (xt == 2) {
+            #stack[int, 64] sb = cssc::alloc(64);
+            cssc::fToStr(x, sb, 64) fn;
+            ciStrNew(sb, fn) ss;
+            sv = ss;
+            #delete[ss];
+            cssc::free(sb);
+            #delete[sb];
+            #delete[fn];
+        }
+        if (xt != 2) {
+            // small int / char code
+            if (x < 65536) {
+                #stack[int, 64] sb = cssc::alloc(64);
+                ciItoa(x, sb) in3;
+                ciStrNew(sb, in3) ss;
+                sv = ss;
+                #delete[ss];
+                cssc::free(sb);
+                #delete[sb];
+                #delete[in3];
+            }
+            // a real heap string pointer is large but below 2^48; a value with
+            // bits at/above 2^48 is a stale-tagged float bit pattern (a finite
+            // double like 0.55 = 0x3FE1..., far above any real pointer) -> format
+            // as a float rather than clone (which would peek32(bits+4) and fault).
+            if (x >= 65536) {
+                if (x < 281474976710656) {
+                    ciStrClone(x) cx;
+                    sv = cx;
+                    #delete[cx];
+                }
+                if (x >= 281474976710656) {
+                    #stack[int, 64] sb = cssc::alloc(64);
+                    cssc::fToStr(x, sb, 64) fn2;
+                    ciStrNew(sb, fn2) ss;
+                    sv = ss;
+                    #delete[ss];
+                    cssc::free(sb);
+                    #delete[sb];
+                    #delete[fn2];
+                }
+            }
+        }
+    }
+    if (et == 8) {
+        if (xt == 1) { ciStrClone(x) cx; sv = cx; #delete[cx]; }
+        #stack[int, 64] tp2 = cssc::peek64(h + 24);
+        cssc::poke32(tp2 + size * 8, xt);
+        #delete[tp2];
+    }
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    cssc::poke64(d + size * 8, sv);
+    cssc::poke32(h + 4, size + 1);
+    #delete[d];
+    #delete[sv];
+    #delete[et];
+    #delete[size];
+    #delete[cap];
+}
+#define(ciVecGet) {
+    #scanp(ciVecGet, int, 0) h;
+    #scanp(ciVecGet, int, 1) i;
+    #req[ciStrClone] ciStrClone;
+    #req[ciVecPopType] ciVecPopType;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] r = 0;
+    ciVecPopType = et;              // real type of the returned element (auto -> per-elem)
+    if (i >= 0) {
+        if (i < size) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            #stack[int, 64] raw = cssc::peek64(d + i * 8);
+            if (et == 1) {
+                ciStrClone(raw) cr;
+                r = cr;
+                #delete[cr];
+            }
+            if (et == 8) {
+                #stack[int, 64] tp = cssc::peek64(h + 24);
+                #stack[int, 64] pt = cssc::peek32(tp + i * 8);
+                ciVecPopType = pt;
+                if (pt == 1) { ciStrClone(raw) cr8; r = cr8; #delete[cr8]; }
+                if (pt != 1) { r = raw; }
+                #delete[tp];
+                #delete[pt];
+            }
+            if (et != 1) { if (et != 8) { r = raw; } }
+            #delete[raw];
+            #delete[d];
+        }
+    }
+    #delete[et];
+    #delete[size];
+    return r;
+}
+#define(ciVecSet) {
+    #scanp(ciVecSet, int, 0) h;
+    #scanp(ciVecSet, int, 1) i;
+    #scanp(ciVecSet, int, 2) x;
+    #req[ciStrClone] ciStrClone;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    if (i >= 0) {
+        if (i < size) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            if (et == 1) {
+                #stack[int, 64] old = cssc::peek64(d + i * 8);
+                cssc::free(old);
+                ciStrClone(x) cx;
+                cssc::poke64(d + i * 8, cx);
+                #delete[cx];
+                #delete[old];
+            }
+            if (et != 1) { cssc::poke64(d + i * 8, x); }
+            #delete[d];
+        }
+    }
+    #delete[et];
+    #delete[size];
+}
+#define(ciVecPop) {
+    #scanp(ciVecPop, int, 0) h;
+    #req[ciVecPopType] ciVecPopType;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] r = 0;
+    ciVecPopType = et;
+    if (size > 0) {
+        size = size - 1;
+        cssc::poke32(h + 4, size);
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        r = cssc::peek64(d + size * 8);
+        if (et == 8) {
+            #stack[int, 64] tp = cssc::peek64(h + 24);
+            ciVecPopType = cssc::peek32(tp + size * 8);
+            #delete[tp];
+        }
+        #delete[d];
+    }
+    #delete[size];
+    #delete[et];
+    return r;
+}
+// remove + return element 0, shifting the rest down one slot (FIFO front pop).
+// Ownership transfers to the caller exactly like ciVecPop (the slot is dropped
+// from the vector, so a string element is no longer owned here).
+#define(ciVecPopFront) {
+    #scanp(ciVecPopFront, int, 0) h;
+    #req[ciVecPopType] ciVecPopType;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] r = 0;
+    ciVecPopType = et;
+    if (size > 0) {
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        r = cssc::peek64(d);
+        #stack[int, 64] tp = 0;
+        if (et == 8) {
+            tp = cssc::peek64(h + 24);
+            ciVecPopType = cssc::peek32(tp);
+        }
+        #stack[int, 64] i = 0;
+        while (i < size - 1) {
+            cssc::poke64(d + i * 8, cssc::peek64(d + (i + 1) * 8));
+            if (et == 8) {
+                cssc::poke32(tp + i * 8, cssc::peek32(tp + (i + 1) * 8));
+            }
+            i = i + 1;
+        }
+        #delete[i];
+        cssc::poke32(h + 4, size - 1);
+        #delete[tp];
+        #delete[d];
+    }
+    #delete[size];
+    #delete[et];
+    return r;
+}
+#define(ciVecClear) {
+    #scanp(ciVecClear, int, 0) h;
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    // free only the owned STRING elements (ciVecPush clones strings); container/
+    // object elements are borrows -> leave them alone (borrow-respecting)
+    if (et == 1) {
+        #stack[int, 64] size = cssc::peek32(h + 4);
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] i = 0;
+        while (i < size) {
+            #stack[int, 64] ev = cssc::peek64(d + i * 8);
+            if (ev != 0) { cssc::free(ev); }
+            #delete[ev];
+            i = i + 1;
+        }
+        #delete[i];
+        #delete[d];
+        #delete[size];
+    }
+    if (et == 8) {
+        #stack[int, 64] size = cssc::peek32(h + 4);
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] tp = cssc::peek64(h + 24);
+        #stack[int, 64] i = 0;
+        while (i < size) {
+            #stack[int, 64] pt = cssc::peek32(tp + i * 8);
+            if (pt == 1) {
+                #stack[int, 64] ev = cssc::peek64(d + i * 8);
+                if (ev != 0) { cssc::free(ev); }
+                #delete[ev];
+            }
+            #delete[pt];
+            i = i + 1;
+        }
+        #delete[i];
+        #delete[tp];
+        #delete[d];
+        #delete[size];
+    }
+    cssc::poke32(h + 4, 0);
+    #delete[et];
+}
+#define(ciVecFree) {
+    #scanp(ciVecFree, int, 0) h;
+    #req[ciVecClear] ciVecClear;
+    ciVecClear(h);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    cssc::free(d);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    if (et == 8) {
+        #stack[int, 64] tp = cssc::peek64(h + 24);
+        if (tp != 0) { cssc::free(tp); }
+        #delete[tp];
+    }
+    #delete[et];
+    cssc::free(h);
+    #delete[d];
+}
+
+// ---- string expression-method helpers (root cause #3) ------------------------
+// A CSSC string value is a heap ptr to {i32 rc@0, i32 size@4, bytes@8}. These
+// build/inspect strings for the `.method()` dispatch in ciExpr (see ciStrMethod).
+// Every helper that returns a NEW string returns an OWNED allocation (rc=1) so
+// the caller marks leftOwns=1; scope-exit/#delete then reclaims it (no leak).
+
+// index of first occurrence of `needle` in `hay` (both string ptrs), or -1.
+// empty needle -> 0.
+#define(ciStrIndexOf) {
+    #scanp(ciStrIndexOf, int, 0) hay;
+    #scanp(ciStrIndexOf, int, 1) needle;
+    #stack[int, 64] hl = cssc::peek32(hay + 4);
+    #stack[int, 64] nl = cssc::peek32(needle + 4);
+    #stack[int, 64] res = 0 - 1;
+    if (nl == 0) { res = 0; }
+    if (nl != 0) {
+        #stack[int, 64] i = 0;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (i + nl > hl) { go = 0; }
+            if (go == 1) {
+                #stack[int, 64] j = 0;
+                #stack[int, 32] m = 1;
+                while (j < nl) {
+                    if (cssc::peek8(hay + 8 + i + j) != cssc::peek8(needle + 8 + j)) { m = 0; j = nl; }
+                    if (m == 1) { j = j + 1; }
+                }
+                if (m == 1) { res = i; go = 0; }
+                #delete[j];
+                #delete[m];
+            }
+            if (go == 1) { i = i + 1; }
+        }
+        #delete[i];
+        #delete[go];
+    }
+    #delete[hl];
+    #delete[nl];
+    return res;
+}
+
+// ASCII case flip -> new owned string. toUpper=1 upper-cases, 0 lower-cases.
+#define(ciStrCaseNew) {
+    #scanp(ciStrCaseNew, int, 0) sp;
+    #scanp(ciStrCaseNew, int, 1) toUpper;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] buf = cssc::alloc(n + 1);
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        #stack[int, 64] c = cssc::peek8(sp + 8 + i);
+        if (toUpper == 1) { if (c >= 97) { if (c <= 122) { c = c - 32; } } }
+        if (toUpper == 0) { if (c >= 65) { if (c <= 90) { c = c + 32; } } }
+        cssc::poke8(buf + i, c);
+        #delete[c];
+        i = i + 1;
+    }
+    ciStrNew(buf, n) r;
+    cssc::free(buf);
+    #delete[i];
+    #delete[n];
+    #delete[buf];
+    return r;
+}
+
+// strip leading+trailing ASCII whitespace (space/tab/LF/CR) -> new owned string.
+#define(ciStrTrimNew) {
+    #scanp(ciStrTrimNew, int, 0) sp;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] a = 0;
+    #stack[int, 64] b = n;
+    #stack[int, 32] g1 = 1;
+    while (g1 == 1) {
+        if (a >= b) { g1 = 0; }
+        if (g1 == 1) {
+            #stack[int, 64] c = cssc::peek8(sp + 8 + a);
+            #stack[int, 32] ws = 0;
+            if (c == 32) { ws = 1; }
+            if (c == 9) { ws = 1; }
+            if (c == 10) { ws = 1; }
+            if (c == 13) { ws = 1; }
+            if (ws == 0) { g1 = 0; }
+            if (ws == 1) { a = a + 1; }
+            #delete[c];
+            #delete[ws];
+        }
+    }
+    #delete[g1];
+    #stack[int, 32] g2 = 1;
+    while (g2 == 1) {
+        if (b <= a) { g2 = 0; }
+        if (g2 == 1) {
+            #stack[int, 64] c = cssc::peek8(sp + 8 + b - 1);
+            #stack[int, 32] ws = 0;
+            if (c == 32) { ws = 1; }
+            if (c == 9) { ws = 1; }
+            if (c == 10) { ws = 1; }
+            if (c == 13) { ws = 1; }
+            if (ws == 0) { g2 = 0; }
+            if (ws == 1) { b = b - 1; }
+            #delete[c];
+            #delete[ws];
+        }
+    }
+    #delete[g2];
+    ciStrNew(sp + 8 + a, b - a) r;
+    #delete[n];
+    #delete[a];
+    #delete[b];
+    return r;
+}
+
+// reversed copy -> new owned string.
+#define(ciStrRevNew) {
+    #scanp(ciStrRevNew, int, 0) sp;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] buf = cssc::alloc(n + 1);
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        cssc::poke8(buf + i, cssc::peek8(sp + 8 + n - 1 - i));
+        i = i + 1;
+    }
+    ciStrNew(buf, n) r;
+    cssc::free(buf);
+    #delete[i];
+    #delete[n];
+    #delete[buf];
+    return r;
+}
+
+// `cnt` concatenated copies -> new owned string (cnt<=0 -> empty).
+#define(ciStrRepeatNew) {
+    #scanp(ciStrRepeatNew, int, 0) sp;
+    #scanp(ciStrRepeatNew, int, 1) cnt;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] c = cnt;
+    if (c < 0) { c = 0; }
+    #stack[int, 64] total = n * c;
+    #stack[int, 64] buf = cssc::alloc(total + 1);
+    #stack[int, 64] k = 0;
+    #stack[int, 64] off = 0;
+    while (k < c) {
+        #stack[int, 64] j = 0;
+        while (j < n) {
+            cssc::poke8(buf + off, cssc::peek8(sp + 8 + j));
+            off = off + 1;
+            j = j + 1;
+        }
+        #delete[j];
+        k = k + 1;
+    }
+    ciStrNew(buf, total) r;
+    cssc::free(buf);
+    #delete[k];
+    #delete[off];
+    #delete[n];
+    #delete[c];
+    #delete[total];
+    #delete[buf];
+    return r;
+}
+
+// chars [start, start+len) (clamped to bounds) -> new owned string.
+#define(ciStrSubNew) {
+    #scanp(ciStrSubNew, int, 0) sp;
+    #scanp(ciStrSubNew, int, 1) start;
+    #scanp(ciStrSubNew, int, 2) len;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] s = start;
+    #stack[int, 64] l = len;
+    if (s < 0) { s = 0; }
+    if (s > n) { s = n; }
+    if (l < 0) { l = 0; }
+    if (s + l > n) { l = n - s; }
+    ciStrNew(sp + 8 + s, l) r;
+    #delete[n];
+    #delete[s];
+    #delete[l];
+    return r;
+}
+
+// replace ALL occurrences of `oldp` with `newp` -> new owned string.
+#define(ciStrReplaceNew) {
+    #scanp(ciStrReplaceNew, int, 0) sp;
+    #scanp(ciStrReplaceNew, int, 1) oldp;
+    #scanp(ciStrReplaceNew, int, 2) newp;
+    #req[ciStrNew] ciStrNew;
+    #req[ciStrClone] ciStrClone;
+    #stack[int, 64] hn = cssc::peek32(sp + 4);
+    #stack[int, 64] on = cssc::peek32(oldp + 4);
+    #stack[int, 64] nn = cssc::peek32(newp + 4);
+    #stack[int, 64] r = 0;
+    if (on == 0) {
+        ciStrClone(sp) c;
+        r = c;
+        #delete[c];
+    }
+    if (on != 0) {
+        #stack[int, 64] cnt = 0;
+        #stack[int, 64] i = 0;
+        while (i + on <= hn) {
+            #stack[int, 64] j = 0;
+            #stack[int, 32] m = 1;
+            while (j < on) {
+                if (cssc::peek8(sp + 8 + i + j) != cssc::peek8(oldp + 8 + j)) { m = 0; j = on; }
+                if (m == 1) { j = j + 1; }
+            }
+            #delete[j];
+            if (m == 1) { cnt = cnt + 1; i = i + on; }
+            if (m == 0) { i = i + 1; }
+            #delete[m];
+        }
+        #delete[i];
+        #stack[int, 64] total = hn + cnt * (nn - on);
+        #stack[int, 64] buf = cssc::alloc(total + 1);
+        #stack[int, 64] w = 0;
+        #stack[int, 64] p = 0;
+        while (p < hn) {
+            #stack[int, 32] m2 = 0;
+            if (p + on <= hn) {
+                m2 = 1;
+                #stack[int, 64] j2 = 0;
+                while (j2 < on) {
+                    if (cssc::peek8(sp + 8 + p + j2) != cssc::peek8(oldp + 8 + j2)) { m2 = 0; j2 = on; }
+                    if (m2 == 1) { j2 = j2 + 1; }
+                }
+                #delete[j2];
+            }
+            if (m2 == 1) {
+                #stack[int, 64] k = 0;
+                while (k < nn) { cssc::poke8(buf + w, cssc::peek8(newp + 8 + k)); w = w + 1; k = k + 1; }
+                #delete[k];
+                p = p + on;
+            }
+            if (m2 == 0) {
+                cssc::poke8(buf + w, cssc::peek8(sp + 8 + p));
+                w = w + 1;
+                p = p + 1;
+            }
+            #delete[m2];
+        }
+        #delete[p];
+        ciStrNew(buf, total) rr;
+        r = rr;
+        cssc::free(buf);
+        #delete[rr];
+        #delete[w];
+        #delete[total];
+        #delete[buf];
+        #delete[cnt];
+    }
+    #delete[hn];
+    #delete[on];
+    #delete[nn];
+    return r;
+}
+
+// split `sp` on separator `sepp` -> a fresh owned vector<string> (elem type 1).
+// A sep not present (or empty sep) yields a size-1 vector holding the whole string.
+#define(ciStrSplitVec) {
+    #scanp(ciStrSplitVec, int, 0) sp;
+    #scanp(ciStrSplitVec, int, 1) sepp;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #req[ciStrNew] ciStrNew;
+    ciVecNew(1) newv;
+    #stack[int, 64] vh = newv;
+    #delete[newv];
+    #stack[int, 64] hn = cssc::peek32(sp + 4);
+    #stack[int, 64] sn = cssc::peek32(sepp + 4);
+    if (sn == 0) {
+        ciStrNew(sp + 8, hn) whole;
+        ciVecPush(vh, whole, 1);
+        cssc::free(whole);
+        #delete[whole];
+    }
+    if (sn != 0) {
+        #stack[int, 64] start = 0;
+        #stack[int, 64] i = 0;
+        while (i + sn <= hn) {
+            #stack[int, 32] m = 1;
+            #stack[int, 64] j = 0;
+            while (j < sn) {
+                if (cssc::peek8(sp + 8 + i + j) != cssc::peek8(sepp + 8 + j)) { m = 0; j = sn; }
+                if (m == 1) { j = j + 1; }
+            }
+            #delete[j];
+            if (m == 1) {
+                ciStrNew(sp + 8 + start, i - start) piece;
+                ciVecPush(vh, piece, 1);
+                cssc::free(piece);
+                #delete[piece];
+                i = i + sn;
+                start = i;
+            }
+            if (m == 0) { i = i + 1; }
+            #delete[m];
+        }
+        ciStrNew(sp + 8 + start, hn - start) tail;
+        ciVecPush(vh, tail, 1);
+        cssc::free(tail);
+        #delete[tail];
+        #delete[start];
+        #delete[i];
+    }
+    #delete[hn];
+    #delete[sn];
+    return vh;
+}
+
+// pad `sp` to TOTAL length `target` with 1-char string `chp` -> new owned string.
+// atStart=1 -> padStart (pad on the left); 0 -> padEnd. If already >= target, clone.
+#define(ciStrPadNew) {
+    #scanp(ciStrPadNew, int, 0) sp;
+    #scanp(ciStrPadNew, int, 1) target;
+    #scanp(ciStrPadNew, int, 2) chp;
+    #scanp(ciStrPadNew, int, 3) atStart;
+    #req[ciStrNew] ciStrNew;
+    #req[ciStrClone] ciStrClone;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] r = 0;
+    if (target <= n) {
+        ciStrClone(sp) c;
+        r = c;
+        #delete[c];
+    }
+    if (target > n) {
+        #stack[int, 64] padcount = target - n;
+        // the pad-char arg is optional: padStart(width) passes chp=0. Reading
+        // peek32(0+4) would fault -> default to space (32) when absent.
+        #stack[int, 64] cn = 0;
+        if (chp != 0) { cn = cssc::peek32(chp + 4); }
+        #stack[int, 64] padchar = 32;
+        if (cn > 0) { padchar = cssc::peek8(chp + 8); }
+        #stack[int, 64] buf = cssc::alloc(target + 1);
+        #stack[int, 64] w = 0;
+        if (atStart == 1) {
+            #stack[int, 64] k = 0;
+            while (k < padcount) { cssc::poke8(buf + w, padchar); w = w + 1; k = k + 1; }
+            #delete[k];
+            #stack[int, 64] j = 0;
+            while (j < n) { cssc::poke8(buf + w, cssc::peek8(sp + 8 + j)); w = w + 1; j = j + 1; }
+            #delete[j];
+        }
+        if (atStart == 0) {
+            #stack[int, 64] j = 0;
+            while (j < n) { cssc::poke8(buf + w, cssc::peek8(sp + 8 + j)); w = w + 1; j = j + 1; }
+            #delete[j];
+            #stack[int, 64] k = 0;
+            while (k < padcount) { cssc::poke8(buf + w, padchar); w = w + 1; k = k + 1; }
+            #delete[k];
+        }
+        ciStrNew(buf, target) rr;
+        r = rr;
+        cssc::free(buf);
+        #delete[rr];
+        #delete[w];
+        #delete[buf];
+        #delete[padcount];
+        #delete[cn];
+        #delete[padchar];
+    }
+    #delete[n];
+    return r;
+}
+
+// parse a leading (optionally signed) decimal integer; non-numeric -> 0.
+#define(ciStrToIntV) {
+    #scanp(ciStrToIntV, int, 0) sp;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] i = 0;
+    #stack[int, 64] sign = 1;
+    #stack[int, 64] v = 0;
+    if (n > 0) {
+        #stack[int, 64] c0 = cssc::peek8(sp + 8);
+        if (c0 == 45) { sign = 0 - 1; i = 1; }
+        if (c0 == 43) { i = 1; }
+        #delete[c0];
+    }
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= n) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] c = cssc::peek8(sp + 8 + i);
+            if (c < 48) { go = 0; }
+            if (c > 57) { go = 0; }
+            if (go == 1) { v = v * 10 + (c - 48); i = i + 1; }
+            #delete[c];
+        }
+    }
+    #delete[go];
+    #stack[int, 64] r = v * sign;
+    #delete[n];
+    #delete[i];
+    #delete[sign];
+    #delete[v];
+    return r;
+}
+
+// bool: non-empty AND every char is a digit 0-9.
+#define(ciStrIsDigit) {
+    #scanp(ciStrIsDigit, int, 0) sp;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 32] r = 1;
+    if (n == 0) { r = 0; }
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        #stack[int, 64] c = cssc::peek8(sp + 8 + i);
+        if (c < 48) { r = 0; }
+        if (c > 57) { r = 0; }
+        #delete[c];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    return r;
+}
+
+// bool: non-empty AND every char is a-z / A-Z.
+#define(ciStrIsAlpha) {
+    #scanp(ciStrIsAlpha, int, 0) sp;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 32] r = 1;
+    if (n == 0) { r = 0; }
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        #stack[int, 64] c = cssc::peek8(sp + 8 + i);
+        #stack[int, 32] ok = 0;
+        if (c >= 65) { if (c <= 90) { ok = 1; } }
+        if (c >= 97) { if (c <= 122) { ok = 1; } }
+        if (ok == 0) { r = 0; }
+        #delete[ok];
+        #delete[c];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[n];
+    return r;
+}
+
+// first index of value `x` (type `xt`) in vector `h`, or -1. String elements are
+// content-compared (ciStrCmp); everything else by value. Used by vector
+// .contains/.indexOf.
+#define(ciVecIndexOf) {
+    #scanp(ciVecIndexOf, int, 0) h;
+    #scanp(ciVecIndexOf, int, 1) x;
+    #scanp(ciVecIndexOf, int, 2) xt;
+    #req[ciStrCmp] ciStrCmp;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] data = cssc::peek64(h + 16);
+    #stack[int, 64] res = 0 - 1;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= size) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] ev = cssc::peek64(data + i * 8);
+            #stack[int, 32] eq = 0;
+            if (et == 1) {
+                if (xt == 1) { ciStrCmp(ev, x) c; if (c == 0) { eq = 1; } #delete[c]; }
+            }
+            if (et != 1) {
+                if (ev == x) { eq = 1; }
+            }
+            if (eq == 1) { res = i; go = 0; }
+            #delete[ev];
+            #delete[eq];
+        }
+        if (go == 1) { i = i + 1; }
+    }
+    #delete[size];
+    #delete[et];
+    #delete[data];
+    #delete[i];
+    #delete[go];
+    return res;
+}
+
+// ---- vector producers + queries (batch: slice/flat/unique/join/count/
+// notAtIndex). Producers return a FRESH owned vector (rc=1, same discipline as
+// ciStrSplitVec): the caller marks leftOwns=1 so scope-exit reclaims it. ----
+#define(ciVecSlice) {
+    #scanp(ciVecSlice, int, 0) h;
+    #scanp(ciVecSlice, int, 1) a;
+    #scanp(ciVecSlice, int, 2) b;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] sa = a;
+    #stack[int, 64] sb = b;
+    if (sa < 0) { sa = 0; }
+    if (sa > size) { sa = size; }
+    if (sb < 0) { sb = 0; }
+    if (sb > size) { sb = size; }
+    if (sb < sa) { sb = sa; }
+    #stack[int, 64] nv = 0;
+    ciVecNew(et) t;
+    nv = t;
+    #delete[t];
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = sa;
+    while (i < sb) {
+        #stack[int, 64] ev = cssc::peek64(d + i * 8);
+        ciVecPush(nv, ev, et);
+        #delete[ev];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[sa];
+    #delete[sb];
+    #delete[size];
+    #delete[et];
+    return nv;
+}
+#define(ciVecUnique) {
+    #scanp(ciVecUnique, int, 0) h;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #req[ciVecIndexOf] ciVecIndexOf;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] nv = 0;
+    ciVecNew(et) t;
+    nv = t;
+    #delete[t];
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ev = cssc::peek64(d + i * 8);
+        ciVecIndexOf(nv, ev, et) ix;
+        if (ix < 0) { ciVecPush(nv, ev, et); }
+        #delete[ix];
+        #delete[ev];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[size];
+    #delete[et];
+    return nv;
+}
+#define(ciVecFlat) {
+    #scanp(ciVecFlat, int, 0) h;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] nv = 0;
+    #stack[int, 64] i = 0;
+    if (et != 4) {
+        ciVecNew(et) t;
+        nv = t;
+        #delete[t];
+        while (i < size) {
+            #stack[int, 64] ev = cssc::peek64(d + i * 8);
+            ciVecPush(nv, ev, et);
+            #delete[ev];
+            i = i + 1;
+        }
+    }
+    if (et == 4) {
+        #stack[int, 64] iet = 0;
+        if (size > 0) {
+            #stack[int, 64] e0 = cssc::peek64(d);
+            if (e0 != 0) { iet = cssc::peek32(e0 + 12); }
+            #delete[e0];
+        }
+        ciVecNew(iet) t2;
+        nv = t2;
+        #delete[t2];
+        while (i < size) {
+            #stack[int, 64] sub = cssc::peek64(d + i * 8);
+            if (sub != 0) {
+                #stack[int, 64] ss = cssc::peek32(sub + 4);
+                #stack[int, 64] sd = cssc::peek64(sub + 16);
+                #stack[int, 64] j = 0;
+                while (j < ss) {
+                    #stack[int, 64] iv2 = cssc::peek64(sd + j * 8);
+                    ciVecPush(nv, iv2, iet);
+                    #delete[iv2];
+                    j = j + 1;
+                }
+                #delete[j];
+                #delete[sd];
+                #delete[ss];
+            }
+            #delete[sub];
+            i = i + 1;
+        }
+        #delete[iet];
+    }
+    #delete[i];
+    #delete[d];
+    #delete[size];
+    #delete[et];
+    return nv;
+}
+#define(ciVecJoin) {
+    #scanp(ciVecJoin, int, 0) h;
+    #scanp(ciVecJoin, int, 1) sep;
+    #req[ciStrClone] ciStrClone;
+    #req[ciStrConcat] ciStrConcat;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] usesep = sep;
+    #stack[int, 32] madesep = 0;
+    if (sep == 0) {
+        #stack[int, 64] cb = cssc::alloc(1);
+        cssc::poke8(cb, 44);
+        ciStrNew(cb, 1) cs;
+        usesep = cs;
+        madesep = 1;
+        cssc::free(cb);
+        #delete[cs];
+        #delete[cb];
+    }
+    #stack[int, 64] acc = 0;
+    ciStrClone(0) acc0;
+    acc = acc0;
+    #delete[acc0];
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        if (i > 0) {
+            ciStrConcat(acc, 1, usesep, 1) t1;
+            cssc::free(acc);
+            acc = t1;
+            #delete[t1];
+        }
+        #stack[int, 64] ev = cssc::peek64(d + i * 8);
+        ciStrConcat(acc, 1, ev, et) t2;
+        cssc::free(acc);
+        acc = t2;
+        #delete[ev];
+        #delete[t2];
+        i = i + 1;
+    }
+    if (madesep == 1) { cssc::free(usesep); }
+    #delete[usesep];
+    #delete[madesep];
+    #delete[i];
+    #delete[d];
+    #delete[et];
+    #delete[size];
+    return acc;
+}
+#define(ciVecCount) {
+    #scanp(ciVecCount, int, 0) h;
+    #scanp(ciVecCount, int, 1) x;
+    #scanp(ciVecCount, int, 2) xt;
+    #req[ciStrCmp] ciStrCmp;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] c = 0;
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ev = cssc::peek64(d + i * 8);
+        #stack[int, 32] eq = 0;
+        if (et == 1) {
+            if (xt == 1) { ciStrCmp(ev, x) cc; if (cc == 0) { eq = 1; } #delete[cc]; }
+        }
+        if (et != 1) {
+            if (ev == x) { eq = 1; }
+        }
+        if (eq == 1) { c = c + 1; }
+        #delete[eq];
+        #delete[ev];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[et];
+    #delete[size];
+    return c;
+}
+#define(ciVecNotAtIndex) {
+    #scanp(ciVecNotAtIndex, int, 0) h;
+    #scanp(ciVecNotAtIndex, int, 1) i;
+    #scanp(ciVecNotAtIndex, int, 2) t;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] r = 1;
+    if (i >= 0) {
+        if (i < size) {
+            r = 0;
+            #stack[int, 64] et = cssc::peek32(h + 12);
+            #stack[int, 64] exp = 0 - 2;
+            if (t != 0) {
+                #stack[int, 64] ts = cssc::peek32(t + 4);
+                #stack[int, 64] c0 = 0;
+                if (ts > 0) { c0 = cssc::peek8(t + 8); }
+                if (ts == 3) { if (c0 == 105) { exp = 0; } if (c0 == 109) { exp = 5; } }
+                if (ts == 4) { if (c0 == 98) { exp = 9; } }
+                if (ts == 5) { if (c0 == 102) { exp = 2; } if (c0 == 97) { exp = 4; } }
+                if (ts == 6) { if (c0 == 115) { exp = 1; } }
+                #delete[ts];
+                #delete[c0];
+            }
+            if (exp != 0 - 2) {
+                if (et != exp) { r = 1; }
+            }
+            #delete[exp];
+            #delete[et];
+        }
+    }
+    #delete[size];
+    return r;
+}
+
+// ---- vector in-place mutators (batch: insert/remove/erase/takeout/sort/
+// reverse/resize/swap). Modeled on ciVecPopFront ownership discipline. ----
+
+// insert value `x` (type `xt`) at index `i` (clamped to [0,size]); elements at
+// [i..size) shift up one. Reuses ciVecPush for growth + string clone/format, then
+// rotates the freshly-appended element down into slot i. push_front = i 0.
+#define(ciVecInsert) {
+    #scanp(ciVecInsert, int, 0) h;
+    #scanp(ciVecInsert, int, 1) i;
+    #scanp(ciVecInsert, int, 2) x;
+    #scanp(ciVecInsert, int, 3) xt;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] idx = i;
+    if (idx < 0) { idx = 0; }
+    if (idx > size) { idx = size; }
+    ciVecPush(h, x, xt);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] nv = cssc::peek64(d + size * 8);
+    #stack[int, 64] j = size;
+    while (j > idx) {
+        cssc::poke64(d + j * 8, cssc::peek64(d + (j - 1) * 8));
+        j = j - 1;
+    }
+    cssc::poke64(d + idx * 8, nv);
+    #delete[j];
+    #delete[nv];
+    #delete[d];
+    #delete[idx];
+    #delete[size];
+}
+// remove element at index `i`, shifting the rest down; frees an owned string
+// slot. Out of range -> no-op (this interp does not raise).
+#define(ciVecEraseAt) {
+    #scanp(ciVecEraseAt, int, 0) h;
+    #scanp(ciVecEraseAt, int, 1) i;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    if (i >= 0) {
+        if (i < size) {
+            #stack[int, 64] et = cssc::peek32(h + 12);
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            if (et == 1) {
+                #stack[int, 64] old = cssc::peek64(d + i * 8);
+                if (old != 0) { cssc::free(old); }
+                #delete[old];
+            }
+            #stack[int, 64] j = i;
+            while (j < size - 1) {
+                cssc::poke64(d + j * 8, cssc::peek64(d + (j + 1) * 8));
+                j = j + 1;
+            }
+            cssc::poke32(h + 4, size - 1);
+            #delete[j];
+            #delete[d];
+            #delete[et];
+        }
+    }
+    #delete[size];
+}
+// remove + return element at index `i`, shifting the rest down. Ownership
+// transfers to the caller (NO clone), exactly like ciVecPopFront. OOB -> 0.
+#define(ciVecTakeout) {
+    #scanp(ciVecTakeout, int, 0) h;
+    #scanp(ciVecTakeout, int, 1) i;
+    #req[ciVecPopType] ciVecPopType;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] r = 0;
+    ciVecPopType = et;
+    if (i >= 0) {
+        if (i < size) {
+            #stack[int, 64] d = cssc::peek64(h + 16);
+            r = cssc::peek64(d + i * 8);
+            #stack[int, 64] tp = 0;
+            if (et == 8) {
+                tp = cssc::peek64(h + 24);
+                ciVecPopType = cssc::peek32(tp + i * 8);
+            }
+            #stack[int, 64] j = i;
+            while (j < size - 1) {
+                cssc::poke64(d + j * 8, cssc::peek64(d + (j + 1) * 8));
+                if (et == 8) {
+                    cssc::poke32(tp + j * 8, cssc::peek32(tp + (j + 1) * 8));
+                }
+                j = j + 1;
+            }
+            cssc::poke32(h + 4, size - 1);
+            #delete[j];
+            #delete[tp];
+            #delete[d];
+        }
+    }
+    #delete[size];
+    #delete[et];
+    return r;
+}
+// remove first element equal to value `x` (type `xt`); string elements are
+// content-compared (via ciVecIndexOf). Returns 1 if removed, 0 if absent (this
+// interp does not raise on absence).
+#define(ciVecRemoveVal) {
+    #scanp(ciVecRemoveVal, int, 0) h;
+    #scanp(ciVecRemoveVal, int, 1) x;
+    #scanp(ciVecRemoveVal, int, 2) xt;
+    #req[ciVecIndexOf] ciVecIndexOf;
+    #req[ciVecEraseAt] ciVecEraseAt;
+    ciVecIndexOf(h, x, xt) ix;
+    #stack[int, 64] found = 0;
+    if (ix >= 0) { ciVecEraseAt(h, ix); found = 1; }
+    #delete[ix];
+    return found;
+}
+// reverse the vector in place (swap slots; no clone/free -- just moves pointers).
+#define(ciVecReverse) {
+    #scanp(ciVecReverse, int, 0) h;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 0;
+    #stack[int, 64] jj = size - 1;
+    while (i < jj) {
+        #stack[int, 64] a = cssc::peek64(d + i * 8);
+        #stack[int, 64] b = cssc::peek64(d + jj * 8);
+        cssc::poke64(d + i * 8, b);
+        cssc::poke64(d + jj * 8, a);
+        #delete[a];
+        #delete[b];
+        i = i + 1;
+        jj = jj - 1;
+    }
+    #delete[i];
+    #delete[jj];
+    #delete[d];
+    #delete[size];
+}
+// ascending in-place insertion sort. String elements compared by content
+// (ciStrCmp); everything else by SIGNED value (correct for int, incl. negatives).
+// Stable (moves only on strict-greater). Float/object element ordering is by raw
+// bits (not numeric) -- int/string are the supported element kinds.
+#define(ciVecSort) {
+    #scanp(ciVecSort, int, 0) h;
+    #req[ciStrCmp] ciStrCmp;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] i = 1;
+    while (i < size) {
+        #stack[int, 64] cur = cssc::peek64(d + i * 8);
+        #stack[int, 64] j = i - 1;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (j < 0) { go = 0; }
+            if (go == 1) {
+                #stack[int, 64] pv = cssc::peek64(d + j * 8);
+                #stack[int, 32] gt = 0;
+                if (et == 1) {
+                    ciStrCmp(pv, cur) c;
+                    if (c > 0) { gt = 1; }
+                    #delete[c];
+                }
+                if (et != 1) {
+                    if (pv > cur) { gt = 1; }
+                }
+                if (gt == 1) {
+                    cssc::poke64(d + (j + 1) * 8, pv);
+                    j = j - 1;
+                }
+                if (gt == 0) { go = 0; }
+                #delete[pv];
+                #delete[gt];
+            }
+        }
+        cssc::poke64(d + (j + 1) * 8, cur);
+        #delete[cur];
+        #delete[j];
+        #delete[go];
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[d];
+    #delete[et];
+    #delete[size];
+}
+// resize to exactly `n` elements. Shrink frees dropped owned-string slots; grow
+// fills new slots with int 0 (the host vector is homogeneous, so a grown slot
+// formats as `0` via elemType -- the reference prints a null `0x0` instead).
+#define(ciVecResize) {
+    #scanp(ciVecResize, int, 0) h;
+    #scanp(ciVecResize, int, 1) n;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] nn = n;
+    if (nn < 0) { nn = 0; }
+    if (nn < size) {
+        if (et == 1) {
+            #stack[int, 64] d0 = cssc::peek64(h + 16);
+            #stack[int, 64] k = nn;
+            while (k < size) {
+                #stack[int, 64] ev = cssc::peek64(d0 + k * 8);
+                if (ev != 0) { cssc::free(ev); }
+                #delete[ev];
+                k = k + 1;
+            }
+            #delete[k];
+            #delete[d0];
+        }
+        cssc::poke32(h + 4, nn);
+    }
+    if (nn > size) {
+        #stack[int, 64] cap = cssc::peek32(h + 8);
+        if (nn > cap) {
+            #stack[int, 64] ncap = cap;
+            while (ncap < nn) { ncap = ncap * 2; }
+            #stack[int, 64] nd = cssc::alloc(ncap * 8);
+            #stack[int, 64] od = cssc::peek64(h + 16);
+            cssc::memcopy(nd, od, size * 2);
+            cssc::free(od);
+            cssc::poke64(h + 16, nd);
+            cssc::poke32(h + 8, ncap);
+            #delete[od];
+            #delete[nd];
+            #delete[ncap];
+        }
+        #stack[int, 64] d = cssc::peek64(h + 16);
+        #stack[int, 64] k = size;
+        while (k < nn) {
+            cssc::poke64(d + k * 8, 0);
+            k = k + 1;
+        }
+        cssc::poke32(h + 4, nn);
+        #delete[k];
+        #delete[d];
+        #delete[cap];
+    }
+    #delete[nn];
+    #delete[et];
+    #delete[size];
+}
+// swap the CONTENTS of two vectors by exchanging their header fields
+// (size/cap/elemType/data). Self-swap (a==b) is a safe no-op (fields snapshot
+// into locals first). Each variable keeps its own handle identity.
+#define(ciVecSwap) {
+    #scanp(ciVecSwap, int, 0) a;
+    #scanp(ciVecSwap, int, 1) b;
+    #stack[int, 64] asz = cssc::peek32(a + 4);
+    #stack[int, 64] acp = cssc::peek32(a + 8);
+    #stack[int, 64] aet = cssc::peek32(a + 12);
+    #stack[int, 64] ad = cssc::peek64(a + 16);
+    #stack[int, 64] bsz = cssc::peek32(b + 4);
+    #stack[int, 64] bcp = cssc::peek32(b + 8);
+    #stack[int, 64] bet = cssc::peek32(b + 12);
+    #stack[int, 64] bd = cssc::peek64(b + 16);
+    cssc::poke32(a + 4, bsz);
+    cssc::poke32(a + 8, bcp);
+    cssc::poke32(a + 12, bet);
+    cssc::poke64(a + 16, bd);
+    cssc::poke32(b + 4, asz);
+    cssc::poke32(b + 8, acp);
+    cssc::poke32(b + 12, aet);
+    cssc::poke64(b + 16, ad);
+    #delete[asz];
+    #delete[acp];
+    #delete[aet];
+    #delete[ad];
+    #delete[bsz];
+    #delete[bcp];
+    #delete[bet];
+    #delete[bd];
+}
+
+// STRING expression-method dispatcher: receiver ptr `sp`, method-name span mo/ml.
+// Parses the argument list `( .. )` from the live token stream, dispatches, and
+// sets ciEvalType (result type: 0 int / 1 string / 2 float / 4 vector / 9 bool)
+// and ciEvalOwns (1 if the returned value is a fresh owned allocation). Returns
+// the result value. bool results use tag 9 so outln prints true/false (int
+// comparisons stay tag 0 -> 1/0, preserving run.py's floatcmp golden).
+// strip LEADING ASCII whitespace only -> new owned string.
+#define(ciStrLTrimNew) {
+    #scanp(ciStrLTrimNew, int, 0) sp;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] a = 0;
+    #stack[int, 32] g1 = 1;
+    while (g1 == 1) {
+        if (a >= n) { g1 = 0; }
+        if (g1 == 1) {
+            #stack[int, 64] c = cssc::peek8(sp + 8 + a);
+            #stack[int, 32] ws = 0;
+            if (c == 32) { ws = 1; }
+            if (c == 9) { ws = 1; }
+            if (c == 10) { ws = 1; }
+            if (c == 13) { ws = 1; }
+            if (ws == 0) { g1 = 0; }
+            if (ws == 1) { a = a + 1; }
+            #delete[c]; #delete[ws];
+        }
+    }
+    #delete[g1];
+    ciStrNew(sp + 8 + a, n - a) r;
+    #delete[n]; #delete[a];
+    return r;
+}
+// strip TRAILING ASCII whitespace only -> new owned string.
+#define(ciStrRTrimNew) {
+    #scanp(ciStrRTrimNew, int, 0) sp;
+    #req[ciStrNew] ciStrNew;
+    #stack[int, 64] n = cssc::peek32(sp + 4);
+    #stack[int, 64] b = n;
+    #stack[int, 32] g2 = 1;
+    while (g2 == 1) {
+        if (b <= 0) { g2 = 0; }
+        if (g2 == 1) {
+            #stack[int, 64] c = cssc::peek8(sp + 8 + b - 1);
+            #stack[int, 32] ws = 0;
+            if (c == 32) { ws = 1; }
+            if (c == 9) { ws = 1; }
+            if (c == 10) { ws = 1; }
+            if (c == 13) { ws = 1; }
+            if (ws == 0) { g2 = 0; }
+            if (ws == 1) { b = b - 1; }
+            #delete[c]; #delete[ws];
+        }
+    }
+    #delete[g2];
+    ciStrNew(sp + 8, b) r;
+    #delete[n]; #delete[b];
+    return r;
+}
+// index of LAST occurrence of needle in hay, or -1 (empty needle -> hl, matching Python rfind).
+#define(ciStrLastIndexOf) {
+    #scanp(ciStrLastIndexOf, int, 0) hay;
+    #scanp(ciStrLastIndexOf, int, 1) needle;
+    #stack[int, 64] hl = cssc::peek32(hay + 4);
+    #stack[int, 64] nl = cssc::peek32(needle + 4);
+    #stack[int, 64] res = 0 - 1;
+    if (nl == 0) { res = hl; }
+    if (nl != 0) {
+        #stack[int, 64] i = hl - nl;
+        #stack[int, 32] go = 1;
+        if (i < 0) { go = 0; }
+        while (go == 1) {
+            #stack[int, 64] j = 0;
+            #stack[int, 32] m = 1;
+            while (j < nl) {
+                if (cssc::peek8(hay + 8 + i + j) != cssc::peek8(needle + 8 + j)) { m = 0; j = nl; }
+                if (m == 1) { j = j + 1; }
+            }
+            if (m == 1) { res = i; go = 0; }
+            #delete[j]; #delete[m];
+            if (go == 1) {
+                if (i == 0) { go = 0; }
+                if (i > 0) { i = i - 1; }
+            }
+        }
+        #delete[i]; #delete[go];
+    }
+    #delete[hl]; #delete[nl];
+    return res;
+}
+// join vector elements (stringified by elemType) with sep -> new owned string.
+// sep==0 (default) -> no separator. elemType: 1 string / 0 int via ciStrConcat.
+#define(ciStrJoinVec) {
+    #scanp(ciStrJoinVec, int, 0) vh;
+    #scanp(ciStrJoinVec, int, 1) sepp;
+    #req[ciStrClone] ciStrClone;
+    #req[ciStrConcat] ciStrConcat;
+    #stack[int, 64] size = cssc::peek32(vh + 4);
+    #stack[int, 64] et = cssc::peek32(vh + 12);
+    #stack[int, 64] data = cssc::peek64(vh + 16);
+    ciStrClone(0) acc;
+    #stack[int, 64] r = acc;
+    #delete[acc];
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ev = cssc::peek64(data + i * 8);
+        if (i > 0) {
+            if (sepp != 0) {
+                ciStrConcat(r, 1, sepp, 1) t1;
+                cssc::free(r);
+                r = t1;
+                #delete[t1];
+            }
+        }
+        ciStrConcat(r, 1, ev, et) t2;
+        cssc::free(r);
+        r = t2;
+        #delete[t2];
+        #delete[ev];
+        i = i + 1;
+    }
+    #delete[i]; #delete[size]; #delete[et]; #delete[data];
+    return r;
+}
+#define(ciStrMethod) {
+    #scanp(ciStrMethod, int, 0) sp;
+    #scanp(ciStrMethod, int, 1) mo;
+    #scanp(ciStrMethod, int, 2) ml;
+    #req[ciCur] ciCur;
+    #req[ciTokOff] ciTokOff;
+    #req[ciTokLen] ciTokLen;
+    #req[ciAdvance] ciAdvance;
+    #req[ciExpr] ciExpr;
+    #req[ciIdentIs] ciIdentIs;
+    #req[ciEvalType] ciEvalType;
+    #req[ciEvalOwns] ciEvalOwns;
+    #req[ciStrNew] ciStrNew;
+    #req[ciStrClone] ciStrClone;
+    #req[ciStrCaseNew] ciStrCaseNew;
+    #req[ciStrTrimNew] ciStrTrimNew;
+    #req[ciStrRevNew] ciStrRevNew;
+    #req[ciStrRepeatNew] ciStrRepeatNew;
+    #req[ciStrSubNew] ciStrSubNew;
+    #req[ciStrIndexOf] ciStrIndexOf;
+    #req[ciStrReplaceNew] ciStrReplaceNew;
+    #req[ciStrSplitVec] ciStrSplitVec;
+    #req[ciStrPadNew] ciStrPadNew;
+    #req[ciStrToIntV] ciStrToIntV;
+    #req[ciStrIsDigit] ciStrIsDigit;
+    #req[ciStrIsAlpha] ciStrIsAlpha;
+    // --- parse up to 2 args: `( a0 , a1 )` (any excess consumed + string-freed) ---
+    #stack[int, 64] a0 = 0;
+    #stack[int, 64] a0t = 0;
+    #stack[int, 64] a0o = 0;
+    #stack[int, 64] a1 = 0;
+    #stack[int, 64] a1t = 0;
+    #stack[int, 64] a1o = 0;
+    #stack[int, 32] argn = 0;
+    if (ciCur == 9) {
+        ciAdvance();
+        #stack[int, 32] g = 1;
+        if (ciCur == 10) { g = 0; }
+        while (g == 1) {
+            ciExpr(0) e;
+            if (argn == 0) { a0 = e; a0t = ciEvalType; a0o = ciEvalOwns; }
+            if (argn == 1) { a1 = e; a1t = ciEvalType; a1o = ciEvalOwns; }
+            if (argn > 1) { if (ciEvalOwns == 1) { if (ciEvalType == 1) { cssc::free(e); } } }
+            argn = argn + 1;
+            #delete[e];
+            if (ciCur == 21) { ciAdvance(); }
+            if (ciCur == 10) { g = 0; }
+            if (ciCur == 0) { g = 0; }
+        }
+        #delete[g];
+    }
+    if (ciCur == 10) { ciAdvance(); }
+    // --- method identity ---
+    ciIdentIs(mo, ml, "length") mLen;
+    ciIdentIs(mo, ml, "size") mSz;
+    ciIdentIs(mo, ml, "isEmpty") mEmp;
+    ciIdentIs(mo, ml, "upper") mUp;
+    ciIdentIs(mo, ml, "lower") mLo;
+    ciIdentIs(mo, ml, "trim") mTr;
+    ciIdentIs(mo, ml, "reverse") mRev;
+    ciIdentIs(mo, ml, "repeat") mRep;
+    ciIdentIs(mo, ml, "substr") mSub;
+    ciIdentIs(mo, ml, "charAt") mCh;
+    ciIdentIs(mo, ml, "contains") mCon;
+    ciIdentIs(mo, ml, "indexOf") mIdx;
+    ciIdentIs(mo, ml, "startsWith") mSw;
+    ciIdentIs(mo, ml, "endsWith") mEw;
+    ciIdentIs(mo, ml, "replace") mRpl;
+    ciIdentIs(mo, ml, "split") mSpl;
+    ciIdentIs(mo, ml, "padStart") mPs;
+    ciIdentIs(mo, ml, "padEnd") mPe;
+    ciIdentIs(mo, ml, "toInt") mTi;
+    ciIdentIs(mo, ml, "toFloat") mTf;
+    ciIdentIs(mo, ml, "isDigit") mIsD;
+    ciIdentIs(mo, ml, "isAlpha") mIsA;
+    // reference-parity string-method aliases + extras
+    ciIdentIs(mo, ml, "starts_with") mSws;
+    ciIdentIs(mo, ml, "ends_with") mEws;
+    ciIdentIs(mo, ml, "index_of") mIdxs;
+    if (mSws == 1) { mSw = 1; }
+    if (mEws == 1) { mEw = 1; }
+    if (mIdxs == 1) { mIdx = 1; }
+    ciIdentIs(mo, ml, "begin") mBeg;
+    ciIdentIs(mo, ml, "end") mEnd;
+    ciIdentIs(mo, ml, "front") mFro;
+    ciIdentIs(mo, ml, "back") mBak;
+    ciIdentIs(mo, ml, "data") mDat;
+    ciIdentIs(mo, ml, "capacity") mCap;
+    ciIdentIs(mo, ml, "index") mIxc;
+    ciIdentIs(mo, ml, "substring") mSbg;
+    ciIdentIs(mo, ml, "exists") mEx;
+    #stack[int, 64] rv = 0;
+    #stack[int, 64] rt = 0;
+    #stack[int, 32] ro = 0;
+    if (mLen == 1) { rv = cssc::peek32(sp + 4); rt = 0; }
+    if (mSz == 1) { rv = cssc::peek32(sp + 4); rt = 0; }
+    if (mEmp == 1) { rv = 0; if (cssc::peek32(sp + 4) == 0) { rv = 1; } rt = 9; }
+    if (mUp == 1) { ciStrCaseNew(sp, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mLo == 1) { ciStrCaseNew(sp, 0) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mTr == 1) { ciStrTrimNew(sp) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mRev == 1) { ciStrRevNew(sp) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mRep == 1) { ciStrRepeatNew(sp, a0) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mSub == 1) { ciStrSubNew(sp, a0, a1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mCh == 1) { ciStrSubNew(sp, a0, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mCon == 1) { ciStrIndexOf(sp, a0) ix; rv = 0; if (ix >= 0) { rv = 1; } rt = 9; #delete[ix]; }
+    if (mIdx == 1) { ciStrIndexOf(sp, a0) ix; rv = ix; rt = 0; #delete[ix]; }
+    if (mSw == 1) { ciStrIndexOf(sp, a0) ix; rv = 0; if (ix == 0) { rv = 1; } rt = 9; #delete[ix]; }
+    if (mEw == 1) {
+        #stack[int, 64] nl = cssc::peek32(a0 + 4);
+        #stack[int, 64] hl = cssc::peek32(sp + 4);
+        #stack[int, 32] ew = 0;
+        if (nl <= hl) {
+            ew = 1;
+            #stack[int, 64] j = 0;
+            while (j < nl) {
+                if (cssc::peek8(sp + 8 + hl - nl + j) != cssc::peek8(a0 + 8 + j)) { ew = 0; j = nl; }
+                if (ew == 1) { j = j + 1; }
+            }
+            #delete[j];
+        }
+        rv = ew;
+        rt = 9;
+        #delete[nl];
+        #delete[hl];
+        #delete[ew];
+    }
+    if (mRpl == 1) { ciStrReplaceNew(sp, a0, a1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mSpl == 1) { ciStrSplitVec(sp, a0) r; rv = r; rt = 4; ro = 1; #delete[r]; }
+    if (mPs == 1) { ciStrPadNew(sp, a0, a1, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mPe == 1) { ciStrPadNew(sp, a0, a1, 0) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mTi == 1) { ciStrToIntV(sp) r; rv = r; rt = 0; #delete[r]; }
+    if (mTf == 1) { cssc::strToF(sp + 8, cssc::peek32(sp + 4)) r; rv = r; rt = 2; #delete[r]; }
+    if (mIsD == 1) { ciStrIsDigit(sp) r; rv = r; rt = 9; #delete[r]; }
+    if (mIsA == 1) { ciStrIsAlpha(sp) r; rv = r; rt = 9; #delete[r]; }
+    if (mBeg == 1) { ciStrSubNew(sp, 0, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mFro == 1) { ciStrSubNew(sp, 0, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mEnd == 1) { ciStrSubNew(sp, cssc::peek32(sp + 4) - 1, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mBak == 1) { ciStrSubNew(sp, cssc::peek32(sp + 4) - 1, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mDat == 1) { ciStrClone(sp) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mCap == 1) { rv = cssc::peek32(sp + 4); rt = 0; }
+    if (mIxc == 1) { ciStrSubNew(sp, a0, 1) r; rv = r; rt = 1; ro = 1; #delete[r]; }
+    if (mSbg == 1) { #stack[int, 64] sbl = a1 - a0; if (argn < 2) { sbl = cssc::peek32(sp + 4) - a0; } ciStrSubNew(sp, a0, sbl) r; rv = r; rt = 1; ro = 1; #delete[r]; #delete[sbl]; }
+    if (mEx == 1) { rv = 1; rt = 9; }
+    // free any owned string-arg temporaries this call consumed
+    if (a0o == 1) { if (a0t == 1) { if (a0 != 0) { cssc::free(a0); } } }
+    if (a1o == 1) { if (a1t == 1) { if (a1 != 0) { cssc::free(a1); } } }
+    ciEvalType = rt;
+    ciEvalOwns = ro;
+    #delete[a0]; #delete[a0t]; #delete[a0o];
+    #delete[a1]; #delete[a1t]; #delete[a1o];
+    #delete[argn];
+    #delete[mLen]; #delete[mSz]; #delete[mEmp]; #delete[mUp]; #delete[mLo];
+    #delete[mTr]; #delete[mRev]; #delete[mRep]; #delete[mSub]; #delete[mCh];
+    #delete[mCon]; #delete[mIdx]; #delete[mSw]; #delete[mEw]; #delete[mRpl];
+    #delete[mSpl]; #delete[mPs]; #delete[mPe]; #delete[mTi]; #delete[mTf];
+    #delete[mIsD]; #delete[mIsA];
+    #delete[mSws]; #delete[mEws]; #delete[mIdxs];
+    #delete[mBeg]; #delete[mEnd]; #delete[mFro]; #delete[mBak]; #delete[mDat];
+    #delete[mCap]; #delete[mIxc]; #delete[mSbg]; #delete[mEx];
+    #delete[rt];
+    #delete[ro];
+    return rv;
+}
+
+// byte-wise string compare -> -1 / 0 / 1 (a<b / a==b / a>b). Operands are
+// pointers to string objects {rc@0, size@4, bytes@8}. Enables content equality
+// and ordering for `==`/`<`/... and string map keys (interpreter values only
+// ever compared by pointer before this).
+#define(ciStrCmp) {
+    #scanp(ciStrCmp, int, 0) a;
+    #scanp(ciStrCmp, int, 1) b;
+    // a null string pointer (uninitialized `#stack[string]`) is the empty string,
+    // not a fault: peek32(0+4) would segfault. length 0 -> the data ptr (a+8) is
+    // never read (the i<la guard fails immediately).
+    #stack[int, 64] la = 0;
+    #stack[int, 64] lb = 0;
+    if (a != 0) { la = cssc::peek32(a + 4); }
+    if (b != 0) { lb = cssc::peek32(b + 4); }
+    #stack[int, 64] da = a + 8;
+    #stack[int, 64] db = b + 8;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] res = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        #stack[int, 32] ae = 0;
+        #stack[int, 32] be = 0;
+        if (i >= la) { ae = 1; }
+        if (i >= lb) { be = 1; }
+        if (ae == 1) {
+            if (be == 1) { res = 0; go = 0; }
+            if (be == 0) { res = 0 - 1; go = 0; }
+        }
+        if (go == 1) {
+            if (be == 1) { res = 1; go = 0; }
+        }
+        if (go == 1) {
+            #stack[int, 64] ca = cssc::peek8(da + i);
+            #stack[int, 64] cb = cssc::peek8(db + i);
+            if (ca < cb) { res = 0 - 1; go = 0; }
+            if (ca > cb) { res = 1; go = 0; }
+            #delete[ca];
+            #delete[cb];
+            i = i + 1;
+        }
+        #delete[ae];
+        #delete[be];
+    }
+    #delete[go];
+    #delete[i];
+    #delete[da];
+    #delete[db];
+    #delete[la];
+    #delete[lb];
+    return res;
+}
+
+// ---- cssc:: array builtins (produce/reduce over vectors): concat/range/zip/
+// fill/sum/avg. slice/unique/flat/count reuse the vector-method primitives above.
+#define(ciVecConcat) {
+    #scanp(ciVecConcat, int, 0) a;
+    #scanp(ciVecConcat, int, 1) b;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] et = cssc::peek32(a + 12);
+    #stack[int, 64] nv = 0;
+    ciVecNew(et) t; nv = t; #delete[t];
+    #stack[int, 64] sa = cssc::peek32(a + 4);
+    #stack[int, 64] da = cssc::peek64(a + 16);
+    #stack[int, 64] i = 0;
+    while (i < sa) { #stack[int, 64] ev = cssc::peek64(da + i * 8); ciVecPush(nv, ev, et); #delete[ev]; i = i + 1; }
+    #delete[i]; #delete[da]; #delete[sa];
+    #stack[int, 64] sb = cssc::peek32(b + 4);
+    #stack[int, 64] db = cssc::peek64(b + 16);
+    #stack[int, 64] j = 0;
+    while (j < sb) { #stack[int, 64] ev = cssc::peek64(db + j * 8); ciVecPush(nv, ev, et); #delete[ev]; j = j + 1; }
+    #delete[j]; #delete[db]; #delete[sb]; #delete[et];
+    return nv;
+}
+#define(ciVecRange) {
+    #scanp(ciVecRange, int, 0) s;
+    #scanp(ciVecRange, int, 1) e;
+    #scanp(ciVecRange, int, 2) step;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] nv = 0;
+    ciVecNew(0) t; nv = t; #delete[t];
+    #stack[int, 64] st = step;
+    if (st == 0) { st = 1; }
+    #stack[int, 64] i = s;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (st > 0) { if (i >= e) { go = 0; } }
+        if (st < 0) { if (i <= e) { go = 0; } }
+        if (go == 1) { ciVecPush(nv, i, 0); i = i + st; }
+    }
+    #delete[go]; #delete[i]; #delete[st];
+    return nv;
+}
+#define(ciVecZip) {
+    #scanp(ciVecZip, int, 0) a;
+    #scanp(ciVecZip, int, 1) b;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] et = cssc::peek32(a + 12);
+    #stack[int, 64] sa = cssc::peek32(a + 4);
+    #stack[int, 64] sb = cssc::peek32(b + 4);
+    #stack[int, 64] da = cssc::peek64(a + 16);
+    #stack[int, 64] db = cssc::peek64(b + 16);
+    #stack[int, 64] n = sa;
+    if (sb < n) { n = sb; }
+    #stack[int, 64] nv = 0;
+    ciVecNew(et) t; nv = t; #delete[t];
+    #stack[int, 64] i = 0;
+    while (i < n) {
+        #stack[int, 64] ea = cssc::peek64(da + i * 8);
+        #stack[int, 64] eb = cssc::peek64(db + i * 8);
+        ciVecPush(nv, ea, et); ciVecPush(nv, eb, et);
+        #delete[ea]; #delete[eb]; i = i + 1;
+    }
+    #delete[i]; #delete[da]; #delete[db]; #delete[sa]; #delete[sb]; #delete[n]; #delete[et];
+    return nv;
+}
+#define(ciVecFill) {
+    #scanp(ciVecFill, int, 0) n;
+    #scanp(ciVecFill, int, 1) x;
+    #scanp(ciVecFill, int, 2) xt;
+    #req[ciVecNew] ciVecNew;
+    #req[ciVecPush] ciVecPush;
+    #stack[int, 64] nv = 0;
+    ciVecNew(xt) t; nv = t; #delete[t];
+    #stack[int, 64] i = 0;
+    while (i < n) { ciVecPush(nv, x, xt); i = i + 1; }
+    #delete[i];
+    return nv;
+}
+#define(ciVecSum) {
+    #scanp(ciVecSum, int, 0) h;
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] acc = 0;
+    if (et == 2) { cssc::iToF(0) z; acc = z; #delete[z]; }
+    #stack[int, 64] i = 0;
+    while (i < size) {
+        #stack[int, 64] ev = cssc::peek64(d + i * 8);
+        if (et == 2) { cssc::fAdd(acc, ev) tt; acc = tt; #delete[tt]; }
+        if (et != 2) { acc = acc + ev; }
+        #delete[ev]; i = i + 1;
+    }
+    #delete[i]; #delete[d]; #delete[size]; #delete[et];
+    return acc;
+}
+#define(ciVecAvg) {
+    #scanp(ciVecAvg, int, 0) h;
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    #stack[int, 64] r = 0;
+    if (size > 0) {
+        #stack[int, 64] acc = 0;
+        cssc::iToF(0) z; acc = z; #delete[z];
+        #stack[int, 64] i = 0;
+        while (i < size) {
+            #stack[int, 64] ev = cssc::peek64(d + i * 8);
+            #stack[int, 64] fv = ev;
+            if (et != 2) { cssc::iToF(ev) c; fv = c; #delete[c]; }
+            cssc::fAdd(acc, fv) tt; acc = tt; #delete[tt];
+            #delete[fv]; #delete[ev]; i = i + 1;
+        }
+        cssc::iToF(size) fs;
+        cssc::fDiv(acc, fs) q;
+        r = q;
+        #delete[q]; #delete[fs]; #delete[acc]; #delete[i];
+    }
+    #delete[et]; #delete[size]; #delete[d];
+    return r;
+}

@@ -1,0 +1,281 @@
+#stack[int, 64] ciSrc = 0;
+#stack[int, 64] ciSrcLen = 0;
+#stack[int, 64] ciPos = 0;
+#stack[int, 64] ciCur = 0;
+#stack[int, 64] ciTokNum = 0;
+#stack[int, 64] ciTokFloat = 0;
+#stack[int, 64] ciTokOff = 0;
+#stack[int, 64] ciTokLen = 0;
+#stack[int, 64] ciExec = 1;
+#stack[int, 64] ciVNames = 0;
+#stack[int, 64] ciVLens = 0;
+#stack[int, 64] ciVVals = 0;
+#stack[int, 64] ciVTypes = 0;
+// per-row ownership: 1 = this row owns a heap string it must free on
+// #delete / frame-exit; 0 = a borrow (ref) that another slot owns
+#stack[int, 64] ciVOwns = 0;
+#stack[int, 64] ciVCount = 0;
+#stack[int, 64] ciEvalType = 0;
+// real value-type of the element most recently removed by ciVecPop/PopFront/
+// Takeout. For a heterogeneous array<auto> it is read from the per-element
+// types@24 array (elemType@12 is only the "auto" marker there); for a
+// homogeneous vector it equals elemType. Callers bind the popped value with
+// THIS type so an array<auto> element keeps its int/string/etc. identity.
+#stack[int, 64] ciVecPopType = 0;
+// last expression's ownership: 1 = fresh owned string (transfers on bind),
+// 0 = an int or a borrow of a variable that keeps its owner
+#stack[int, 64] ciEvalOwns = 0;
+// out-param: the value type of the entry a map get/find just returned (0=int,
+// 1=string), so the dispatch can set ciEvalType/ownership correctly.
+#stack[int, 64] ciMapRT = 0;
+// out-param: 1 if the last map get found the key, else 0 (lets has/contains/count
+// route through ciMapGet, which is reliably callable from ciExpr).
+#stack[int, 64] ciMapFound = 0;
+// out-param: the cell type (0=int, 1=string) of the last bind flat-cell read, so
+// the dispatch can set ciEvalType/ownership correctly (bind cells are heterogeneous).
+#stack[int, 64] ciBindCellRT = 0;
+// variable-lookup floor: a function frame only sees rows >= ciScopeBase (isolation)
+#stack[int, 64] ciScopeBase = 0;
+// user-defined function table (name -> body source span)
+#stack[int, 64] ciFnNames = 0;
+#stack[int, 64] ciFnLens = 0;
+#stack[int, 64] ciFnBodyStart = 0;
+#stack[int, 64] ciFnBodyEnd = 0;
+#stack[int, 64] ciFnInjCnt = 0;
+#stack[int, 64] ciFnInjStart = 0;
+#stack[int, 64] ciFnInjEnd = 0;
+#stack[int, 64] ciFnCount = 0;
+// #cdefine named-param table: per function row, a count + up to 8 param-name spans
+// (byte offset+len into ciSrc). #define functions have count 0 (they read args via
+// #scanp inside the body); #cdefine functions pre-bind these names to arg[i] at call
+// time. Pool layout: ciFnPar{Off,Len} indexed (row * 8 + i).
+#stack[int, 64] ciFnParCnt = 0;   // per-fn: number of named params (32 rows x 8B)
+#stack[int, 64] ciFnParOff = 0;   // pool: param name byte offset (32*8 rows x 8B)
+#stack[int, 64] ciFnParLen = 0;   // pool: param name byte length  (32*8 rows x 8B)
+// #cdefine parse scratch: up to 8 (off,len) param specs collected from the signature
+// before the fn row is known, then copied into the pool for that row.
+#stack[int, 64] ciCdOff = 0;
+#stack[int, 64] ciCdLen = 0;
+// 1 after #include('def'): enables #cdefine / #param / #fvar / #qvar (reset per run)
+#stack[int, 64] ciDefLoaded = 0;
+// per-call argument frame (values + types, filled by the call site, read by #scanp)
+#stack[int, 64] ciArgVals = 0;
+#stack[int, 64] ciArgTypes = 0;
+// per-arg ownership: 1 = the call site owns this string temporary (freed after
+// the call unless it escaped via the return value); 0 = int / borrow
+#stack[int, 64] ciArgOwns = 0;
+#stack[int, 64] ciArgCount = 0;
+// control signal: 0 = normal, 2 = return (unwinds the running body); + return value
+#stack[int, 64] ciSignal = 0;
+#stack[int, 64] ciRetVal = 0;
+#stack[int, 64] ciRetType = 0;
+// select-loop state. ciSignal value 6 = select-jump (consumed only by the select
+// loop, gated on ciInSelect>0 so it never escapes). ciSelDelta = the cursor step a
+// jump requests (1/2 or 0-1/0-2); ciSelCursor = active cursor (label.pos());
+// ciInSelect = select-body depth; ciSelLab{Off,Len} = active label name span.
+#stack[int, 64] ciSelDelta = 0;
+#stack[int, 64] ciSelCursor = 0;
+#stack[int, 64] ciInSelect = 0;
+#stack[int, 64] ciSelLabOff = 0;
+#stack[int, 64] ciSelLabLen = 0;
+
+// ---- L3 sector state ----
+// sector table: up to 8 sectors; names referenced as source spans (offset+len
+// into ciSrc -- stable for the whole run), body/free{} spans for replay
+#stack[int, 64] ciSecNameOff = 0;
+#stack[int, 64] ciSecNameLen = 0;
+#stack[int, 64] ciSecBodyS = 0;
+#stack[int, 64] ciSecBodyE = 0;
+#stack[int, 64] ciSecFreeS = 0;
+#stack[int, 64] ciSecFreeE = 0;
+// run-once guard for free{} (set BEFORE the replay, so re-entry is inert)
+#stack[int, 64] ciSecFreed = 0;
+// 1 = declared `sector Name ?label {..}`: body parked, runs on #reserve[label]
+#stack[int, 64] ciSecDefer = 0;
+#stack[int, 64] ciSecLabOff = 0;
+#stack[int, 64] ciSecLabLen = 0;
+#stack[int, 64] ciSecCount = 0;
+// current sector context (source span of the sector name; len 0 = none).
+// Set while a sector body initializes, while a method body runs, and while
+// a free{} block replays -- it makes bare member names resolve qualified.
+#stack[int, 64] ciCurSecOff = 0;
+#stack[int, 64] ciCurSecLen = 0;
+// 1 only while a sector body initializes its members (decls bind qualified)
+#stack[int, 64] ciSecInit = 0;
+// section visibility inside a sector body: 0 private (DEFAULT), 1 public
+#stack[int, 64] ciSecVis = 0;
+// visibility applied to the next var/fn binding (1 everywhere but sectors)
+#stack[int, 64] ciBindVis = 1;
+// declared bit width applied to the next binding (64 = unchecked); a decl
+// like `#stack[int, 8] x` stores 8 here so ciVarSet can enforce the range
+#stack[int, 64] ciBindBits = 64;
+// per-var declared bit width column (default 64)
+#stack[int, 64] ciVBits = 0;
+// #req write-through: for each var row, the target global row + 1 that a
+// `#req[Global] alias;` binds to (0 = not a requisition alias). Writing the
+// alias also writes the target global, so setters like `#req[A] a; a = 100;`
+// mutate the real global. Cleared to 0 for every freshly-created row.
+#stack[int, 64] ciVReq = 0;
+// 1 while ciDoAssign binds: enables the bare-name->member write-through
+// fallback; 0 for declarations (#stack/#scanp/... always create locals)
+#stack[int, 64] ciSetMode = 0;
+// 32B scratch for building qualified "Sector::member" names; addressed via
+// the offset (ciQualBuf - ciSrc) so the name helpers work unchanged
+#stack[int, 64] ciQualBuf = 0;
+// per-var visibility column (1 public, 0 private; only checked on :: access)
+#stack[int, 64] ciVVis = 0;
+// per-fn sector backpointer (source span of the owning sector) + visibility
+#stack[int, 64] ciFnSecOff = 0;
+#stack[int, 64] ciFnSecLen = 0;
+#stack[int, 64] ciFnVis = 0;
+// registration context consumed by ciFnRegister (owning sector of the fn)
+#stack[int, 64] ciRegSecOff = 0;
+#stack[int, 64] ciRegSecLen = 0;
+
+// ---- L4 object state ----
+// object definition table: up to 8 defs. Source spans only -- the body is
+// the CONSTRUCTOR and is replayed per instantiation, never at declaration.
+#stack[int, 64] ciObjNameOff = 0;
+#stack[int, 64] ciObjNameLen = 0;
+// ctor param-list span (first token inside `<...>`; 0 = no params)
+#stack[int, 64] ciObjParS = 0;
+#stack[int, 64] ciObjBodyS = 0;
+#stack[int, 64] ciObjBodyE = 0;
+// source offset where the ctor's top-level statements END (= the first
+// label's ident, or the closing brace) -- the instantiation replay boundary
+#stack[int, 64] ciObjTopE = 0;
+#stack[int, 64] ciObjFreeS = 0;
+#stack[int, 64] ciObjFreeE = 0;
+#stack[int, 64] ciObjCount = 0;
+// label table: up to 24 labels across all object defs (overload sets =
+// several rows sharing objIdx+name, resolved by arg-type scoring)
+#stack[int, 64] ciLabObj = 0;
+#stack[int, 64] ciLabNameOff = 0;
+#stack[int, 64] ciLabNameLen = 0;
+// label param-list span (first token inside `<...>`; 0 = parameterless)
+#stack[int, 64] ciLabParS = 0;
+#stack[int, 64] ciLabBodyS = 0;
+#stack[int, 64] ciLabBodyE = 0;
+#stack[int, 64] ciLabCount = 0;
+// current instance context during ctor/label replay: instance record ptr
+// (0 = none) + owning object-def index
+#stack[int, 64] ciCurInst = 0;
+#stack[int, 64] ciCurObj = 0;
+#stack[int, 64] ciLastInst = 0;
+#stack[int, 64] ciLastObj = 0;
+// 1 while a ctor body runs (member decls write into the instance record)
+#stack[int, 64] ciObjInit = 0;
+// mirror: first mirror wins within one body replay (reset per call)
+#stack[int, 64] ciMirrored = 0;
+// ownership of the return value: 1 = a fresh owned string escaping the frame
+// (the caller adopts it), 0 = an int or a borrow
+#stack[int, 64] ciRetOwns = 0;
+// #include("name") capability modules exposed to interpreted programs as
+// sectors. Each flag is set by #include, reset to 0 at program start and by
+// #unload (the "always freed to not leak" discipline for native modules).
+// video -> gfx drawing, sound -> PC speaker, ini -> cssc.ini config.
+#stack[int, 64] ciModVideo = 0;
+#stack[int, 64] ciModSound = 0;
+#stack[int, 64] ciModIni = 0;
+// #include("stdio") -> plain file I/O on the CCFS (modid 14): exists /
+// createfile / read / write. The ini module layers on the same filesystem.
+#stack[int, 64] ciModStdio = 0;
+#stack[int, 64] ciModSys = 0;
+#stack[int, 64] ciModKey = 0;
+// stdlib modules: console (instance value tag 6, no modid), devdebug (modid 9),
+// stdgrace (modid 10), stdout companion, mouse (modid 11). Flags set on #include,
+// reset each run. value-tag 6 = console instance; value-tag 8 = mouse-client handle.
+#stack[int, 64] ciModConsole = 0;
+#stack[int, 64] ciModDev = 0;
+#stack[int, 64] ciModGrace = 0;
+#stack[int, 64] ciModStdout = 0;
+#stack[int, 64] ciModMouse = 0;
+// mouse button snapshot (low 3 bits: bit0 left,1 right,2 middle), written by
+// mouse::update(); prev/curr for down/up edge detection.
+#stack[int, 64] ciMsCurr = 0;
+#stack[int, 64] ciMsPrev = 0;
+// gfx sub-modules: video.sprite=5, video.tilemap=6, video.font=7 (#include flags).
+#stack[int, 64] ciModSprite = 0;
+#stack[int, 64] ciModTilemap = 0;
+#stack[int, 64] ciModFont = 0;
+// STATELESS native math modules: math.accel (modid 12; names math.accel/acc/ma) is
+// splitmix64/FNV noise (ma::fbm2 for worldgen); cssc.math (modid 13; names cssc.math/
+// math) is thin float-intrinsic delegation. Pure value methods, no handles. See
+// mvmod==12 / mvmod==13 in ciExpr and the ciMa* helper #defines before ciExpr.
+#stack[int, 64] ciModMathAccel = 0;
+#stack[int, 64] ciModCsscMath = 0;
+// BMP loader out-params: ciBmpLoad returns the RAW-ARGB buffer ptr, w/h come back here.
+#stack[int, 64] ciBmpW = 0;
+#stack[int, 64] ciBmpH = 0;
+// builtin 5x7 font blob (95 glyphs ASCII 32..126, 7 row-bytes packed per i64, byte
+// gy = (word>>(gy*8))&0xFF, MSB-first over low 5 bits: bit test 1<<(4-col)). Distinct
+// from the 8x8 ciFont. glyphsPtr for video.font::builtin (mode 0).
+#stack[int, 64] ciFont5 = 0;
+// present() records its scale + centering offset here so cssc::mouseX/mouseY can
+// map the framebuffer cursor (mouseX/mouseY) back into the backbuffer's own
+// coordinate space -- what a guest program draws and hit-tests buttons in.
+#stack[int, 64] ciVidScale = 1;
+#stack[int, 64] ciVidOffX = 0;
+#stack[int, 64] ciVidOffY = 0;
+// alias->module table (#include("video") vid; -> "vid" maps to modid 1). Key =
+// alias if given, else the module name (so unaliased video:: still resolves).
+// modids: 1=video 2=sound 3=keyboard 4=ini. Spans point into ciSrc (persistent).
+#stack[int, 64] ciAlOff = 0;      // alloc'd array[64] of alias name offsets
+#stack[int, 64] ciAlLen = 0;      // alloc'd array[64] of alias name lengths
+#stack[int, 64] ciAlMod = 0;      // alloc'd array[64] of modids
+#stack[int, 64] ciAlCount = 0;
+// module-call return channel (a ciModCall value method sets these; the ciExpr /
+// ciStmt dispatch reads them). type: 0=int 1=string; owns: 1=fresh string.
+#stack[int, 64] ciModRetVal = 0;
+#stack[int, 64] ciModRetType = 0;
+#stack[int, 64] ciModRetOwns = 0;
+// devdebug persistent stdout list (tag-4 vector, et=1 string), created lazily on
+// first devdebug/dev include, freed+recreated at program start. Newest at highest index.
+#stack[int, 64] ciDevStdout = 0;
+// fault channel (stdgrace): ciSignal value 7 = fault; ciFaultMsg holds the owned
+// '<Type>: <message>' guest string, ciFaultKind an int class id. Consumed+cleared by
+// grace::catch / #catch. Dormant today (the interp returns 0x0 rather than raising).
+#stack[int, 64] ciFaultMsg = 0;
+#stack[int, 64] ciFaultKind = 0;
+#stack[int, 64] ciFaultLine = 0;
+#stack[int, 64] ciSrcPath = 0;
+#stack[int, 64] ciSrcPathLen = 0;
+// 8x8 font table (96 glyphs * 8 row-bytes packed as one i64 each, 768 bytes).
+#stack[int, 64] ciFont = 0;
+// keyboard module state: curr/prev held arrays indexed by VK (256 bytes each);
+// name->VK table (records [len][vk][UPPER name...], end len 0); the interp's own
+// ring-drain tail + E0-prefix latch (independent of the shell's keyTail).
+#stack[int, 64] ciKbCurr = 0;
+#stack[int, 64] ciKbPrev = 0;
+// per-frame PRESS latch: set on a make scancode during update(), NOT cleared by
+// a break in the same update. So a key tapped AND released within one (slow)
+// interpreter frame is still seen -> isDown works at any frame rate. Without it,
+// a human keypress on a slow frame has its make+break both drained in one update
+// and the held-state snapshot shows 0 -> input feels dead.
+#stack[int, 64] ciKbEdge = 0;
+#stack[int, 64] ciKbNames = 0;
+#stack[int, 64] ciKbTail = 0;
+#stack[int, 64] ciKbExt = 0;
+// sound module state (inert): 32 slots {pathPtr@0 i64, aliasPtr@8 i64} = 16B
+// each; nextId + volume. new() returns a non-null handle sentinel.
+#stack[int, 64] ciSndSlots = 0;
+#stack[int, 64] ciSndNextId = 0;
+#stack[int, 64] ciSndVolume = 100;
+#stack[int, 64] ciSndHandle = 0;
+// ini module scratch: value-extraction buffer + length; rewrite output buffer.
+#stack[int, 64] ciIniVal = 0;
+#stack[int, 64] ciIniValLen = 0;
+#stack[int, 64] ciIniOut = 0;
+// #load runtime file loading: ciRun copies the program into ciSrcBuf (64KB
+// growable); #load appends other .cssc files' bytes and registers their
+// #defines with spans into it (valid for the whole run). ciMainEnd bounds the
+// top-level loop to the ORIGINAL program (loaded code is library, run once at
+// #load time). ciLoad* records each load's function range so #unload can
+// tombstone them.
+#stack[int, 64] ciSrcBuf = 0;
+#stack[int, 64] ciSrcUsed = 0;
+#stack[int, 64] ciMainEnd = 0;
+#stack[int, 64] ciLoadName = 0;
+#stack[int, 64] ciLoadFnS = 0;
+#stack[int, 64] ciLoadFnE = 0;
+#stack[int, 64] ciLoadCount = 0;
