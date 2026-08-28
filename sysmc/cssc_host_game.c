@@ -426,6 +426,59 @@ void cssc_video_free(void* p) {
  * windowed build gets it, even one that links no host_extras symbols. */
 static void cssc_watermark_play(void* p);
 
+#ifdef _WIN32
+/* Forward decls — the sprite loader/accessors are defined further down. */
+void* cssc_sprite_load(const char* path);
+void cssc_sprite_free(void* p);
+int64_t cssc_sprite_width(void* p);
+int64_t cssc_sprite_height(void* p);
+int64_t cssc_sprite_get_pixel(void* p, int64_t x, int64_t y);
+/* The UNIVERSAL default window icon: the CSSC logo. Loaded once from a PNG and
+ * applied to every CSSC window the moment it opens, so a plain windowed build
+ * carries the CSSC brand in the title bar / taskbar / Alt-Tab without any code.
+ * The gui:: module's cssc_gui_screen_seticon overrides this per-window when a
+ * program picks its own icon. Path: env CSSC_ICON, else C:/CSSC/assets. */
+static void cssc_video_apply_default_icon(HWND hwnd) {
+    if (!hwnd) return;
+    const char* path = getenv("CSSC_ICON");
+    char fallback[] = "C:/CSSC/assets/CSSC_icon.png";
+    if (!path || !path[0]) path = fallback;
+    void* spr = cssc_sprite_load(path);
+    if (!spr) return;
+    int w = (int)cssc_sprite_width(spr), h = (int)cssc_sprite_height(spr);
+    if (w <= 0 || h <= 0) { cssc_sprite_free(spr); return; }
+    BITMAPV5HEADER bi; ZeroMemory(&bi, sizeof(bi));
+    bi.bV5Size = sizeof(BITMAPV5HEADER);
+    bi.bV5Width = w; bi.bV5Height = -h; bi.bV5Planes = 1; bi.bV5BitCount = 32;
+    bi.bV5Compression = BI_BITFIELDS;
+    bi.bV5RedMask = 0x00FF0000; bi.bV5GreenMask = 0x0000FF00;
+    bi.bV5BlueMask = 0x000000FF; bi.bV5AlphaMask = 0xFF000000;
+    HDC hdc = GetDC(NULL);
+    void* bits = NULL;
+    HBITMAP color = CreateDIBSection(hdc, (BITMAPINFO*)&bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    ReleaseDC(NULL, hdc);
+    if (!color || !bits) { if (color) DeleteObject(color); cssc_sprite_free(spr); return; }
+    uint32_t* px = (uint32_t*)bits;
+    for (int yy = 0; yy < h; yy++)
+        for (int xx = 0; xx < w; xx++)
+            px[yy * w + xx] = (uint32_t)cssc_sprite_get_pixel(spr, xx, yy);
+    int mstride = ((w + 15) / 16) * 2;
+    unsigned char* mbits = (unsigned char*)calloc((size_t)mstride * h, 1);
+    HBITMAP mask = CreateBitmap(w, h, 1, 1, mbits);
+    if (mbits) free(mbits);
+    ICONINFO ii; ZeroMemory(&ii, sizeof(ii));
+    ii.fIcon = TRUE; ii.hbmColor = color; ii.hbmMask = mask;
+    HICON hIcon = CreateIconIndirect(&ii);
+    DeleteObject(color); DeleteObject(mask);
+    cssc_sprite_free(spr);
+    if (hIcon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+        SetClassLongPtrW(hwnd, GCLP_HICON, (LONG_PTR)hIcon);
+    }
+}
+#endif
+
 void cssc_video_begin(void* p) {
     cssc_video_t* v = (cssc_video_t*)p;
     if (!v) return;
@@ -455,6 +508,7 @@ void cssc_video_begin(void* p) {
                               NULL, NULL, hinst, NULL);
     if (!v->hwnd) { v->is_open = 0; return; }
     SetWindowLongPtrW(v->hwnd, GWLP_USERDATA, (LONG_PTR)v);
+    cssc_video_apply_default_icon(v->hwnd);
     v->hdc = GetDC(v->hwnd);
     ShowWindow(v->hwnd, SW_SHOW);
     UpdateWindow(v->hwnd);
