@@ -100,6 +100,7 @@
     #req[ciVarSet] ciVarSet;
     #req[ciVecNew] ciVecNew;
     #req[ciVecPush] ciVecPush;
+    #req[ciVecPushRef] ciVecPushRef;
     #req[ciVecSet] ciVecSet;
     #req[ciVecClear] ciVecClear;
     #req[ciVecPop] ciVecPop;
@@ -3312,12 +3313,16 @@
                     #stack[int, 64] vg0 = 0;
                     #stack[int, 64] vg0T = 0;
                     #stack[int, 64] vg0O = 0;
+                    #stack[int, 64] vRefNO = 0;
+                    #stack[int, 64] vRefNL = 0;
+                    #stack[int, 32] vRefCand = 0;
                     #stack[int, 64] vg1 = 0;
                     #stack[int, 64] vg1T = 0;
                     #stack[int, 64] vg1O = 0;
                     if (ciCur == 9) {
                         ciAdvance();
                         if (ciCur != 10) {
+                            if (ciCur == 2) { vRefNO = ciTokOff; vRefNL = ciTokLen; vRefCand = 1; }
                             ciExpr(0) ve0;
                             vg0 = ve0;
                             vg0T = ciEvalType;
@@ -3339,8 +3344,27 @@
                         ciIdentIs(vmo, vml, "push_back") vmpb;
                         ciIdentIs(vmo, vml, "set") vms;
                         ciIdentIs(vmo, vml, "clear") vmc;
-                        if (vmp == 1) { ciVecPush(vh, vg0, vg0T); }
-                        if (vmpb == 1) { ciVecPush(vh, vg0, vg0T); }
+                        #stack[int, 32] vEndPush = 0;
+                        if (vmp == 1) { vEndPush = 1; }
+                        if (vmpb == 1) { vEndPush = 1; }
+                        if (vEndPush == 1) {
+                            #stack[int, 32] vDidRef = 0;
+                            if (vRefCand == 1) { if (vg0O == 0) {
+                                #stack[int, 32] vPrim = 0;
+                                if (vg0T == 0) { vPrim = 1; }
+                                if (vg0T == 2) { vPrim = 1; }
+                                if (vg0T == 9) { vPrim = 1; }
+                                if (vPrim == 1) {
+                                    ciVarFind(vRefNO, vRefNL) vFi;
+                                    if (vFi >= 0) { ciVecPushRef(vh, vRefNO, vRefNL); vDidRef = 1; }
+                                    #delete[vFi];
+                                }
+                                #delete[vPrim];
+                            } }
+                            if (vDidRef == 0) { ciVecPush(vh, vg0, vg0T); }
+                            #delete[vDidRef];
+                        }
+                        #delete[vEndPush];
                         if (vms == 1) { ciVecSet(vh, vg0, vg1); }
                         if (vmc == 1) { ciVecClear(vh); }
                         // in-place mutators (void). push_front/emplace_front insert
@@ -3466,6 +3490,9 @@
                     #delete[vg0];
                     #delete[vg0T];
                     #delete[vg0O];
+                    #delete[vRefNO];
+                    #delete[vRefNL];
+                    #delete[vRefCand];
                     #delete[vg1];
                     #delete[vg1T];
                     #delete[vg1O];

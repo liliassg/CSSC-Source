@@ -132,11 +132,34 @@
 #stack[int, 64] txInstLen = 0;
 #stack[int, 64] txInstObj = 0;
 #stack[int, 64] txInstCount = 0;
+// gui:: handle table: a result-captured `g::Screen(...) screen;` records the var
+// name -> its widget kind (1=Screen) so `screen->method(...)` dispatches to the
+// right gui rtsym. Parallel to txInst* but for opaque gui runtime handles.
+#stack[int, 64] txGuiOff = 0;
+#stack[int, 64] txGuiLen = 0;
+#stack[int, 64] txGuiKind = 0;      // 1=Screen (widget kind)
+#stack[int, 64] txGuiCount = 0;
+// `#matrix[w,h] m;` pixel-array registry: name -> its handle slot id, so
+// `m.set/.get/...` dispatches to inline poke32/peek32 index math.
+#stack[int, 64] txMatOff = 0;
+#stack[int, 64] txMatLen = 0;
+#stack[int, 64] txMatSlot = 0;
+#stack[int, 64] txMatCount = 0;
 #stack[int, 64] txCallThis = 0;     // block-ptr SSA to prepend as arg0 of the NEXT
                                     // user call (ctor / label / free -> "this"); -1 = none
 #stack[int, 64] txCurObj = 0;       // object whose body is being lowered (-1 = none)
 #stack[int, 64] txIsoBad = 0;       // 1 = a #define-body called an un-#req'd sibling
                                     // (isolation violation) -> reject: emit no container
+#stack[int, 64] txIntrinBad = 0;    // 1 = a `cssc::` builtin the lowering does not
+                                   // implement was called. It MUST reject rather than
+                                   // fall through to the unknown-call path, which
+                                   // yields a typed ZERO: cssc::fAdd(1.5,2.5) compiled
+                                   // to 0.0 with no diagnostic. A wrong answer that
+                                   // links and boots is worse than any compile error.
+#stack[int, 64] txIntrinBadOff = 0; // callee span of the first such call, for the message
+#stack[int, 64] txIntrinBadLen = 0;
+#stack[int, 64] txBitBad = 0;       // 1 = a CONSTANT int decl/assign overflows its
+                                    // declared bit width -> COMPILE-TIME reject (no container)
 #stack[int, 64] txObjNode = 0;      // per-object: its OBJECT AST node (lower via registry)
 #stack[int, 64] txObjSec = 0;       // per-object: owning sector id (-1 = top level)
 
@@ -232,8 +255,20 @@
     #req[txInstLen] txInstLen;
     #req[txInstObj] txInstObj;
     #req[txInstCount] txInstCount;
+    #req[txGuiOff] txGuiOff;
+    #req[txGuiLen] txGuiLen;
+    #req[txGuiKind] txGuiKind;
+    #req[txGuiCount] txGuiCount;
+    #req[txMatOff] txMatOff;
+    #req[txMatLen] txMatLen;
+    #req[txMatSlot] txMatSlot;
+    #req[txMatCount] txMatCount;
     #req[txCurObj] txCurObj;
     #req[txIsoBad] txIsoBad;
+    #req[txBitBad] txBitBad;
+    #req[txIntrinBad] txIntrinBad;
+    #req[txIntrinBadOff] txIntrinBadOff;
+    #req[txIntrinBadLen] txIntrinBadLen;
     #req[txObjNode] txObjNode;
     #req[txObjSec] txObjSec;
     #req[txSecNameOff] txSecNameOff;
@@ -299,6 +334,14 @@
     txInstLen = cssc::alloc(8192 * 8);
     txInstObj = cssc::alloc(8192 * 8);
     txInstCount = 0;
+    txGuiOff = cssc::alloc(8192 * 8);
+    txGuiLen = cssc::alloc(8192 * 8);
+    txGuiKind = cssc::alloc(8192 * 8);
+    txGuiCount = 0;
+    txMatOff = cssc::alloc(8192 * 8);
+    txMatLen = cssc::alloc(8192 * 8);
+    txMatSlot = cssc::alloc(8192 * 8);
+    txMatCount = 0;
     txCurObj = 0 - 1;
     txCallThis = 0 - 1;
     txObjNode = cssc::alloc(1024 * 8);
@@ -335,7 +378,11 @@
     txCurSector = 0 - 1;
     txCurSecCtor = 0;
     txIsoBad = 0;
-    txSymCap = 16384;
+    txBitBad = 0;
+    txIntrinBad = 0;
+    txIntrinBadOff = 0;
+    txIntrinBadLen = 0;
+    txSymCap = 65536;
     txSymOff = cssc::alloc(txSymCap * 8);
     txSymLen = cssc::alloc(txSymCap * 8);
     txSymSlot = cssc::alloc(txSymCap * 8);
@@ -583,8 +630,11 @@
     #req[txSymLen] txSymLen;
     #req[txSymSlot] txSymSlot;
     #req[txSymCount] txSymCount;
+    #req[txSymCap] txSymCap;
+    #req[txCapBad] txCapBadS;
     #stack[int, 64] i = txSymCount;
-    txSymCount = txSymCount + 1;
+    if (i >= txSymCap) { i = txSymCap - 1; txCapBadS = 1; }   // OVERFLOW -> flag + clamp
+    if (i == txSymCount) { txSymCount = txSymCount + 1; }
     cssc::poke64(txSymOff + i * 8, off);
     cssc::poke64(txSymLen + i * 8, len);
     cssc::poke64(txSymSlot + i * 8, slot);
@@ -751,6 +801,7 @@
     #req[txIsMap] txIsMap;
     #req[txIsVec] txIsVec;
     #req[txCirCallR] txCirCallR;
+    #req[txCirCall3R] txCirCall3R;
     #req[txSetStr] txSetStr;
     #req[txIsFloat] txIsFloat;
     #req[txCirFCall] txCirFCall;
@@ -776,6 +827,7 @@
     #req[txCirGlobAddr] txCirGlobAddr;
     #req[txCirSlotAlive] txCirSlotAlive;
     #req[txCirGlobAlive] txCirGlobAlive;
+    #req[txSVarGlob] txSVarGlob;
     #req[txNewLabel] txNewLabel;
     #req[txCirBrz] txCirBrz;
     #req[txCirBr] txCirBr;
@@ -805,9 +857,12 @@
             if (argKind == 4) {                            // string literal -> print_str
                 #stack[int, 64] soff = cssc::peek64(txAstOff + firstArg * 8);
                 #stack[int, 64] slen = cssc::peek64(txAstLen + firstArg * 8);
+                #req[txStrEsc] txStrEscO;
                 txCirConstStr(soff, slen) sid;
-                txCirConstInt(slen) lid;
+                txStrEscO(soff, slen, 0) plen;             // escape-processed length
+                txCirConstInt(plen) lid;
                 txCirCall(1, sid, lid);
+                #delete[plen];
                 #delete[sid];
                 #delete[lid];
                 #delete[soff];
@@ -833,9 +888,25 @@
                         if (pGi >= 0) { txCirGlobAlive(pGi) gav; aliveId = gav; pBound = 1; #delete[gav]; }
                         #delete[pGi];
                     }
+                    // Inside a sector, a bare name that is a sibling MEMBER var is
+                    // BOUND (the interpreter makes members directly visible in a
+                    // member body -- `#define(f){ outln(x) }`). Mark it bound with
+                    // its member-global alive cell so outln prints the value, not
+                    // 0x0. Cases: m11_bare, sector_function, sector_private_member.
+                    if (pBound == 0) { if (txCurSector >= 0) {
+                        #req[txSVarFind] txSVarFind;
+                        txSVarFind(txCurSector, nOffP, nLenP) pSmv;
+                        if (pSmv >= 0) {
+                            #stack[int, 64] pSg = cssc::peek64(txSVarGlob + pSmv * 8);
+                            txCirGlobAlive(pSg) pSav; aliveId = pSav; pBound = 1;
+                            #delete[pSav];
+                            #delete[pSg];
+                        }
+                        #delete[pSmv];
+                    } }
                     // Inside a sector, a BARE (unqualified) name that is neither a
-                    // local nor a member/#req alias is UNBOUND -> print 0x0, not 0
-                    // (S3/S9). A `Sector::member` read (`::`) is bound; leave it.
+                    // local, a member, nor a #req alias is UNBOUND -> print 0x0,
+                    // not 0 (S3/S9). A `Sector::member` read (`::`) is bound; leave.
                     if (pBound == 0) { if (txCurSector >= 0) {
                         txNsColon(nOffP, nLenP) pns;
                         if (pns < 0) { txCirConstInt(0) az; aliveId = az; #delete[az]; }
@@ -869,6 +940,36 @@
                     txNewLabel() el2; endL2 = el2; #delete[el2];
                     txCirBrz(aliveId, nullL);              // alive == 0 -> print 0x0
                 }
+                // Container VALUE -> stringify `{...}` first (a vector or map
+                // prints its elements, not its raw pointer). cssc_vec_to_str /
+                // cssc_map_to_str build the interpreter-identical repr; the
+                // result is a normal string printed via print_string.
+                txIsVec(vid) isVecO;
+                txIsMap(vid) isMapO;
+                #stack[int, 32] contO = 0;
+                if (isVecO == 1) {
+                    #req[txGetElem] txGetElemVO;
+                    txGetElemVO(vid) veoK;
+                    txCirConstInt(veoK) veoC;
+                    txCirCallR(4107, vid, veoC) vstrO;
+                    txCirCall(7, vstrO, 0 - 1);
+                    contO = 1;
+                    #delete[vstrO];
+                    #delete[veoC];
+                    #delete[veoK];
+                }
+                if (isMapO == 1) {
+                    #req[txGetElem] txGetElemMO;
+                    txGetElemMO(vid) meoK;
+                    txCirConstInt(meoK) meoC;
+                    txCirCallR(4108, vid, meoC) mstrO;
+                    txCirCall(7, mstrO, 0 - 1);
+                    contO = 1;
+                    #delete[mstrO];
+                    #delete[meoC];
+                    #delete[meoK];
+                }
+                if (contO == 0) {
                 txIsStr(vid) iss;
                 txIsBool(vid) isb;
                 txIsFloat(vid) isf;
@@ -880,6 +981,13 @@
                         if (isb == 0) { txCirCall(0, vid, 0 - 1); }   // print_int
                     }
                 }
+                #delete[isf];
+                #delete[isb];
+                #delete[iss];
+                }
+                #delete[contO];
+                #delete[isMapO];
+                #delete[isVecO];
                 if (aliveId >= 0) {
                     txCirBr(endL2);
                     txCirLabel(nullL);
@@ -889,9 +997,6 @@
                 #delete[endL2];
                 #delete[nullL];
                 #delete[aliveId];
-                #delete[isf];
-                #delete[isb];
-                #delete[iss];
                 #delete[vid];
             }
             #delete[argKind];
@@ -969,6 +1074,87 @@
         txSpanIs(calleeOff, calleeLen, "cssc::alloc") isAlloc;
         if (isAlloc == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirCallR(5, a, 0 - 1) v; out = v; #delete[v]; #delete[a]; } }
         #delete[isAlloc];
+        // cssc::chr(n) -> a one-byte string (rtsym 110); cssc::ord(s) -> the byte
+        // value of s's first byte (rtsym 111). The int<->byte primitive pair for
+        // building/parsing binary buffers from pure CSSC.
+        txSpanIs(calleeOff, calleeLen, "cssc::chr") isChr;
+        if (isChr == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirCallR(110, a, 0 - 1) v; txSetStr(v); txSetOwned(v); out = v; #delete[v]; #delete[a]; } }
+        #delete[isChr];
+        txSpanIs(calleeOff, calleeLen, "cssc::ord") isOrd;
+        if (isOrd == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirCallR(111, a, 0 - 1) v; out = v; #delete[v]; #delete[a]; } }
+        #delete[isOrd];
+        // cssc:: arithmetic basics: add/sub/mul/div/mod. int op int stays int
+        // (BINOP: 1+ 2- 3* 4/idiv 5%imod); a float operand promotes to float
+        // (FBINOP; mod composes x - trunc(x/y)*y).
+        #req[txCirBinOp] txCirBinOpA;
+        #req[txCirFloatToInt] txCirFloatToIntA;
+        #req[txIsFloat] txIsFloatA;
+        #stack[int, 64] arOpc = 0;
+        txSpanIs(calleeOff, calleeLen, "cssc::add") isAddA; if (isAddA == 1) { arOpc = 1; } #delete[isAddA];
+        txSpanIs(calleeOff, calleeLen, "cssc::sub") isSubA; if (isSubA == 1) { arOpc = 2; } #delete[isSubA];
+        txSpanIs(calleeOff, calleeLen, "cssc::mul") isMulA; if (isMulA == 1) { arOpc = 3; } #delete[isMulA];
+        txSpanIs(calleeOff, calleeLen, "cssc::div") isDivA; if (isDivA == 1) { arOpc = 4; } #delete[isDivA];
+        txSpanIs(calleeOff, calleeLen, "cssc::mod") isModA; if (isModA == 1) { arOpc = 5; } #delete[isModA];
+        if (arOpc > 0) {
+            handled = 1;
+            if (arg2 != 0) {
+                txLowerExpr(firstArg) la;
+                txLowerExpr(arg2) rb;
+                txIsFloatA(la) lf;
+                txIsFloatA(rb) rf;
+                #stack[int, 32] fl = 0;
+                if (lf == 1) { fl = 1; }
+                if (rf == 1) { fl = 1; }
+                if (fl == 1) {
+                    #stack[int, 64] fa = la;
+                    #stack[int, 64] fb = rb;
+                    if (lf == 0) { txCirIntToFloat(la) lp; fa = lp; #delete[lp]; }
+                    if (rf == 0) { txCirIntToFloat(rb) rp; fb = rp; #delete[rp]; }
+                    if (arOpc == 5) {
+                        txCirFBinOp(4, fa, fb) q;      // x/y
+                        txCirFloatToIntA(q) qi;
+                        txCirIntToFloat(qi) qt;        // trunc(x/y)
+                        txCirFBinOp(3, qt, fb) qm;     // trunc*y
+                        txCirFBinOp(2, fa, qm) r;      // x - trunc*y
+                        txSetFloat(r); out = r;
+                        #delete[r]; #delete[qm]; #delete[qt]; #delete[qi]; #delete[q];
+                    }
+                    if (arOpc != 5) {
+                        txCirFBinOp(arOpc, fa, fb) r;
+                        txSetFloat(r); out = r;
+                        #delete[r];
+                    }
+                    #delete[fb]; #delete[fa];
+                }
+                if (fl == 0) {
+                    txCirBinOpA(arOpc, la, rb) r;      // integer BINOP
+                    out = r;
+                    #delete[r];
+                }
+                #delete[rf]; #delete[lf]; #delete[rb]; #delete[la];
+            }
+        }
+        #delete[arOpc];
+        // cssc:: bitwise basics: xor/bxor/xnor/nand/nor/bnot (band/bor/shl/shr
+        // are handled above). xnor/nand/nor compose a xor/and/or with bnot.
+        txSpanIs(calleeOff, calleeLen, "cssc::xor") isXorB;
+        txSpanIs(calleeOff, calleeLen, "cssc::bxor") isBxorB;
+        if (isXorB == 1) { handled = 1; if (arg2 != 0) { txLowerExpr(firstArg) a; txLowerExpr(arg2) b; txCirBitBin(41, a, b) v; out = v; #delete[v]; #delete[b]; #delete[a]; } }
+        if (isBxorB == 1) { handled = 1; if (arg2 != 0) { txLowerExpr(firstArg) a; txLowerExpr(arg2) b; txCirBitBin(41, a, b) v; out = v; #delete[v]; #delete[b]; #delete[a]; } }
+        #delete[isBxorB];
+        #delete[isXorB];
+        txSpanIs(calleeOff, calleeLen, "cssc::xnor") isXnorB;
+        if (isXnorB == 1) { handled = 1; if (arg2 != 0) { txLowerExpr(firstArg) a; txLowerExpr(arg2) b; txCirBitBin(41, a, b) x; txCirBitBin(42, x, 0 - 1) v; out = v; #delete[v]; #delete[x]; #delete[b]; #delete[a]; } }
+        #delete[isXnorB];
+        txSpanIs(calleeOff, calleeLen, "cssc::nand") isNandB;
+        if (isNandB == 1) { handled = 1; if (arg2 != 0) { txLowerExpr(firstArg) a; txLowerExpr(arg2) b; txCirBitBin(29, a, b) x; txCirBitBin(42, x, 0 - 1) v; out = v; #delete[v]; #delete[x]; #delete[b]; #delete[a]; } }
+        #delete[isNandB];
+        txSpanIs(calleeOff, calleeLen, "cssc::nor") isNorB;
+        if (isNorB == 1) { handled = 1; if (arg2 != 0) { txLowerExpr(firstArg) a; txLowerExpr(arg2) b; txCirBitBin(30, a, b) x; txCirBitBin(42, x, 0 - 1) v; out = v; #delete[v]; #delete[x]; #delete[b]; #delete[a]; } }
+        #delete[isNorB];
+        txSpanIs(calleeOff, calleeLen, "cssc::bnot") isBnotB;
+        if (isBnotB == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirBitBin(42, a, 0 - 1) v; out = v; #delete[v]; #delete[a]; } }
+        #delete[isBnotB];
         // host + output + float intrinsics: hostRead=rt42, free=rt43, printRaw=rt44,
         // memfill32=rt45, strToF=rt46 (added to cssc_rt_host.c); out=rt6; iToF=ITOF;
         // fDiv=FBINOP(/). These complete the surface the compiler is written in.
@@ -979,7 +1165,58 @@
         #stack[int, 64] arg3 = 0;
         if (arg2 != 0) { arg3 = cssc::peek64(txAstNext + arg2 * 8); }
         txSpanIs(calleeOff, calleeLen, "cssc::out") isOut;
-        if (isOut == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirCallI(6, a, 0 - 1); #delete[a]; } }
+        if (isOut == 1) { handled = 1; if (firstArg != 0) {
+            // `cssc::out` = `outln` WITHOUT the trailing newline -> must
+            // type-dispatch exactly like outln (string→2, float→21 XMM0,
+            // bool→10, int→6), not blindly print the value as an int (which
+            // printed a string's POINTER). Mirrors the outln value dispatch.
+            txLowerExpr(firstArg) a;
+            txIsVec(a) oIsVec;
+            txIsMap(a) oIsMap;
+            #stack[int, 32] oCont = 0;
+            if (oIsVec == 1) {
+                #req[txGetElem] txGetElemVX;
+                txGetElemVX(a) vxK;
+                txCirConstInt(vxK) vxC;
+                txCirCallR(4107, a, vxC) vxStr;
+                txCirCall(2, vxStr, 0 - 1);                // out_string (no newline)
+                oCont = 1;
+                #delete[vxStr];
+                #delete[vxC];
+                #delete[vxK];
+            }
+            if (oIsMap == 1) {
+                #req[txGetElem] txGetElemMX;
+                txGetElemMX(a) mxK;
+                txCirConstInt(mxK) mxC;
+                txCirCallR(4108, a, mxC) mxStr;
+                txCirCall(2, mxStr, 0 - 1);
+                oCont = 1;
+                #delete[mxStr];
+                #delete[mxC];
+                #delete[mxK];
+            }
+            if (oCont == 0) {
+            txIsStr(a) oiss;
+            txIsFloat(a) oisf;
+            txIsBool(a) oisb;
+            if (oiss == 1) { txCirCall(2, a, 0 - 1); }
+            if (oiss == 0) {
+                if (oisf == 1) { txCirFCall(21, a); }
+                if (oisf == 0) {
+                    if (oisb == 1) { txCirCall(10, a, 0 - 1); }
+                    if (oisb == 0) { txCirCall(6, a, 0 - 1); }
+                }
+            }
+            #delete[oisb];
+            #delete[oisf];
+            #delete[oiss];
+            }
+            #delete[oCont];
+            #delete[oIsMap];
+            #delete[oIsVec];
+            #delete[a];
+        } }
         #delete[isOut];
         txSpanIs(calleeOff, calleeLen, "cssc::dbg") isDbg;   // stderr trace (rt47), self-host debugging
         if (isDbg == 1) { handled = 1; if (firstArg != 0) { txLowerExpr(firstArg) a; txCirCallI(47, a, 0 - 1); #delete[a]; } }
@@ -1045,6 +1282,44 @@
                 txSpanIs(mmOff, mmLen, "pow") mq9; if (mq9 == 1) { mid = 66; arity = 2; } #delete[mq9];
                 txSpanIs(mmOff, mmLen, "min") mq10; if (mq10 == 1) { mid = 67; arity = 2; } #delete[mq10];
                 txSpanIs(mmOff, mmLen, "max") mq11; if (mq11 == 1) { mid = 68; arity = 2; } #delete[mq11];
+                // Deterministic seeded RNG: integer args (NOT float-promoted).
+                // random(seed) -> float bits (rtsym 108); randomint(seed,lo,hi)
+                // -> int (rtsym 109). Handled here; mid stays -1 so the generic
+                // float-promoting dispatch below is skipped for them.
+                txSpanIs(mmOff, mmLen, "random") mqR;
+                if (mqR == 1) {
+                    handled = 1;
+                    if (firstArg != 0) {
+                        txLowerExpr(firstArg) sv;
+                        txCirCallR(108, sv, 0 - 1) v;
+                        txSetFloat(v);
+                        out = v;
+                        #delete[v];
+                        #delete[sv];
+                    }
+                }
+                #delete[mqR];
+                txSpanIs(mmOff, mmLen, "randomint") mqRi;
+                if (mqRi == 1) {
+                    handled = 1;
+                    if (firstArg != 0) {
+                        #stack[int, 64] a2r = cssc::peek64(txAstNext + firstArg * 8);
+                        #stack[int, 64] a3r = 0;
+                        if (a2r != 0) { a3r = cssc::peek64(txAstNext + a2r * 8); }
+                        txLowerExpr(firstArg) sv;
+                        txLowerExpr(a2r) lv;
+                        txLowerExpr(a3r) hv;
+                        txCirCall3R(109, sv, lv, hv) v;
+                        out = v;
+                        #delete[v];
+                        #delete[hv];
+                        #delete[lv];
+                        #delete[sv];
+                        #delete[a3r];
+                        #delete[a2r];
+                    }
+                }
+                #delete[mqRi];
                 if (mid >= 0) {
                     handled = 1;
                     if (firstArg != 0) {
@@ -1130,6 +1405,9 @@
                 txSpanIs(smOff, smLen, "move") si7; if (si7 == 1) { srid = 80; sArity = 2; } #delete[si7];
                 txSpanIs(smOff, smLen, "cwd") si8; if (si8 == 1) { srid = 81; sArity = 0; sStr = 1; } #delete[si8];
                 txSpanIs(smOff, smLen, "listdir") si9; if (si9 == 1) { srid = 82; sStr = 1; } #delete[si9];
+                txSpanIs(smOff, smLen, "sizeof") si10; if (si10 == 1) { srid = 4097; } #delete[si10];
+                txSpanIs(smOff, smLen, "absolute") si11; if (si11 == 1) { srid = 4098; sStr = 1; } #delete[si11];
+                txSpanIs(smOff, smLen, "setcwd") si12; if (si12 == 1) { srid = 4099; } #delete[si12];
                 if (srid >= 0) {
                     handled = 1;
                     if (sArity == 0) {                     // io::cwd()
@@ -1169,6 +1447,166 @@
                 #delete[srid];
                 #delete[smLen];
                 #delete[smOff];
+            }
+            if (isMathA == 9) {                            // kind 9 = sys (process args)
+                #req[txSetStr] txSetStrQ;
+                #req[txSetOwned] txSetOwnedQ;
+                #req[txSetFloat] txSetFloatQ;
+                #req[txSetBool] txSetBoolQ;
+                #stack[int, 64] qmOff = calleeOff + mcp + 2;
+                #stack[int, 64] qmLen = calleeLen - mcp - 2;
+                #stack[int, 64] qrid = 0 - 1;              // rtsym id, -1 = unknown fn
+                #stack[int, 32] qArity = 1;                // index-taking by default
+                #stack[int, 32] qRet = 0;                  // 0=int 1=string 2=float 3=bool
+                txSpanIs(qmOff, qmLen, "argc") qi0; if (qi0 == 1) { qrid = 4100; qArity = 0; } #delete[qi0];
+                txSpanIs(qmOff, qmLen, "arg") qi1; if (qi1 == 1) { qrid = 4101; qRet = 1; } #delete[qi1];
+                txSpanIs(qmOff, qmLen, "has_arg") qi2; if (qi2 == 1) { qrid = 4102; qRet = 3; } #delete[qi2];
+                txSpanIs(qmOff, qmLen, "arg_int") qi3; if (qi3 == 1) { qrid = 4103; } #delete[qi3];
+                txSpanIs(qmOff, qmLen, "arg_float") qi4; if (qi4 == 1) { qrid = 4104; qRet = 2; } #delete[qi4];
+                txSpanIs(qmOff, qmLen, "arg_bool") qi5; if (qi5 == 1) { qrid = 4105; qRet = 3; } #delete[qi5];
+                if (qrid >= 0) {
+                    handled = 1;
+                    if (qArity == 0) {                     // sys::argc()
+                        txCirCallR(qrid, 0 - 1, 0 - 1) qv;
+                        out = qv;
+                        #delete[qv];
+                    }
+                    if (qArity == 1) {                     // sys::arg/has_arg/arg_int/...(index)
+                        if (firstArg != 0) {
+                            txLowerExpr(firstArg) qa0;
+                            txCirCallR(qrid, qa0, 0 - 1) qv;
+                            if (qRet == 1) { txSetStrQ(qv); txSetOwnedQ(qv); }
+                            if (qRet == 2) { txSetFloatQ(qv); }
+                            if (qRet == 3) { txSetBoolQ(qv); }
+                            out = qv;
+                            #delete[qv];
+                            #delete[qa0];
+                        }
+                    }
+                }
+                #delete[qRet];
+                #delete[qArity];
+                #delete[qrid];
+                #delete[qmLen];
+                #delete[qmOff];
+            }
+            if (isMathA == 10) {                           // kind 10 = env (process env vars)
+                #req[txSetStr] txSetStrE;
+                #req[txSetOwned] txSetOwnedE;
+                #req[txSetBool] txSetBoolE;
+                #stack[int, 64] emOff = calleeOff + mcp + 2;
+                #stack[int, 64] emLen = calleeLen - mcp - 2;
+                #stack[int, 64] erid = 0 - 1;              // rtsym id
+                #stack[int, 32] eArgs = 1;                 // arg count expected
+                #stack[int, 32] eRet = 0;                  // 0=int 1=string 3=bool
+                txSpanIs(emOff, emLen, "get") ei0; if (ei0 == 1) { erid = 4109; eRet = 1; } #delete[ei0];
+                txSpanIs(emOff, emLen, "get_or_default") ei1; if (ei1 == 1) { erid = 4110; eArgs = 2; eRet = 1; } #delete[ei1];
+                txSpanIs(emOff, emLen, "set") ei2; if (ei2 == 1) { erid = 4111; eArgs = 2; eRet = 3; } #delete[ei2];
+                txSpanIs(emOff, emLen, "has") ei3; if (ei3 == 1) { erid = 4112; eRet = 3; } #delete[ei3];
+                txSpanIs(emOff, emLen, "delete") ei4; if (ei4 == 1) { erid = 4113; eRet = 3; } #delete[ei4];
+                txSpanIs(emOff, emLen, "count") ei5; if (ei5 == 1) { erid = 4114; eArgs = 0; } #delete[ei5];
+                txSpanIs(emOff, emLen, "get_int") ei6; if (ei6 == 1) { erid = 4115; } #delete[ei6];
+                txSpanIs(emOff, emLen, "get_bool") ei7; if (ei7 == 1) { erid = 4116; eRet = 3; } #delete[ei7];
+                // env::get(name, default) -> 2-arg form uses rtsym 4110
+                if (erid == 4109) {
+                    if (firstArg != 0) {
+                        #stack[int, 64] eSecond = cssc::peek64(txAstNext + firstArg * 8);
+                        if (eSecond != 0) { erid = 4110; eArgs = 2; }
+                        #delete[eSecond];
+                    }
+                }
+                if (erid >= 0) {
+                    handled = 1;
+                    if (eArgs == 0) {                      // env::count()
+                        txCirCallR(erid, 0 - 1, 0 - 1) ev;
+                        out = ev;
+                        #delete[ev];
+                    }
+                    if (eArgs == 1) {                      // env::get/has/delete/get_int/get_bool(name)
+                        if (firstArg != 0) {
+                            txLowerExpr(firstArg) ea0;
+                            txCirCallR(erid, ea0, 0 - 1) ev;
+                            if (eRet == 1) { txSetStrE(ev); txSetOwnedE(ev); }
+                            if (eRet == 3) { txSetBoolE(ev); }
+                            out = ev;
+                            #delete[ev];
+                            #delete[ea0];
+                        }
+                    }
+                    if (eArgs == 2) {                      // env::get(name,def) / set(name,val)
+                        if (firstArg != 0) {
+                            #stack[int, 64] eArg2 = cssc::peek64(txAstNext + firstArg * 8);
+                            if (eArg2 != 0) {
+                                txLowerExpr(firstArg) ea0;
+                                txLowerExpr(eArg2) eb0;
+                                txCirCallR(erid, ea0, eb0) ev;
+                                if (eRet == 1) { txSetStrE(ev); txSetOwnedE(ev); }
+                                if (eRet == 3) { txSetBoolE(ev); }
+                                out = ev;
+                                #delete[ev];
+                                #delete[eb0];
+                                #delete[ea0];
+                            }
+                            #delete[eArg2];
+                        }
+                    }
+                }
+                #delete[eRet];
+                #delete[eArgs];
+                #delete[erid];
+                #delete[emLen];
+                #delete[emOff];
+            }
+            if (isMathA == 8) {                            // kind 8 = video (handle-arg methods)
+                #req[txCirCallRtN] txCirCallRtNV;
+                #req[txCallArg] txCallArgV;
+                #req[txCallArgCount] txCallArgCountV;
+                #stack[int, 64] vmOff = calleeOff + mcp + 2;
+                #stack[int, 64] vmLen = calleeLen - mcp - 2;
+                #stack[int, 64] vrid = 0 - 1;              // rtsym id, -1 = unknown
+                #stack[int, 32] vret = 0;                  // 1 = returns int
+                txSpanIs(vmOff, vmLen, "clear") vc0; if (vc0 == 1) { vrid = 501; } #delete[vc0];
+                txSpanIs(vmOff, vmLen, "setPixel") vc1; if (vc1 == 1) { vrid = 502; } #delete[vc1];
+                txSpanIs(vmOff, vmLen, "setpixel") vc1b; if (vc1b == 1) { vrid = 502; } #delete[vc1b];
+                txSpanIs(vmOff, vmLen, "getPixel") vc2; if (vc2 == 1) { vrid = 503; vret = 1; } #delete[vc2];
+                txSpanIs(vmOff, vmLen, "getpixel") vc2b; if (vc2b == 1) { vrid = 503; vret = 1; } #delete[vc2b];
+                txSpanIs(vmOff, vmLen, "fillRect") vc3; if (vc3 == 1) { vrid = 504; } #delete[vc3];
+                txSpanIs(vmOff, vmLen, "fillrect") vc3b; if (vc3b == 1) { vrid = 504; } #delete[vc3b];
+                txSpanIs(vmOff, vmLen, "drawRect") vc4; if (vc4 == 1) { vrid = 505; } #delete[vc4];
+                txSpanIs(vmOff, vmLen, "drawrect") vc4b; if (vc4b == 1) { vrid = 505; } #delete[vc4b];
+                txSpanIs(vmOff, vmLen, "drawText") vc5; if (vc5 == 1) { vrid = 506; } #delete[vc5];
+                txSpanIs(vmOff, vmLen, "drawtext") vc5b; if (vc5b == 1) { vrid = 506; } #delete[vc5b];
+                txSpanIs(vmOff, vmLen, "present") vc6; if (vc6 == 1) { vrid = 507; } #delete[vc6];
+                txSpanIs(vmOff, vmLen, "checksum") vc7; if (vc7 == 1) { vrid = 508; vret = 1; } #delete[vc7];
+                if (vrid >= 0) {
+                    handled = 1;
+                    #stack[int, 64] vas = txCallArgCountV;
+                    #stack[int, 64] vac = 0;
+                    #stack[int, 64] vap = firstArg;
+                    #stack[int, 32] vgo = 1;
+                    while (vgo == 1) {
+                        if (vap == 0) { vgo = 0; }
+                        if (vgo == 1) {
+                            txLowerExpr(vap) vav;
+                            cssc::poke64(txCallArgV + (vas + vac) * 8, vav);
+                            #delete[vav];
+                            vac = vac + 1;
+                            vap = cssc::peek64(txAstNext + vap * 8);
+                        }
+                    }
+                    txCallArgCountV = txCallArgCountV + vac;
+                    txCirCallRtNV(vrid, vas, vac) vv;
+                    if (vret == 1) { out = vv; }
+                    #delete[vv];
+                    #delete[vgo];
+                    #delete[vap];
+                    #delete[vac];
+                    #delete[vas];
+                }
+                #delete[vret];
+                #delete[vrid];
+                #delete[vmLen];
+                #delete[vmOff];
             }
             if (isMathA == 6) {                            // kind 6 = cssc.peek (collection helpers)
                 #req[txIsVec] txIsVec;
@@ -1465,6 +1903,140 @@
                 #delete[kmLen];
                 #delete[kmOff];
             }
+            if (isMathA == 7) {                            // kind 7 = gui (ctor -> handle)
+                #req[txCirCallRtN] txCirCallRtN;
+                #req[txCallArg] txCallArgG;
+                #req[txCallArgCount] txCallArgCountG;
+                #stack[int, 64] gmOff = calleeOff + mcp + 2;
+                #stack[int, 64] gmLen = calleeLen - mcp - 2;
+                txSpanIs(gmOff, gmLen, "Screen") isScreenC;
+                if (isScreenC == 1) {
+                    handled = 1;
+                    // cssc_rt_gui_screen_new(w, h, fps) -- rtsym 112. `g::Screen(w,h)`
+                    // passes fps=0. Stage the 3 args into the call side-table.
+                    #stack[int, 64] a2g = 0;
+                    if (firstArg != 0) { a2g = cssc::peek64(txAstNext + firstArg * 8); }
+                    txLowerExpr(firstArg) wv;
+                    txLowerExpr(a2g) hv;
+                    txCirConstInt(0) fv;
+                    #stack[int, 64] las = txCallArgCountG;
+                    txCallArgCountG = txCallArgCountG + 3;
+                    cssc::poke64(txCallArgG + las * 8, wv);
+                    cssc::poke64(txCallArgG + (las + 1) * 8, hv);
+                    cssc::poke64(txCallArgG + (las + 2) * 8, fv);
+                    txCirCallRtN(112, las, 3) gh;
+                    out = gh;
+                    #delete[gh];
+                    #delete[las];
+                    #delete[fv];
+                    #delete[hv];
+                    #delete[wv];
+                    #delete[a2g];
+                }
+                #delete[isScreenC];
+                // GUIGEN-CTOR-BEGIN (generated by harness/gui_gen.py -- do not hand-edit)
+                txSpanIs(gmOff, gmLen, "Font") isC2;
+                if (isC2 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(130, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC2];
+                txSpanIs(gmOff, gmLen, "Text") isC3;
+                if (isC3 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(137, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC3];
+                txSpanIs(gmOff, gmLen, "Button") isC4;
+                if (isC4 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(150, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC4];
+                txSpanIs(gmOff, gmLen, "Toolbar") isC5;
+                if (isC5 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(166, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC5];
+                txSpanIs(gmOff, gmLen, "TextBox") isC6;
+                if (isC6 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(176, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC6];
+                txSpanIs(gmOff, gmLen, "Editor") isC7;
+                if (isC7 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(187, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC7];
+                txSpanIs(gmOff, gmLen, "List") isC8;
+                if (isC8 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(254, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC8];
+                txSpanIs(gmOff, gmLen, "Tree") isC9;
+                if (isC9 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(269, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC9];
+                txSpanIs(gmOff, gmLen, "Terminal") isC10;
+                if (isC10 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(290, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC10];
+                txSpanIs(gmOff, gmLen, "Menu") isC11;
+                if (isC11 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(308, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC11];
+                txSpanIs(gmOff, gmLen, "Prompt") isC12;
+                if (isC12 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(320, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC12];
+                txSpanIs(gmOff, gmLen, "Tabs") isC13;
+                if (isC13 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(329, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC13];
+                txSpanIs(gmOff, gmLen, "Browser") isC14;
+                if (isC14 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(345, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC14];
+                txSpanIs(gmOff, gmLen, "Debugger") isC15;
+                if (isC15 == 1) { handled = 1; if (firstArg != 0) {
+                    #stack[int, 64] las = txCallArgCountG; txCallArgCountG = txCallArgCountG + 1;
+                    txLowerExpr(firstArg) av; cssc::poke64(txCallArgG + las * 8, av);
+                    txCirCallRtN(355, las, 1) gh; out = gh;
+                    #delete[gh]; #delete[av]; #delete[las]; } }
+                #delete[isC15];
+                // GUIGEN-CTOR-END
+                #delete[gmLen];
+                #delete[gmOff];
+            }
             #delete[isMathA];
         }
         #delete[mcp];
@@ -1526,15 +2098,13 @@
             if (txCurObj < 0) {
                 if (txCurSector >= 0) {
                     txSFnFind(txCurSector, calleeOff, calleeLen) sib2;
-                    if (sib2 >= 0) {
-                        #req[txCurSecCtor] txCurSecCtor;
-                        if (txCurSecCtor == 1) { secFnIdx = sib2; }
-                        if (txCurSecCtor == 0) {
-                            txAliasFind(calleeOff, calleeLen) af2;
-                            if (af2 < 0) { #req[txIsoBad] txIsoBad; txIsoBad = 1; }
-                            #delete[af2];
-                        }
-                    }
+                    // A bare call to a sibling MEMBER fn resolves DIRECTLY, in both
+                    // a construction/free scope (txCurSecCtor==1) AND a `#define`
+                    // member BODY (==0) -- the interpreter (the oracle) makes
+                    // siblings visible in member bodies WITHOUT `#req` (m11_sibcall
+                    // `#define(f){ g(); }` -> 111; m11_chain calls `helper()`).
+                    // The old `#req`-or-reject isolation was dropped to match it.
+                    if (sib2 >= 0) { secFnIdx = sib2; }
                     #delete[sib2];
                 }
             }
@@ -1676,6 +2246,38 @@
     }
 
     if (handled == 0) {                                    // unknown -> typed zero
+        // ... EXCEPT in the `cssc::` namespace. That namespace belongs to the
+        // compiler: an unimplemented builtin there is a compiler gap, not a
+        // user-defined name that might resolve later. Falling through to a zero
+        // makes it compile, link and boot while computing nothing -- measured:
+        // cssc::fAdd(1.5, 2.5) yielded 0.0. Reject instead, and remember the
+        // name so the message can say which one.
+        #req[txIntrinBad] txIntrinBad;
+        #req[txIntrinBadOff] txIntrinBadOff;
+        #req[txIntrinBadLen] txIntrinBadLen;
+        txNsColon(calleeOff, calleeLen) icp;
+        if (icp >= 0) {
+            txSpanIs(calleeOff, icp, "cssc") isCsscNs;
+            // cssc::argc / cssc::argStr are HOST-provided command-line builtins:
+            // stage-0 lowers them to cssc_host_argc / cssc_host_argstr, so a
+            // production txc (stage-0-built) reads its args correctly. The
+            // self-hosted lowering does not emit them (they'd diverge from
+            // stage-0's frame and break the byte-exact fixpoint), so they fall
+            // through to a typed zero here -- NOT a compiler gap, so don't flag.
+            txSpanIs(calleeOff, calleeLen, "cssc::argc") isBArgc;
+            txSpanIs(calleeOff, calleeLen, "cssc::argStr") isBArgS;
+            if (isCsscNs == 1) { if (isBArgc == 0) { if (isBArgS == 0) {
+                txIntrinBad = 1;
+                if (txIntrinBadLen == 0) {
+                    txIntrinBadOff = calleeOff;
+                    txIntrinBadLen = calleeLen;
+                }
+            } } }
+            #delete[isBArgS];
+            #delete[isBArgc];
+            #delete[isCsscNs];
+        }
+        #delete[icp];
         txCirConstInt(0) z;
         out = z;
         #delete[z];
@@ -1707,6 +2309,7 @@
     #req[txCirSlotLoad] txCirSlotLoad;
     #req[txCirGlobLoad] txCirGlobLoad;
     #req[txCirCallR] txCirCallR;
+    #req[txCirCall3R] txCirCall3R;
     #req[txSetStr] txSetStr;
     #req[txSetBool] txSetBool;
     #req[txSetOwned] txSetOwned;
@@ -1814,14 +2417,17 @@
         // fast path never comes through here -- it prints the static bytes directly.
         #stack[int, 64] soff = cssc::peek64(txAstOff + node * 8);
         #stack[int, 64] slen = cssc::peek64(txAstLen + node * 8);
+        #req[txStrEsc] txStrEscV;
         txCirConstStr(soff, slen) p;                  // static byte pointer
-        txCirConstInt(slen) l;
+        txStrEscV(soff, slen, 0) plen;                // escape-processed length
+        txCirConstInt(plen) l;
         txCirCallR(3, p, l) h;                        // cssc_string_lit(ptr, len)
         txSetStr(h);
         txSetOwned(h);                                // fresh refcount-1 value
         out = h;
         #delete[h];
         #delete[l];
+        #delete[plen];
         #delete[p];
         #delete[slen];
         #delete[soff];
@@ -1918,6 +2524,25 @@
                     }
                     #delete[szv];
                 }
+                if (nsBik == 9) {                         // `sys::argc` / `sys::args` properties
+                    #req[txSetVec] txSetVecS;
+                    #req[txSetElem] txSetElemS;
+                    #req[txSetOwned] txSetOwnedS;
+                    txSpanIs(mbOff, mbLen, "argc") sq0;
+                    txSpanIs(mbOff, mbLen, "args") sq1;
+                    if (sq0 == 1) {
+                        nsHandled = 1;
+                        txCirCallR(4100, 0 - 1, 0 - 1) sqc; out = sqc; #delete[sqc];
+                    }
+                    if (sq1 == 1) {
+                        nsHandled = 1;
+                        txCirCallR(4106, 0 - 1, 0 - 1) sqa;
+                        txSetVecS(sqa); txSetElemS(sqa, 1); txSetOwnedS(sqa);
+                        out = sqa; #delete[sqa];
+                    }
+                    #delete[sq1];
+                    #delete[sq0];
+                }
                 if (nsBik == 0) {                         // FLAT module: strip the transparent
                     txModFlatHas(pxOff, pxLen) nsFlat;    // alias, resolve `member` via the
                     if (nsFlat == 1) {                    // normal IDENT path below
@@ -1983,6 +2608,36 @@
             #req[txGlobFind] txGlobFind;
             txGAliasFind(nOff, nLen) gi;
             if (gi < 0) { if (txCurSector < 0) { txGlobFind(nOff, nLen) gg; gi = gg; #delete[gg]; } }
+            // Inside a sector fn/ctor body, a BARE name may be a sibling MEMBER
+            // var. The interpreter makes members directly visible in member
+            // bodies (NO `#req` needed) -- `#define(f){ outln(x) }` reads member
+            // `x`, `#define(Sec::peek){ outln(secret) }` reads a PRIVATE sibling
+            // (allowed from inside). Resolve it to the member global with its
+            // typed kind, mirroring the `Sector::member` ns-access read path.
+            // Cases: m11_bare, sector_function, sector_private_member.
+            #stack[int, 32] smvDone = 0;
+            if (gi < 0) { if (txCurSector >= 0) {
+                txSVarFind(txCurSector, nOff, nLen) smvi;
+                if (smvi >= 0) {
+                    #stack[int, 64] sgidx = cssc::peek64(txSVarGlob + smvi * 8);
+                    #stack[int, 64] smk = cssc::peek64(txSVarKind + smvi * 8);
+                    #stack[int, 64] smel = cssc::peek64(txSVarElem + smvi * 8);
+                    txCirGlobLoad(sgidx) smv;
+                    if (smk == 1) { txSetStr(smv); }
+                    if (smk == 2) { txSetFloat(smv); }
+                    if (smk == 3) { txSetVec(smv); if (smel != 0) { txSetElem(smv, smel); } }
+                    if (smk == 4) { txSetMap(smv); if (smel != 0) { txSetElem(smv, smel); } }
+                    if (smk == 5) { txSetVec(smv); if (smel != 0) { txSetElem(smv, smel); } }
+                    out = smv;
+                    smvDone = 1;
+                    #delete[smv];
+                    #delete[smel];
+                    #delete[smk];
+                    #delete[sgidx];
+                }
+                #delete[smvi];
+            } }
+            if (smvDone == 0) {
             if (gi >= 0) {
                 txCirGlobLoad(gi) id;
                 txGlobIsStr(gi) gIsStr;
@@ -1996,6 +2651,8 @@
             }
             // unknown name -> warn-not-reject: typed zero
             if (gi < 0) { txCirConstInt(0) id; out = id; #delete[id]; }
+            }
+            #delete[smvDone];
             #delete[gi];
         }
         #delete[slot];
@@ -2389,6 +3046,439 @@
         // lowering the receiver, which would otherwise load the label's element.
         txSpanIs(mOff, mLen, "pos") isPos;
         #stack[int, 32] posDone = 0;
+        // gui:: handle method: `screen->method(args)` where `screen` was captured
+        // from a gui ctor -> dispatch by widget kind to the gui rtsym (self + args
+        // through CALL_RTN). Intercept before the generic str/vec/object dispatch.
+        if (posDone == 0) {
+            #req[txGuiFind] txGuiFindM;
+            #req[txCirCallRtN] txCirCallRtNM;
+            #req[txCallArg] txCallArgM;
+            #req[txCallArgCount] txCallArgCountM;
+            #stack[int, 64] grcv = cssc::peek64(txAstB + node * 8);
+            if (cssc::peek64(txAstKind + grcv * 8) == 5) {
+                txGuiFindM(cssc::peek64(txAstOff + grcv * 8), cssc::peek64(txAstLen + grcv * 8)) gkind;
+                if (gkind >= 1) {                              // any gui handle
+                    #stack[int, 64] grt = 0 - 1;
+                    #stack[int, 64] gnargs = 1;                // method args after self
+                    #stack[int, 32] gret = 0;                  // 0 void / 1 int / 2 string
+                    if (gkind == 1) {                          // Screen
+                    txSpanIs(mOff, mLen, "clear") gc0;      if (gc0 == 1) { grt = 113; gnargs = 1; } #delete[gc0];
+                    txSpanIs(mOff, mLen, "present") gc1;    if (gc1 == 1) { grt = 114; gnargs = 0; } #delete[gc1];
+                    txSpanIs(mOff, mLen, "isOpen") gc2;     if (gc2 == 1) { grt = 115; gnargs = 0; gret = 1; } #delete[gc2];
+                    txSpanIs(mOff, mLen, "isopen") gc2b;    if (gc2b == 1) { grt = 115; gnargs = 0; gret = 1; } #delete[gc2b];
+                    txSpanIs(mOff, mLen, "close") gc3;      if (gc3 == 1) { grt = 116; gnargs = 0; } #delete[gc3];
+                    txSpanIs(mOff, mLen, "width") gc4;      if (gc4 == 1) { grt = 117; gnargs = 0; gret = 1; } #delete[gc4];
+                    txSpanIs(mOff, mLen, "height") gc5;     if (gc5 == 1) { grt = 118; gnargs = 0; gret = 1; } #delete[gc5];
+                    txSpanIs(mOff, mLen, "fillRect") gc6;   if (gc6 == 1) { grt = 119; gnargs = 5; } #delete[gc6];
+                    txSpanIs(mOff, mLen, "drawRect") gc7;   if (gc7 == 1) { grt = 120; gnargs = 5; } #delete[gc7];
+                    txSpanIs(mOff, mLen, "drawText") gc8;   if (gc8 == 1) { grt = 121; gnargs = 5; } #delete[gc8];
+                    txSpanIs(mOff, mLen, "fbChecksum") gc9; if (gc9 == 1) { grt = 122; gnargs = 0; gret = 1; } #delete[gc9];
+                    }
+                // GUIGEN-METHOD-BEGIN (generated by harness/gui_gen.py -- do not hand-edit)
+                if (gkind == 2) {
+                    txSpanIs(mOff, mLen, "setScale") gm1; if (gm1 == 1) { grt = 131; gnargs = 1; gret = 0; } #delete[gm1];
+                    txSpanIs(mOff, mLen, "scale") gm2; if (gm2 == 1) { grt = 132; gnargs = 0; gret = 1; } #delete[gm2];
+                    txSpanIs(mOff, mLen, "setColor") gm3; if (gm3 == 1) { grt = 133; gnargs = 1; gret = 0; } #delete[gm3];
+                    txSpanIs(mOff, mLen, "color") gm4; if (gm4 == 1) { grt = 134; gnargs = 0; gret = 1; } #delete[gm4];
+                    txSpanIs(mOff, mLen, "measure") gm5; if (gm5 == 1) { grt = 135; gnargs = 1; gret = 1; } #delete[gm5];
+                    txSpanIs(mOff, mLen, "height") gm6; if (gm6 == 1) { grt = 136; gnargs = 0; gret = 1; } #delete[gm6];
+                }
+                if (gkind == 3) {
+                    txSpanIs(mOff, mLen, "setText") gm7; if (gm7 == 1) { grt = 138; gnargs = 1; gret = 0; } #delete[gm7];
+                    txSpanIs(mOff, mLen, "text") gm8; if (gm8 == 1) { grt = 139; gnargs = 0; gret = 2; } #delete[gm8];
+                    txSpanIs(mOff, mLen, "setPos") gm9; if (gm9 == 1) { grt = 140; gnargs = 2; gret = 0; } #delete[gm9];
+                    txSpanIs(mOff, mLen, "x") gm10; if (gm10 == 1) { grt = 141; gnargs = 0; gret = 1; } #delete[gm10];
+                    txSpanIs(mOff, mLen, "y") gm11; if (gm11 == 1) { grt = 142; gnargs = 0; gret = 1; } #delete[gm11];
+                    txSpanIs(mOff, mLen, "setColor") gm12; if (gm12 == 1) { grt = 143; gnargs = 1; gret = 0; } #delete[gm12];
+                    txSpanIs(mOff, mLen, "setScale") gm13; if (gm13 == 1) { grt = 144; gnargs = 1; gret = 0; } #delete[gm13];
+                    txSpanIs(mOff, mLen, "setFont") gm14; if (gm14 == 1) { grt = 145; gnargs = 1; gret = 0; } #delete[gm14];
+                    txSpanIs(mOff, mLen, "measure") gm15; if (gm15 == 1) { grt = 146; gnargs = 0; gret = 1; } #delete[gm15];
+                    txSpanIs(mOff, mLen, "draw") gm16; if (gm16 == 1) { grt = 147; gnargs = 0; gret = 0; } #delete[gm16];
+                    txSpanIs(mOff, mLen, "hide") gm17; if (gm17 == 1) { grt = 148; gnargs = 0; gret = 0; } #delete[gm17];
+                    txSpanIs(mOff, mLen, "show") gm18; if (gm18 == 1) { grt = 149; gnargs = 0; gret = 0; } #delete[gm18];
+                }
+                if (gkind == 4) {
+                    txSpanIs(mOff, mLen, "setLabel") gm19; if (gm19 == 1) { grt = 151; gnargs = 1; gret = 0; } #delete[gm19];
+                    txSpanIs(mOff, mLen, "label") gm20; if (gm20 == 1) { grt = 152; gnargs = 0; gret = 2; } #delete[gm20];
+                    txSpanIs(mOff, mLen, "setRect") gm21; if (gm21 == 1) { grt = 153; gnargs = 4; gret = 0; } #delete[gm21];
+                    txSpanIs(mOff, mLen, "position") gm22; if (gm22 == 1) { grt = 154; gnargs = 2; gret = 0; } #delete[gm22];
+                    txSpanIs(mOff, mLen, "size") gm23; if (gm23 == 1) { grt = 155; gnargs = 2; gret = 0; } #delete[gm23];
+                    txSpanIs(mOff, mLen, "setColor") gm24; if (gm24 == 1) { grt = 156; gnargs = 1; gret = 0; } #delete[gm24];
+                    txSpanIs(mOff, mLen, "setHoverColor") gm25; if (gm25 == 1) { grt = 157; gnargs = 1; gret = 0; } #delete[gm25];
+                    txSpanIs(mOff, mLen, "setTextColor") gm26; if (gm26 == 1) { grt = 158; gnargs = 1; gret = 0; } #delete[gm26];
+                    txSpanIs(mOff, mLen, "onClick") gm27; if (gm27 == 1) { grt = 159; gnargs = 1; gret = 0; } #delete[gm27];
+                    txSpanIs(mOff, mLen, "update") gm28; if (gm28 == 1) { grt = 160; gnargs = 1; gret = 1; } #delete[gm28];
+                    txSpanIs(mOff, mLen, "isHovered") gm29; if (gm29 == 1) { grt = 161; gnargs = 0; gret = 1; } #delete[gm29];
+                    txSpanIs(mOff, mLen, "isPressed") gm30; if (gm30 == 1) { grt = 162; gnargs = 0; gret = 1; } #delete[gm30];
+                    txSpanIs(mOff, mLen, "draw") gm31; if (gm31 == 1) { grt = 163; gnargs = 0; gret = 0; } #delete[gm31];
+                    txSpanIs(mOff, mLen, "hide") gm32; if (gm32 == 1) { grt = 164; gnargs = 0; gret = 0; } #delete[gm32];
+                    txSpanIs(mOff, mLen, "show") gm33; if (gm33 == 1) { grt = 165; gnargs = 0; gret = 0; } #delete[gm33];
+                }
+                if (gkind == 5) {
+                    txSpanIs(mOff, mLen, "add") gm34; if (gm34 == 1) { grt = 167; gnargs = 1; gret = 0; } #delete[gm34];
+                    txSpanIs(mOff, mLen, "setPos") gm35; if (gm35 == 1) { grt = 168; gnargs = 2; gret = 0; } #delete[gm35];
+                    txSpanIs(mOff, mLen, "setSize") gm36; if (gm36 == 1) { grt = 169; gnargs = 2; gret = 0; } #delete[gm36];
+                    txSpanIs(mOff, mLen, "setOrientation") gm37; if (gm37 == 1) { grt = 170; gnargs = 1; gret = 0; } #delete[gm37];
+                    txSpanIs(mOff, mLen, "setSpacing") gm38; if (gm38 == 1) { grt = 171; gnargs = 1; gret = 0; } #delete[gm38];
+                    txSpanIs(mOff, mLen, "setRightText") gm39; if (gm39 == 1) { grt = 172; gnargs = 1; gret = 0; } #delete[gm39];
+                    txSpanIs(mOff, mLen, "setRightColor") gm40; if (gm40 == 1) { grt = 173; gnargs = 1; gret = 0; } #delete[gm40];
+                    txSpanIs(mOff, mLen, "update") gm41; if (gm41 == 1) { grt = 174; gnargs = 1; gret = 1; } #delete[gm41];
+                    txSpanIs(mOff, mLen, "draw") gm42; if (gm42 == 1) { grt = 175; gnargs = 0; gret = 0; } #delete[gm42];
+                }
+                if (gkind == 6) {
+                    txSpanIs(mOff, mLen, "setRect") gm43; if (gm43 == 1) { grt = 177; gnargs = 4; gret = 0; } #delete[gm43];
+                    txSpanIs(mOff, mLen, "setText") gm44; if (gm44 == 1) { grt = 178; gnargs = 1; gret = 0; } #delete[gm44];
+                    txSpanIs(mOff, mLen, "text") gm45; if (gm45 == 1) { grt = 179; gnargs = 0; gret = 2; } #delete[gm45];
+                    txSpanIs(mOff, mLen, "length") gm46; if (gm46 == 1) { grt = 180; gnargs = 0; gret = 1; } #delete[gm46];
+                    txSpanIs(mOff, mLen, "setFocus") gm47; if (gm47 == 1) { grt = 181; gnargs = 1; gret = 0; } #delete[gm47];
+                    txSpanIs(mOff, mLen, "isFocused") gm48; if (gm48 == 1) { grt = 182; gnargs = 0; gret = 1; } #delete[gm48];
+                    txSpanIs(mOff, mLen, "setColor") gm49; if (gm49 == 1) { grt = 183; gnargs = 2; gret = 0; } #delete[gm49];
+                    txSpanIs(mOff, mLen, "setScale") gm50; if (gm50 == 1) { grt = 184; gnargs = 1; gret = 0; } #delete[gm50];
+                    txSpanIs(mOff, mLen, "update") gm51; if (gm51 == 1) { grt = 185; gnargs = 1; gret = 1; } #delete[gm51];
+                    txSpanIs(mOff, mLen, "draw") gm52; if (gm52 == 1) { grt = 186; gnargs = 0; gret = 0; } #delete[gm52];
+                }
+                if (gkind == 7) {
+                    txSpanIs(mOff, mLen, "setRect") gm53; if (gm53 == 1) { grt = 188; gnargs = 4; gret = 0; } #delete[gm53];
+                    txSpanIs(mOff, mLen, "setText") gm54; if (gm54 == 1) { grt = 189; gnargs = 1; gret = 0; } #delete[gm54];
+                    txSpanIs(mOff, mLen, "text") gm55; if (gm55 == 1) { grt = 190; gnargs = 0; gret = 2; } #delete[gm55];
+                    txSpanIs(mOff, mLen, "lineCount") gm56; if (gm56 == 1) { grt = 191; gnargs = 0; gret = 1; } #delete[gm56];
+                    txSpanIs(mOff, mLen, "cursorLine") gm57; if (gm57 == 1) { grt = 192; gnargs = 0; gret = 1; } #delete[gm57];
+                    txSpanIs(mOff, mLen, "cursorCol") gm58; if (gm58 == 1) { grt = 193; gnargs = 0; gret = 1; } #delete[gm58];
+                    txSpanIs(mOff, mLen, "revision") gm59; if (gm59 == 1) { grt = 194; gnargs = 0; gret = 1; } #delete[gm59];
+                    txSpanIs(mOff, mLen, "caretPixelX") gm60; if (gm60 == 1) { grt = 195; gnargs = 0; gret = 1; } #delete[gm60];
+                    txSpanIs(mOff, mLen, "caretPixelY") gm61; if (gm61 == 1) { grt = 196; gnargs = 0; gret = 1; } #delete[gm61];
+                    txSpanIs(mOff, mLen, "lineHeight") gm62; if (gm62 == 1) { grt = 197; gnargs = 0; gret = 1; } #delete[gm62];
+                    txSpanIs(mOff, mLen, "completeReq") gm63; if (gm63 == 1) { grt = 198; gnargs = 0; gret = 1; } #delete[gm63];
+                    txSpanIs(mOff, mLen, "completeActive") gm64; if (gm64 == 1) { grt = 199; gnargs = 0; gret = 1; } #delete[gm64];
+                    txSpanIs(mOff, mLen, "completeCancel") gm65; if (gm65 == 1) { grt = 200; gnargs = 0; gret = 0; } #delete[gm65];
+                    txSpanIs(mOff, mLen, "completionQuery") gm66; if (gm66 == 1) { grt = 201; gnargs = 0; gret = 2; } #delete[gm66];
+                    txSpanIs(mOff, mLen, "setCompletions") gm67; if (gm67 == 1) { grt = 202; gnargs = 1; gret = 0; } #delete[gm67];
+                    txSpanIs(mOff, mLen, "hoverReq") gm68; if (gm68 == 1) { grt = 203; gnargs = 0; gret = 1; } #delete[gm68];
+                    txSpanIs(mOff, mLen, "hoverActive") gm69; if (gm69 == 1) { grt = 204; gnargs = 0; gret = 1; } #delete[gm69];
+                    txSpanIs(mOff, mLen, "hoverCancel") gm70; if (gm70 == 1) { grt = 205; gnargs = 0; gret = 0; } #delete[gm70];
+                    txSpanIs(mOff, mLen, "hoverQuery") gm71; if (gm71 == 1) { grt = 206; gnargs = 0; gret = 2; } #delete[gm71];
+                    txSpanIs(mOff, mLen, "setHover") gm72; if (gm72 == 1) { grt = 207; gnargs = 1; gret = 0; } #delete[gm72];
+                    txSpanIs(mOff, mLen, "setDiagnostics") gm73; if (gm73 == 1) { grt = 208; gnargs = 1; gret = 0; } #delete[gm73];
+                    txSpanIs(mOff, mLen, "setStickyDiag") gm74; if (gm74 == 1) { grt = 209; gnargs = 1; gret = 0; } #delete[gm74];
+                    txSpanIs(mOff, mLen, "clearStickyDiag") gm75; if (gm75 == 1) { grt = 210; gnargs = 0; gret = 0; } #delete[gm75];
+                    txSpanIs(mOff, mLen, "setCleanMarks") gm76; if (gm76 == 1) { grt = 211; gnargs = 1; gret = 0; } #delete[gm76];
+                    txSpanIs(mOff, mLen, "clearCleanMarks") gm77; if (gm77 == 1) { grt = 212; gnargs = 0; gret = 0; } #delete[gm77];
+                    txSpanIs(mOff, mLen, "setIpLine") gm78; if (gm78 == 1) { grt = 213; gnargs = 1; gret = 0; } #delete[gm78];
+                    txSpanIs(mOff, mLen, "revealIp") gm79; if (gm79 == 1) { grt = 214; gnargs = 0; gret = 0; } #delete[gm79];
+                    txSpanIs(mOff, mLen, "stickyCount") gm80; if (gm80 == 1) { grt = 215; gnargs = 0; gret = 1; } #delete[gm80];
+                    txSpanIs(mOff, mLen, "sigReq") gm81; if (gm81 == 1) { grt = 216; gnargs = 0; gret = 1; } #delete[gm81];
+                    txSpanIs(mOff, mLen, "sigActive") gm82; if (gm82 == 1) { grt = 217; gnargs = 0; gret = 1; } #delete[gm82];
+                    txSpanIs(mOff, mLen, "sigCancel") gm83; if (gm83 == 1) { grt = 218; gnargs = 0; gret = 0; } #delete[gm83];
+                    txSpanIs(mOff, mLen, "sigQuery") gm84; if (gm84 == 1) { grt = 219; gnargs = 0; gret = 2; } #delete[gm84];
+                    txSpanIs(mOff, mLen, "setSignature") gm85; if (gm85 == 1) { grt = 220; gnargs = 1; gret = 0; } #delete[gm85];
+                    txSpanIs(mOff, mLen, "gotoLine") gm86; if (gm86 == 1) { grt = 221; gnargs = 1; gret = 0; } #delete[gm86];
+                    txSpanIs(mOff, mLen, "setCursor") gm87; if (gm87 == 1) { grt = 222; gnargs = 2; gret = 0; } #delete[gm87];
+                    txSpanIs(mOff, mLen, "insert") gm88; if (gm88 == 1) { grt = 223; gnargs = 1; gret = 0; } #delete[gm88];
+                    txSpanIs(mOff, mLen, "hasSelection") gm89; if (gm89 == 1) { grt = 224; gnargs = 0; gret = 1; } #delete[gm89];
+                    txSpanIs(mOff, mLen, "selectedText") gm90; if (gm90 == 1) { grt = 225; gnargs = 0; gret = 2; } #delete[gm90];
+                    txSpanIs(mOff, mLen, "doubleClicked") gm91; if (gm91 == 1) { grt = 226; gnargs = 0; gret = 1; } #delete[gm91];
+                    txSpanIs(mOff, mLen, "rightClicked") gm92; if (gm92 == 1) { grt = 227; gnargs = 0; gret = 1; } #delete[gm92];
+                    txSpanIs(mOff, mLen, "clicked") gm93; if (gm93 == 1) { grt = 228; gnargs = 0; gret = 1; } #delete[gm93];
+                    txSpanIs(mOff, mLen, "scanDecl") gm94; if (gm94 == 1) { grt = 229; gnargs = 1; gret = 1; } #delete[gm94];
+                    txSpanIs(mOff, mLen, "declType") gm95; if (gm95 == 1) { grt = 230; gnargs = 0; gret = 2; } #delete[gm95];
+                    txSpanIs(mOff, mLen, "declBase") gm96; if (gm96 == 1) { grt = 231; gnargs = 0; gret = 2; } #delete[gm96];
+                    txSpanIs(mOff, mLen, "declBits") gm97; if (gm97 == 1) { grt = 232; gnargs = 0; gret = 1; } #delete[gm97];
+                    txSpanIs(mOff, mLen, "declIsAuto") gm98; if (gm98 == 1) { grt = 233; gnargs = 0; gret = 1; } #delete[gm98];
+                    txSpanIs(mOff, mLen, "valueBits") gm99; if (gm99 == 1) { grt = 234; gnargs = 2; gret = 1; } #delete[gm99];
+                    txSpanIs(mOff, mLen, "saveRequested") gm100; if (gm100 == 1) { grt = 235; gnargs = 0; gret = 1; } #delete[gm100];
+                    txSpanIs(mOff, mLen, "undo") gm101; if (gm101 == 1) { grt = 236; gnargs = 0; gret = 0; } #delete[gm101];
+                    txSpanIs(mOff, mLen, "redo") gm102; if (gm102 == 1) { grt = 237; gnargs = 0; gret = 0; } #delete[gm102];
+                    txSpanIs(mOff, mLen, "selectAll") gm103; if (gm103 == 1) { grt = 238; gnargs = 0; gret = 0; } #delete[gm103];
+                    txSpanIs(mOff, mLen, "search") gm104; if (gm104 == 1) { grt = 239; gnargs = 1; gret = 1; } #delete[gm104];
+                    txSpanIs(mOff, mLen, "markAll") gm105; if (gm105 == 1) { grt = 240; gnargs = 1; gret = 1; } #delete[gm105];
+                    txSpanIs(mOff, mLen, "clearSearch") gm106; if (gm106 == 1) { grt = 241; gnargs = 0; gret = 0; } #delete[gm106];
+                    txSpanIs(mOff, mLen, "searchCount") gm107; if (gm107 == 1) { grt = 242; gnargs = 0; gret = 1; } #delete[gm107];
+                    txSpanIs(mOff, mLen, "replaceAll") gm108; if (gm108 == 1) { grt = 243; gnargs = 2; gret = 1; } #delete[gm108];
+                    txSpanIs(mOff, mLen, "setFocus") gm109; if (gm109 == 1) { grt = 244; gnargs = 1; gret = 0; } #delete[gm109];
+                    txSpanIs(mOff, mLen, "setScale") gm110; if (gm110 == 1) { grt = 245; gnargs = 1; gret = 0; } #delete[gm110];
+                    txSpanIs(mOff, mLen, "setColor") gm111; if (gm111 == 1) { grt = 246; gnargs = 2; gret = 0; } #delete[gm111];
+                    txSpanIs(mOff, mLen, "setGutter") gm112; if (gm112 == 1) { grt = 247; gnargs = 1; gret = 0; } #delete[gm112];
+                    txSpanIs(mOff, mLen, "setVisible") gm113; if (gm113 == 1) { grt = 248; gnargs = 1; gret = 0; } #delete[gm113];
+                    txSpanIs(mOff, mLen, "setLanguage") gm114; if (gm114 == 1) { grt = 249; gnargs = 1; gret = 0; } #delete[gm114];
+                    txSpanIs(mOff, mLen, "setLanguageForPath") gm115; if (gm115 == 1) { grt = 250; gnargs = 1; gret = 0; } #delete[gm115];
+                    txSpanIs(mOff, mLen, "setOwnership") gm116; if (gm116 == 1) { grt = 251; gnargs = 1; gret = 0; } #delete[gm116];
+                    txSpanIs(mOff, mLen, "update") gm117; if (gm117 == 1) { grt = 252; gnargs = 1; gret = 1; } #delete[gm117];
+                    txSpanIs(mOff, mLen, "draw") gm118; if (gm118 == 1) { grt = 253; gnargs = 0; gret = 0; } #delete[gm118];
+                }
+                if (gkind == 8) {
+                    txSpanIs(mOff, mLen, "setRect") gm119; if (gm119 == 1) { grt = 255; gnargs = 4; gret = 0; } #delete[gm119];
+                    txSpanIs(mOff, mLen, "add") gm120; if (gm120 == 1) { grt = 256; gnargs = 1; gret = 0; } #delete[gm120];
+                    txSpanIs(mOff, mLen, "addAt") gm121; if (gm121 == 1) { grt = 257; gnargs = 2; gret = 0; } #delete[gm121];
+                    txSpanIs(mOff, mLen, "clear") gm122; if (gm122 == 1) { grt = 258; gnargs = 0; gret = 0; } #delete[gm122];
+                    txSpanIs(mOff, mLen, "count") gm123; if (gm123 == 1) { grt = 259; gnargs = 0; gret = 1; } #delete[gm123];
+                    txSpanIs(mOff, mLen, "selected") gm124; if (gm124 == 1) { grt = 260; gnargs = 0; gret = 1; } #delete[gm124];
+                    txSpanIs(mOff, mLen, "rightClicked") gm125; if (gm125 == 1) { grt = 261; gnargs = 0; gret = 1; } #delete[gm125];
+                    txSpanIs(mOff, mLen, "selectedText") gm126; if (gm126 == 1) { grt = 262; gnargs = 0; gret = 2; } #delete[gm126];
+                    txSpanIs(mOff, mLen, "setSelected") gm127; if (gm127 == 1) { grt = 263; gnargs = 1; gret = 0; } #delete[gm127];
+                    txSpanIs(mOff, mLen, "setFocus") gm128; if (gm128 == 1) { grt = 264; gnargs = 1; gret = 0; } #delete[gm128];
+                    txSpanIs(mOff, mLen, "setScale") gm129; if (gm129 == 1) { grt = 265; gnargs = 1; gret = 0; } #delete[gm129];
+                    txSpanIs(mOff, mLen, "setColor") gm130; if (gm130 == 1) { grt = 266; gnargs = 2; gret = 0; } #delete[gm130];
+                    txSpanIs(mOff, mLen, "update") gm131; if (gm131 == 1) { grt = 267; gnargs = 1; gret = 1; } #delete[gm131];
+                    txSpanIs(mOff, mLen, "draw") gm132; if (gm132 == 1) { grt = 268; gnargs = 0; gret = 0; } #delete[gm132];
+                }
+                if (gkind == 9) {
+                    txSpanIs(mOff, mLen, "setRoot") gm133; if (gm133 == 1) { grt = 270; gnargs = 1; gret = 0; } #delete[gm133];
+                    txSpanIs(mOff, mLen, "setIconDir") gm134; if (gm134 == 1) { grt = 271; gnargs = 1; gret = 0; } #delete[gm134];
+                    txSpanIs(mOff, mLen, "setRect") gm135; if (gm135 == 1) { grt = 272; gnargs = 4; gret = 0; } #delete[gm135];
+                    txSpanIs(mOff, mLen, "width") gm136; if (gm136 == 1) { grt = 273; gnargs = 0; gret = 1; } #delete[gm136];
+                    txSpanIs(mOff, mLen, "refresh") gm137; if (gm137 == 1) { grt = 274; gnargs = 0; gret = 0; } #delete[gm137];
+                    txSpanIs(mOff, mLen, "count") gm138; if (gm138 == 1) { grt = 275; gnargs = 0; gret = 1; } #delete[gm138];
+                    txSpanIs(mOff, mLen, "selected") gm139; if (gm139 == 1) { grt = 276; gnargs = 0; gret = 1; } #delete[gm139];
+                    txSpanIs(mOff, mLen, "selectedPath") gm140; if (gm140 == 1) { grt = 277; gnargs = 0; gret = 2; } #delete[gm140];
+                    txSpanIs(mOff, mLen, "selectedName") gm141; if (gm141 == 1) { grt = 278; gnargs = 0; gret = 2; } #delete[gm141];
+                    txSpanIs(mOff, mLen, "selectedIsDir") gm142; if (gm142 == 1) { grt = 279; gnargs = 0; gret = 1; } #delete[gm142];
+                    txSpanIs(mOff, mLen, "rightClicked") gm143; if (gm143 == 1) { grt = 280; gnargs = 0; gret = 1; } #delete[gm143];
+                    txSpanIs(mOff, mLen, "dropReady") gm144; if (gm144 == 1) { grt = 281; gnargs = 0; gret = 1; } #delete[gm144];
+                    txSpanIs(mOff, mLen, "dropSrc") gm145; if (gm145 == 1) { grt = 282; gnargs = 0; gret = 2; } #delete[gm145];
+                    txSpanIs(mOff, mLen, "dropDst") gm146; if (gm146 == 1) { grt = 283; gnargs = 0; gret = 2; } #delete[gm146];
+                    txSpanIs(mOff, mLen, "setFocus") gm147; if (gm147 == 1) { grt = 284; gnargs = 1; gret = 0; } #delete[gm147];
+                    txSpanIs(mOff, mLen, "setScale") gm148; if (gm148 == 1) { grt = 285; gnargs = 1; gret = 0; } #delete[gm148];
+                    txSpanIs(mOff, mLen, "setColor") gm149; if (gm149 == 1) { grt = 286; gnargs = 2; gret = 0; } #delete[gm149];
+                    txSpanIs(mOff, mLen, "setVisible") gm150; if (gm150 == 1) { grt = 287; gnargs = 1; gret = 0; } #delete[gm150];
+                    txSpanIs(mOff, mLen, "update") gm151; if (gm151 == 1) { grt = 288; gnargs = 1; gret = 1; } #delete[gm151];
+                    txSpanIs(mOff, mLen, "draw") gm152; if (gm152 == 1) { grt = 289; gnargs = 0; gret = 0; } #delete[gm152];
+                }
+                if (gkind == 10) {
+                    txSpanIs(mOff, mLen, "setRect") gm153; if (gm153 == 1) { grt = 291; gnargs = 4; gret = 0; } #delete[gm153];
+                    txSpanIs(mOff, mLen, "setCwd") gm154; if (gm154 == 1) { grt = 292; gnargs = 1; gret = 0; } #delete[gm154];
+                    txSpanIs(mOff, mLen, "setFocus") gm155; if (gm155 == 1) { grt = 293; gnargs = 1; gret = 0; } #delete[gm155];
+                    txSpanIs(mOff, mLen, "setScale") gm156; if (gm156 == 1) { grt = 294; gnargs = 1; gret = 0; } #delete[gm156];
+                    txSpanIs(mOff, mLen, "setColor") gm157; if (gm157 == 1) { grt = 295; gnargs = 2; gret = 0; } #delete[gm157];
+                    txSpanIs(mOff, mLen, "isRunning") gm158; if (gm158 == 1) { grt = 296; gnargs = 0; gret = 1; } #delete[gm158];
+                    txSpanIs(mOff, mLen, "run") gm159; if (gm159 == 1) { grt = 297; gnargs = 1; gret = 0; } #delete[gm159];
+                    txSpanIs(mOff, mLen, "write") gm160; if (gm160 == 1) { grt = 298; gnargs = 1; gret = 0; } #delete[gm160];
+                    txSpanIs(mOff, mLen, "writeAnsi") gm161; if (gm161 == 1) { grt = 299; gnargs = 1; gret = 0; } #delete[gm161];
+                    txSpanIs(mOff, mLen, "clear") gm162; if (gm162 == 1) { grt = 300; gnargs = 0; gret = 0; } #delete[gm162];
+                    txSpanIs(mOff, mLen, "ipLine") gm163; if (gm163 == 1) { grt = 301; gnargs = 0; gret = 1; } #delete[gm163];
+                    txSpanIs(mOff, mLen, "ipFile") gm164; if (gm164 == 1) { grt = 302; gnargs = 0; gret = 2; } #delete[gm164];
+                    txSpanIs(mOff, mLen, "setInputLock") gm165; if (gm165 == 1) { grt = 303; gnargs = 1; gret = 0; } #delete[gm165];
+                    txSpanIs(mOff, mLen, "stop") gm166; if (gm166 == 1) { grt = 304; gnargs = 0; gret = 0; } #delete[gm166];
+                    txSpanIs(mOff, mLen, "setVisible") gm167; if (gm167 == 1) { grt = 305; gnargs = 1; gret = 0; } #delete[gm167];
+                    txSpanIs(mOff, mLen, "update") gm168; if (gm168 == 1) { grt = 306; gnargs = 1; gret = 1; } #delete[gm168];
+                    txSpanIs(mOff, mLen, "draw") gm169; if (gm169 == 1) { grt = 307; gnargs = 0; gret = 0; } #delete[gm169];
+                }
+                if (gkind == 11) {
+                    txSpanIs(mOff, mLen, "setRect") gm170; if (gm170 == 1) { grt = 309; gnargs = 4; gret = 0; } #delete[gm170];
+                    txSpanIs(mOff, mLen, "addMenu") gm171; if (gm171 == 1) { grt = 310; gnargs = 1; gret = 1; } #delete[gm171];
+                    txSpanIs(mOff, mLen, "addItem") gm172; if (gm172 == 1) { grt = 311; gnargs = 3; gret = 0; } #delete[gm172];
+                    txSpanIs(mOff, mLen, "setScale") gm173; if (gm173 == 1) { grt = 312; gnargs = 1; gret = 0; } #delete[gm173];
+                    txSpanIs(mOff, mLen, "setColor") gm174; if (gm174 == 1) { grt = 313; gnargs = 2; gret = 0; } #delete[gm174];
+                    txSpanIs(mOff, mLen, "setRightText") gm175; if (gm175 == 1) { grt = 314; gnargs = 1; gret = 0; } #delete[gm175];
+                    txSpanIs(mOff, mLen, "setRightColor") gm176; if (gm176 == 1) { grt = 315; gnargs = 1; gret = 0; } #delete[gm176];
+                    txSpanIs(mOff, mLen, "isOpen") gm177; if (gm177 == 1) { grt = 316; gnargs = 0; gret = 1; } #delete[gm177];
+                    txSpanIs(mOff, mLen, "action") gm178; if (gm178 == 1) { grt = 317; gnargs = 0; gret = 1; } #delete[gm178];
+                    txSpanIs(mOff, mLen, "update") gm179; if (gm179 == 1) { grt = 318; gnargs = 1; gret = 1; } #delete[gm179];
+                    txSpanIs(mOff, mLen, "draw") gm180; if (gm180 == 1) { grt = 319; gnargs = 0; gret = 0; } #delete[gm180];
+                }
+                if (gkind == 12) {
+                    txSpanIs(mOff, mLen, "open") gm181; if (gm181 == 1) { grt = 321; gnargs = 1; gret = 0; } #delete[gm181];
+                    txSpanIs(mOff, mLen, "isOpen") gm182; if (gm182 == 1) { grt = 322; gnargs = 0; gret = 1; } #delete[gm182];
+                    txSpanIs(mOff, mLen, "result") gm183; if (gm183 == 1) { grt = 323; gnargs = 0; gret = 1; } #delete[gm183];
+                    txSpanIs(mOff, mLen, "text") gm184; if (gm184 == 1) { grt = 324; gnargs = 0; gret = 2; } #delete[gm184];
+                    txSpanIs(mOff, mLen, "setScale") gm185; if (gm185 == 1) { grt = 325; gnargs = 1; gret = 0; } #delete[gm185];
+                    txSpanIs(mOff, mLen, "setColor") gm186; if (gm186 == 1) { grt = 326; gnargs = 2; gret = 0; } #delete[gm186];
+                    txSpanIs(mOff, mLen, "update") gm187; if (gm187 == 1) { grt = 327; gnargs = 1; gret = 1; } #delete[gm187];
+                    txSpanIs(mOff, mLen, "draw") gm188; if (gm188 == 1) { grt = 328; gnargs = 0; gret = 0; } #delete[gm188];
+                }
+                if (gkind == 13) {
+                    txSpanIs(mOff, mLen, "setRect") gm189; if (gm189 == 1) { grt = 330; gnargs = 4; gret = 0; } #delete[gm189];
+                    txSpanIs(mOff, mLen, "add") gm190; if (gm190 == 1) { grt = 331; gnargs = 1; gret = 0; } #delete[gm190];
+                    txSpanIs(mOff, mLen, "indexOf") gm191; if (gm191 == 1) { grt = 332; gnargs = 1; gret = 1; } #delete[gm191];
+                    txSpanIs(mOff, mLen, "count") gm192; if (gm192 == 1) { grt = 333; gnargs = 0; gret = 1; } #delete[gm192];
+                    txSpanIs(mOff, mLen, "active") gm193; if (gm193 == 1) { grt = 334; gnargs = 0; gret = 1; } #delete[gm193];
+                    txSpanIs(mOff, mLen, "activePath") gm194; if (gm194 == 1) { grt = 335; gnargs = 0; gret = 2; } #delete[gm194];
+                    txSpanIs(mOff, mLen, "pathOf") gm195; if (gm195 == 1) { grt = 336; gnargs = 1; gret = 2; } #delete[gm195];
+                    txSpanIs(mOff, mLen, "setActive") gm196; if (gm196 == 1) { grt = 337; gnargs = 1; gret = 0; } #delete[gm196];
+                    txSpanIs(mOff, mLen, "remove") gm197; if (gm197 == 1) { grt = 338; gnargs = 1; gret = 0; } #delete[gm197];
+                    txSpanIs(mOff, mLen, "clicked") gm198; if (gm198 == 1) { grt = 339; gnargs = 0; gret = 1; } #delete[gm198];
+                    txSpanIs(mOff, mLen, "closeRequested") gm199; if (gm199 == 1) { grt = 340; gnargs = 0; gret = 1; } #delete[gm199];
+                    txSpanIs(mOff, mLen, "setScale") gm200; if (gm200 == 1) { grt = 341; gnargs = 1; gret = 0; } #delete[gm200];
+                    txSpanIs(mOff, mLen, "setColor") gm201; if (gm201 == 1) { grt = 342; gnargs = 2; gret = 0; } #delete[gm201];
+                    txSpanIs(mOff, mLen, "update") gm202; if (gm202 == 1) { grt = 343; gnargs = 1; gret = 1; } #delete[gm202];
+                    txSpanIs(mOff, mLen, "draw") gm203; if (gm203 == 1) { grt = 344; gnargs = 0; gret = 0; } #delete[gm203];
+                }
+                if (gkind == 14) {
+                    txSpanIs(mOff, mLen, "open") gm204; if (gm204 == 1) { grt = 346; gnargs = 2; gret = 0; } #delete[gm204];
+                    txSpanIs(mOff, mLen, "isOpen") gm205; if (gm205 == 1) { grt = 347; gnargs = 0; gret = 1; } #delete[gm205];
+                    txSpanIs(mOff, mLen, "result") gm206; if (gm206 == 1) { grt = 348; gnargs = 0; gret = 1; } #delete[gm206];
+                    txSpanIs(mOff, mLen, "chosen") gm207; if (gm207 == 1) { grt = 349; gnargs = 0; gret = 2; } #delete[gm207];
+                    txSpanIs(mOff, mLen, "setScale") gm208; if (gm208 == 1) { grt = 350; gnargs = 1; gret = 0; } #delete[gm208];
+                    txSpanIs(mOff, mLen, "setColor") gm209; if (gm209 == 1) { grt = 351; gnargs = 2; gret = 0; } #delete[gm209];
+                    txSpanIs(mOff, mLen, "setIconDir") gm210; if (gm210 == 1) { grt = 352; gnargs = 1; gret = 0; } #delete[gm210];
+                    txSpanIs(mOff, mLen, "update") gm211; if (gm211 == 1) { grt = 353; gnargs = 1; gret = 1; } #delete[gm211];
+                    txSpanIs(mOff, mLen, "draw") gm212; if (gm212 == 1) { grt = 354; gnargs = 0; gret = 0; } #delete[gm212];
+                }
+                if (gkind == 15) {
+                    txSpanIs(mOff, mLen, "start") gm213; if (gm213 == 1) { grt = 356; gnargs = 2; gret = 0; } #delete[gm213];
+                    txSpanIs(mOff, mLen, "update") gm214; if (gm214 == 1) { grt = 357; gnargs = 0; gret = 1; } #delete[gm214];
+                    txSpanIs(mOff, mLen, "active") gm215; if (gm215 == 1) { grt = 358; gnargs = 0; gret = 1; } #delete[gm215];
+                    txSpanIs(mOff, mLen, "focused") gm216; if (gm216 == 1) { grt = 359; gnargs = 0; gret = 1; } #delete[gm216];
+                    txSpanIs(mOff, mLen, "click") gm217; if (gm217 == 1) { grt = 360; gnargs = 3; gret = 0; } #delete[gm217];
+                    txSpanIs(mOff, mLen, "draw") gm218; if (gm218 == 1) { grt = 361; gnargs = 0; gret = 0; } #delete[gm218];
+                    txSpanIs(mOff, mLen, "ipLine") gm219; if (gm219 == 1) { grt = 362; gnargs = 0; gret = 1; } #delete[gm219];
+                    txSpanIs(mOff, mLen, "ipFollow") gm220; if (gm220 == 1) { grt = 363; gnargs = 0; gret = 1; } #delete[gm220];
+                    txSpanIs(mOff, mLen, "ipFile") gm221; if (gm221 == 1) { grt = 364; gnargs = 0; gret = 2; } #delete[gm221];
+                    txSpanIs(mOff, mLen, "output") gm222; if (gm222 == 1) { grt = 365; gnargs = 0; gret = 2; } #delete[gm222];
+                    txSpanIs(mOff, mLen, "held") gm223; if (gm223 == 1) { grt = 366; gnargs = 0; gret = 1; } #delete[gm223];
+                    txSpanIs(mOff, mLen, "clearHeld") gm224; if (gm224 == 1) { grt = 367; gnargs = 0; gret = 0; } #delete[gm224];
+                    txSpanIs(mOff, mLen, "close") gm225; if (gm225 == 1) { grt = 368; gnargs = 0; gret = 0; } #delete[gm225];
+                    txSpanIs(mOff, mLen, "handleKey") gm226; if (gm226 == 1) { grt = 369; gnargs = 1; gret = 0; } #delete[gm226];
+                    txSpanIs(mOff, mLen, "handleChar") gm227; if (gm227 == 1) { grt = 370; gnargs = 1; gret = 0; } #delete[gm227];
+                }
+                // GUIGEN-METHOD-END
+                    if (grt >= 0) {
+                        #stack[int, 64] las = txCallArgCountM;
+                        txCallArgCountM = txCallArgCountM + gnargs + 1;
+                        txLowerExpr(grcv) selfv;               // the handle ptr = arg0
+                        cssc::poke64(txCallArgM + las * 8, selfv);
+                        #delete[selfv];
+                        #stack[int, 64] aptr = cssc::peek64(txAstA + node * 8);
+                        #stack[int, 64] ac = 0;
+                        #stack[int, 32] ago = 1;
+                        while (ago == 1) {
+                            if (aptr == 0) { ago = 0; }
+                            if (ac >= gnargs) { ago = 0; }
+                            if (ago == 1) {
+                                txLowerExpr(aptr) av;
+                                cssc::poke64(txCallArgM + (las + 1 + ac) * 8, av);
+                                #delete[av];
+                                ac = ac + 1;
+                                aptr = cssc::peek64(txAstNext + aptr * 8);
+                            }
+                        }
+                        #delete[ago];
+                        #delete[aptr];
+                        #delete[ac];
+                        txCirCallRtN(grt, las, gnargs + 1) gres;
+                        if (gret == 1) { out = gres; }
+                        if (gret == 2) { #req[txSetStr] txSetStrG; #req[txSetOwned] txSetOwnedG; txSetStrG(gres); txSetOwnedG(gres); out = gres; }
+                        if (gret == 0) { txCirConstInt(0) gz; out = gz; #delete[gz]; }
+                        posDone = 1;
+                        #delete[gres];
+                        #delete[las];
+                    }
+                    #delete[gret];
+                    #delete[gnargs];
+                    #delete[grt];
+                }
+                #delete[gkind];
+            }
+            #delete[grcv];
+        }
+        // #matrix[w,h] pixel-array method dispatch: `m.set/.get/.fill/.width/
+        // .height/.size`. All BRANCHLESS (a trailing scratch cell absorbs an
+        // out-of-bounds set; get masks its result), indexed via poke32/peek32.
+        if (posDone == 0) {
+            #req[txMatFind] txMatFindM;
+            #stack[int, 64] mrcv = cssc::peek64(txAstB + node * 8);
+            if (cssc::peek64(txAstKind + mrcv * 8) == 5) {
+                txMatFindM(cssc::peek64(txAstOff + mrcv * 8), cssc::peek64(txAstLen + mrcv * 8)) mslot;
+                if (mslot >= 0) {
+                    #req[txCirSlotLoad] txCirSlotLoadM;
+                    #req[txCirConstInt] txCirConstIntMM;
+                    #req[txCirBinOp] txCirBinOpMM;
+                    #req[txCirPeekN] txCirPeekNMM;
+                    #req[txCirPokeN] txCirPokeNMM;
+                    #req[txCirBitBin] txCirBitBinMM;
+                    #req[txCirCallRtN] txCirCallRtNMM;
+                    #req[txCallArg] txCallArgMM;
+                    #req[txCallArgCount] txCallArgCountMM;
+                    txCirSlotLoadM(mslot) mbase;
+                    txCirConstIntMM(4) k4;
+                    txCirConstIntMM(8) k8;
+                    txCirPeekNMM(35, mbase) mwv;               // w
+                    txCirBinOpMM(1, mbase, k4) mha;
+                    txCirPeekNMM(35, mha) mhv;                 // h
+                    txCirBinOpMM(3, mwv, mhv) mn;              // n = w*h
+                    // collect up to 3 arg NODES (lowered per-method below)
+                    #stack[int, 64] an0 = 0; #stack[int, 64] an1 = 0; #stack[int, 64] an2 = 0;
+                    #stack[int, 64] ap = cssc::peek64(txAstA + node * 8);
+                    if (ap != 0) { an0 = ap; ap = cssc::peek64(txAstNext + ap * 8); }
+                    if (ap != 0) { an1 = ap; ap = cssc::peek64(txAstNext + ap * 8); }
+                    if (ap != 0) { an2 = ap; ap = cssc::peek64(txAstNext + ap * 8); }
+                    txSpanIs(mOff, mLen, "width") mIsW;
+                    txSpanIs(mOff, mLen, "height") mIsH;
+                    txSpanIs(mOff, mLen, "size") mIsSz;
+                    txSpanIs(mOff, mLen, "set") mIsSet;
+                    txSpanIs(mOff, mLen, "get") mIsGet;
+                    txSpanIs(mOff, mLen, "fill") mIsFill;
+                    if (mIsW == 1) { out = mwv; posDone = 1; }
+                    if (mIsH == 1) { out = mhv; posDone = 1; }
+                    if (mIsSz == 1) { txCirBinOpMM(3, mwv, mhv) sv; out = sv; #delete[sv]; posDone = 1; }
+                    if (mIsSet == 1) {
+                        txLowerExpr(an0) sx0; txLowerExpr(an1) sy0; txLowerExpr(an2) sc0;
+                        txCirBinOpMM(3, sy0, mwv) yw; txCirBinOpMM(1, yw, sx0) sidx;
+                        txCirConstIntMM(0) z0; txCirBinOpMM(9, sidx, z0) sge;   // idx>=0
+                        txCirBinOpMM(6, sidx, mn) slt;                          // idx<n
+                        txCirBitBinMM(29, sge, slt) sin;                        // in = ge & lt
+                        txCirConstIntMM(1) o1; txCirBinOpMM(2, o1, sin) snin;   // 1-in
+                        txCirBinOpMM(3, sidx, sin) t1; txCirBinOpMM(3, mn, snin) t2;
+                        txCirBinOpMM(1, t1, t2) scidx;                          // idx*in + n*(1-in)
+                        txCirBinOpMM(3, scidx, k4) soff; txCirBinOpMM(1, k8, soff) srel;
+                        txCirBinOpMM(1, mbase, srel) saddr;
+                        txCirPokeNMM(36, saddr, sc0);
+                        #delete[saddr]; #delete[srel]; #delete[soff]; #delete[scidx];
+                        #delete[t2]; #delete[t1]; #delete[snin]; #delete[o1];
+                        #delete[sin]; #delete[slt]; #delete[sge]; #delete[z0];
+                        #delete[sidx]; #delete[yw]; #delete[sc0]; #delete[sy0]; #delete[sx0];
+                        txCirConstIntMM(0) sz; out = sz; #delete[sz];
+                        posDone = 1;
+                    }
+                    if (mIsGet == 1) {
+                        #stack[int, 64] gidx = 0;
+                        txLowerExpr(an0) gx0;
+                        if (an1 != 0) {
+                            txLowerExpr(an1) gy0;
+                            txCirBinOpMM(3, gy0, mwv) gyw; txCirBinOpMM(1, gyw, gx0) gi;
+                            gidx = gi; #delete[gi]; #delete[gyw]; #delete[gy0];
+                        }
+                        if (an1 == 0) { gidx = gx0; }
+                        txCirConstIntMM(0) gz0; txCirBinOpMM(9, gidx, gz0) gge;
+                        txCirBinOpMM(6, gidx, mn) glt; txCirBitBinMM(29, gge, glt) gin;
+                        txCirBinOpMM(3, gidx, gin) gcidx;
+                        txCirBinOpMM(3, gcidx, k4) goff; txCirBinOpMM(1, k8, goff) grel;
+                        txCirBinOpMM(1, mbase, grel) gaddr;
+                        txCirPeekNMM(35, gaddr) graw;
+                        // sign-extend the i32 (peek32 zero-extends): raw - ((raw & 0x80000000)*2)
+                        txCirConstIntMM(2147483648) gsb; txCirBitBinMM(29, graw, gsb) ghi;
+                        txCirConstIntMM(2) gtwo; txCirBinOpMM(3, ghi, gtwo) ghi2;
+                        txCirBinOpMM(2, graw, ghi2) gsx;
+                        txCirBinOpMM(3, gsx, gin) gout;                         // 0 when out of bounds
+                        out = gout;
+                        #delete[gout]; #delete[gsx]; #delete[ghi2]; #delete[gtwo];
+                        #delete[ghi]; #delete[gsb]; #delete[graw]; #delete[gaddr];
+                        #delete[grel]; #delete[goff]; #delete[gcidx]; #delete[gin];
+                        #delete[glt]; #delete[gge]; #delete[gz0]; #delete[gx0]; #delete[gidx];
+                        posDone = 1;
+                    }
+                    if (mIsFill == 1) {
+                        txLowerExpr(an0) fc0;
+                        txCirBinOpMM(1, mbase, k8) fpx;
+                        #stack[int, 64] ffb = txCallArgCountMM;
+                        txCallArgCountMM = txCallArgCountMM + 3;
+                        cssc::poke64(txCallArgMM + ffb * 8, fpx);
+                        cssc::poke64(txCallArgMM + (ffb + 1) * 8, fc0);
+                        cssc::poke64(txCallArgMM + (ffb + 2) * 8, mn);
+                        txCirCallRtNMM(45, ffb, 3) ffr;
+                        #delete[ffr]; #delete[ffb]; #delete[fpx]; #delete[fc0];
+                        txCirConstIntMM(0) fz; out = fz; #delete[fz];
+                        posDone = 1;
+                    }
+                    #delete[mIsFill]; #delete[mIsGet]; #delete[mIsSet];
+                    #delete[mIsSz]; #delete[mIsH]; #delete[mIsW];
+                    #delete[an2]; #delete[an1]; #delete[an0]; #delete[ap];
+                    #delete[mn]; #delete[mhv]; #delete[mha]; #delete[mwv];
+                    #delete[k8]; #delete[k4]; #delete[mbase];
+                }
+                #delete[mslot];
+            }
+            #delete[mrcv];
+        }
         if (isPos == 1) {
             #stack[int, 64] rcv = cssc::peek64(txAstB + node * 8);
             if (cssc::peek64(txAstKind + rcv * 8) == 5) {     // receiver is an IDENT
@@ -2458,6 +3548,20 @@
                         #delete[lago];
                         txNewSsa() lres;
                         txCirCallUser(lfn, las, lac + 1, lres);
+                        // Tag the result by the label's mirror'd return kind, so a
+                        // captured `obj.who() a;` where `who: mirror <string>` prints
+                        // text (not the raw ptr) -- same as a plain call (2227) and
+                        // the `call lbl<> cap;` form (5165).
+                        #req[txFuncIsRetStr] txFuncIsRetStrL;
+                        #req[txFuncIsRetFloat] txFuncIsRetFloatL;
+                        #req[txFuncIsRetBool] txFuncIsRetBoolL;
+                        #req[txSetStr] txSetStrL;
+                        #req[txSetOwned] txSetOwnedL;
+                        #req[txSetFloat] txSetFloatL;
+                        #req[txSetBool] txSetBoolL;
+                        txFuncIsRetStrL(lfn) lRetS; if (lRetS == 1) { txSetStrL(lres); txSetOwnedL(lres); } #delete[lRetS];
+                        txFuncIsRetFloatL(lfn) lRetF; if (lRetF == 1) { txSetFloatL(lres); } #delete[lRetF];
+                        txFuncIsRetBoolL(lfn) lRetB; if (lRetB == 1) { txSetBoolL(lres); } #delete[lRetB];
                         out = lres;
                         posDone = 1;
                         #delete[lres];
@@ -2481,9 +3585,25 @@
         txSpanIs(mOff, mLen, "at") isAt;
         txSpanIs(mOff, mLen, "push_back") isPush;
         #stack[int, 32] mdone = 0;
+        txIsStr(recv) rIsStr;                         // string methods (length/...)
         txIsMap(recv) rIsMap;                         // maps use map_get/map_size
         txIsBind(recv) rIsBind;                       // bind: flat cells, PAIR count
-        if (isSize == 1) {
+        // `get(k)` / `get(i)` is an alias of `at` (map get / vector index). `len`
+        // is an alias of `size`. A STRING receiver's `length`/`len`/`size` all
+        // return the byte count via cssc_string_len_i64 (rtsym 41).
+        txSpanIs(mOff, mLen, "get") isGet;   if (isGet == 1) { isAt = 1; }  #delete[isGet];
+        txSpanIs(mOff, mLen, "len") isLenA;
+        txSpanIs(mOff, mLen, "length") isLenB;
+        if (rIsStr == 1) { if (isLenA == 1) { isSize = 1; } if (isLenB == 1) { isSize = 1; } }
+        if (rIsStr == 0) { if (isLenA == 1) { isSize = 1; } }
+        #delete[isLenA];
+        #delete[isLenB];
+        if (isSize == 1) { if (rIsStr == 1) {
+            txCirCallR(41, recv, 0 - 1) slr;          // cssc_string_len_i64
+            out = slr; mdone = 1;
+            #delete[slr];
+        } }
+        if (isSize == 1) { if (mdone == 0) {
             #stack[int, 64] szSym = 25;               // cssc_vec_size
             if (rIsMap == 1) { szSym = 30; }          // cssc_map_size
             txCirCallR(szSym, recv, 0 - 1) r;
@@ -2498,7 +3618,7 @@
             mdone = 1;
             #delete[r];
             #delete[szSym];
-        }
+        } }
         if (mdone == 0) { if (rIsMap == 1) { if (isAt == 1) {
             txLowerExpr(a1) mk;
             txCirCallR(29, recv, mk) r;               // cssc_map_get(m, key)
@@ -2568,6 +3688,67 @@
         #delete[isSet];
         #delete[isPopF];
         #delete[isPopB];
+        // String methods on a string receiver: upper/lower/trim -> fresh string,
+        // replace(from,to) -> fresh string, contains(sub) -> bool. rtsyms 103-107.
+        if (mdone == 0) { if (rIsStr == 1) {
+            txSpanIs(mOff, mLen, "upper") isUp;
+            txSpanIs(mOff, mLen, "lower") isLo;
+            txSpanIs(mOff, mLen, "trim") isTr;
+            txSpanIs(mOff, mLen, "replace") isRep;
+            txSpanIs(mOff, mLen, "contains") isCon;
+            txSpanIs(mOff, mLen, "append") isApp;
+            if (isUp == 1) { txCirCallR(103, recv, 0 - 1) r; txSetStr(r); txSetOwned(r); out = r; mdone = 1; #delete[r]; }
+            if (isLo == 1) { txCirCallR(104, recv, 0 - 1) r; txSetStr(r); txSetOwned(r); out = r; mdone = 1; #delete[r]; }
+            if (isTr == 1) { txCirCallR(107, recv, 0 - 1) r; txSetStr(r); txSetOwned(r); out = r; mdone = 1; #delete[r]; }
+            if (isRep == 1) {
+                #stack[int, 64] a2r = cssc::peek64(txAstNext + a1 * 8);
+                txLowerExpr(a1) rf;
+                txLowerExpr(a2r) rt2;
+                txCirCall3R(105, recv, rf, rt2) r;
+                txSetStr(r); txSetOwned(r); out = r; mdone = 1;
+                #delete[r];
+                #delete[rt2];
+                #delete[rf];
+                #delete[a2r];
+            }
+            if (isCon == 1) {
+                txLowerExpr(a1) cs;
+                txCirCallR(106, recv, cs) r;
+                txSetBool(r); out = r; mdone = 1;
+                #delete[r];
+                #delete[cs];
+            }
+            // append(x): result is recv + x (concat, rtsym 4). The arg is coerced
+            // to a string first (int/float/bool -> its text form) so `.append(n)`
+            // matches the interpreter. Pure here (expr); the EXPR_STMT handler
+            // writes the fresh string back to the receiver slot in statement pos.
+            if (isApp == 1) {
+                txLowerExpr(a1) av;
+                #stack[int, 64] avs = av;
+                txIsStr(av) avIsStr;
+                if (avIsStr == 0) {
+                    txIsFloat(av) avIsF;
+                    txIsBool(av) avIsB;
+                    if (avIsF == 1) { txCirCallR(18, av, 0 - 1) c; avs = c; #delete[c]; }
+                    if (avIsF == 0) { if (avIsB == 1) { txCirCallR(12, av, 0 - 1) c; avs = c; #delete[c]; } }
+                    if (avIsF == 0) { if (avIsB == 0) { txCirCallR(11, av, 0 - 1) c; avs = c; #delete[c]; } }
+                    #delete[avIsB];
+                    #delete[avIsF];
+                }
+                #delete[avIsStr];
+                txCirCallR(4, recv, avs) r;
+                txSetStr(r); txSetOwned(r); out = r; mdone = 1;
+                #delete[r];
+                #delete[avs];
+                #delete[av];
+            }
+            #delete[isApp];
+            #delete[isCon];
+            #delete[isRep];
+            #delete[isTr];
+            #delete[isLo];
+            #delete[isUp];
+        } }
         if (mdone == 0) { if (isPush == 1) {
             txLowerExpr(a1) xv;
             txGetElem(recv) pElem;                    // vector<auto> -> 6
@@ -2592,6 +3773,7 @@
         if (mdone == 0) { txCirConstInt(0) z; out = z; #delete[z]; }   // warn-not-reject
         #delete[rIsBind];
         #delete[rIsMap];
+        #delete[rIsStr];
         #delete[mdone];
         #delete[isSize];
         #delete[isAt];
@@ -2843,6 +4025,53 @@
                         #delete[thisB];
                         #delete[mv];
                     }
+                    // A CONTAINER / string member declared WITHOUT an initialiser
+                    // (`#stack[vector<int>,N] Obj->v;`) must still be allocated into
+                    // the instance block, exactly like the non-member path below;
+                    // otherwise the slot holds frame garbage and the first
+                    // `.size()` reads junk / the first `.push_back` faults.
+                    if (init == 0) {
+                        #stack[int, 64] mCtr = 0;
+                        if (declStr == 3) { mCtr = 1; }   // vector
+                        if (declStr == 5) { mCtr = 1; }   // bind (vector storage)
+                        if (declStr == 4) { mCtr = 2; }   // map
+                        if (mCtr != 0) {
+                            txCirConstInt(8) mcap;
+                            #stack[int, 64] mNew = 22;    // cssc_vec_new
+                            if (mCtr == 2) { mNew = 27; } // cssc_map_new
+                            txCirCallR(mNew, mcap, 0 - 1) mcnew;
+                            txCirSlotLoad(0) mThisB;
+                            txCirConstInt(boff) mBoc;
+                            txCirBinOp(1, mThisB, mBoc) mAddr;
+                            txCirStoreIndD(mAddr, mcnew);
+                            txContainerTake(mcnew);
+                            #delete[mAddr];
+                            #delete[mBoc];
+                            #delete[mThisB];
+                            #delete[mcnew];
+                            #delete[mNew];
+                            #delete[mcap];
+                        }
+                        if (declStr == 1) {               // empty string, not null
+                            txCirConstStr(0, 0) mes;
+                            txCirConstInt(0) mel;
+                            txCirCallR(3, mes, mel) mesh;
+                            txSetStr(mesh);
+                            txSetOwned(mesh);
+                            txCirSlotLoad(0) mThisB2;
+                            txCirConstInt(boff) mBoc2;
+                            txCirBinOp(1, mThisB2, mBoc2) mAddr2;
+                            txCirStoreIndD(mAddr2, mesh);
+                            txContainerTake(mesh);
+                            #delete[mAddr2];
+                            #delete[mBoc2];
+                            #delete[mThisB2];
+                            #delete[mesh];
+                            #delete[mel];
+                            #delete[mes];
+                        }
+                        #delete[mCtr];
+                    }
                     memberDone = 1;
                     #delete[boff];
                 }
@@ -2879,6 +4108,15 @@
             #stack[int, 64] mElem2 = cssc::peek64(txAstC + node * 8);
             if (mElem2 != 0) { txSlotSetElem(slot, mElem2); }
             #delete[mElem2];
+            // A map initialised with a comma literal `{k, v}` (no `:`) parses as
+            // an ARRAY_LIT (kind 22) -- the parser only tags MAP_LIT (24) when it
+            // sees `key: value`. Retag it MAP_LIT so the pair-building map path
+            // (cssc_map_set over flat k,v,k,v) runs instead of a vector store.
+            if (init != 0) {
+                if (cssc::peek64(txAstKind + init * 8) == 22) {
+                    cssc::poke64(txAstKind + init * 8, 24);
+                }
+            }
         }
         if (declStr == 3) {
             txSlotSetVec(slot, 1);
@@ -2942,6 +4180,80 @@
             if (vIsVec == 1) { txSlotSetVec(slot, 1); }
             #delete[vIsVec];
             txCirSlotStore(slot, sval);
+            // Bit-EXACT enforcement is a COMPILE-TIME contract (CSSC is
+            // deterministic; a runtime guard costs perf and is the wrong place):
+            // a CONSTANT int(0)/bool(7) literal that overflows the slot's EXPLICIT
+            // bit width sets txBitBad -> main emits NO container (compile-reject).
+            // A DYNAMIC value is RAW (no check). Bit-PATTERN range model: fits if
+            // -2^(N-1) <= v <= 2^N-1; N>=64 always fits (values are i64), so a
+            // top-bit-set constant like 0xCBF29CE484222325 in int64 is accepted.
+            #req[txDeclBits] txDeclBitsL;
+            #stack[int, 64] dBits = cssc::peek64(txDeclBitsL + node * 8);
+            if (dBits > 0) {
+                #stack[int, 32] isIB = 0;
+                if (declStr == 0) { isIB = 1; }
+                if (declStr == 7) { isIB = 1; }
+                if (isIB == 1) {
+                    // record the slot's declared width so a later ASSIGN can run
+                    // the same COMPILE-TIME constant-overflow check.
+                    #req[txSlotBits] txSlotBitsW;
+                    cssc::poke64(txSlotBitsW + slot * 8, dBits);
+                }
+                #delete[isIB];
+                if (dBits < 64) {
+                    #stack[int, 32] chkK = 0;
+                    if (declStr == 0) { chkK = 1; }
+                    if (declStr == 7) { chkK = 1; }
+                    if (chkK == 1) {
+                        // Fold the constant: a bare INT literal (kind 3, non-float)
+                        // OR the `0 - <lit>` BINOP a leading `-` lowers to (kind 6,
+                        // op 2 = subtract, A = INT 0, B = INT literal).
+                        #stack[int, 64] litV = 0;
+                        #stack[int, 32] haveLit = 0;
+                        #stack[int, 64] ik = cssc::peek64(txAstKind + init * 8);
+                        if (ik == 3) {
+                            if (cssc::peek64(txAstB + init * 8) == 0) {
+                                litV = cssc::peek64(txAstNum + init * 8);
+                                haveLit = 1;
+                            }
+                        }
+                        if (ik == 6) {
+                            if (cssc::peek64(txAstNum + init * 8) == 2) {
+                                #stack[int, 64] la = cssc::peek64(txAstA + init * 8);
+                                #stack[int, 64] lb = cssc::peek64(txAstB + init * 8);
+                                if (cssc::peek64(txAstKind + la * 8) == 3) {
+                                    if (cssc::peek64(txAstNum + la * 8) == 0) {
+                                        if (cssc::peek64(txAstKind + lb * 8) == 3) {
+                                            if (cssc::peek64(txAstB + lb * 8) == 0) {
+                                                litV = 0 - cssc::peek64(txAstNum + lb * 8);
+                                                haveLit = 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                #delete[lb];
+                                #delete[la];
+                            }
+                        }
+                        if (haveLit == 1) {
+                            #stack[int, 64] hi = cssc::shl(1, dBits) - 1;
+                            #stack[int, 64] lo = 0 - cssc::shl(1, dBits - 1);
+                            #stack[int, 32] bad = 0;
+                            if (litV > hi) { bad = 1; }
+                            if (litV < lo) { bad = 1; }
+                            if (bad == 1) { #req[txBitBad] txBitBadW; txBitBadW = 1; }
+                            #delete[bad];
+                            #delete[lo];
+                            #delete[hi];
+                        }
+                        #delete[ik];
+                        #delete[haveLit];
+                        #delete[litV];
+                    }
+                    #delete[chkK];
+                }
+            }
+            #delete[dBits];
             // NULLABLE RHS (e.g. `pk::peek` out of bounds): the interpreter coerces
             // null BY THE CONSUMING SLOT'S TYPE -- int->0, float->0.0, bool->false,
             // string->"" (all already produced as the value), but an `auto` slot (and
@@ -2962,6 +4274,96 @@
         #delete[nOff];
         #delete[nLen];
         }                                             // end of `if (memberDone == 0)`
+    }
+    if (kind == 45) {                                 // VIDEO_DECL: #video[w,h,fps] var
+        // create a headless video context (cssc_video_new, rtsym 500) and bind
+        // the handle to `var` as a plain ptr slot; video:: methods take it as arg0.
+        #req[txCirCallRtN] txCirCallRtNVd;
+        #req[txCallArg] txCallArgVd;
+        #req[txCallArgCount] txCallArgCountVd;
+        #stack[int, 64] nOff = cssc::peek64(txAstOff + node * 8);
+        #stack[int, 64] nLen = cssc::peek64(txAstLen + node * 8);
+        #stack[int, 64] vw = cssc::peek64(txAstA + node * 8);
+        #stack[int, 64] vh = cssc::peek64(txAstB + node * 8);
+        #stack[int, 64] vfps = cssc::peek64(txAstC + node * 8);
+        txCirConstInt(vw) cw;
+        txCirConstInt(vh) ch;
+        txCirConstInt(vfps) cfp;
+        #stack[int, 64] las = txCallArgCountVd;
+        txCallArgCountVd = txCallArgCountVd + 3;
+        cssc::poke64(txCallArgVd + las * 8, cw);
+        cssc::poke64(txCallArgVd + (las + 1) * 8, ch);
+        cssc::poke64(txCallArgVd + (las + 2) * 8, cfp);
+        txCirCallRtNVd(500, las, 3) vhandle;
+        txNewSlot() vslot;
+        txSymAdd(nOff, nLen, vslot);
+        txCirSlotAlloc(vslot);
+        txCirSlotStore(vslot, vhandle);
+        #delete[vhandle];
+        #delete[vslot];
+        #delete[las];
+        #delete[cfp];
+        #delete[ch];
+        #delete[cw];
+        #delete[vfps];
+        #delete[vh];
+        #delete[vw];
+        #delete[nLen];
+        #delete[nOff];
+    }
+    if (kind == 46) {                                 // MATRIX_DECL: #matrix[w,h] var
+        // A heap 2D int32 PIXEL ARRAY (CsscMatrix parity). Layout:
+        // [i32 w @0][i32 h @4][i32 pixels[w*h] @8][i32 scratch @8+w*h*4]. The
+        // trailing scratch cell lets set() be BRANCHLESS (an out-of-bounds set
+        // writes the scratch, which get() never reads). Indexed via
+        // cssc::poke32/peek32 (core ops on every backend) -> no matrix rtsym.
+        #req[txCirConstInt] txCirConstIntM;
+        #req[txCirBinOp] txCirBinOpM;
+        #req[txCirPokeN] txCirPokeNM;
+        #req[txCirCallR] txCirCallRM;
+        #req[txCirCallRtN] txCirCallRtNM;
+        #req[txCallArg] txCallArgM;
+        #req[txCallArgCount] txCallArgCountM;
+        #req[txMatAdd] txMatAddM;
+        #stack[int, 64] nOff = cssc::peek64(txAstOff + node * 8);
+        #stack[int, 64] nLen = cssc::peek64(txAstLen + node * 8);
+        #stack[int, 64] mw = cssc::peek64(txAstA + node * 8);
+        #stack[int, 64] mh = cssc::peek64(txAstB + node * 8);
+        txCirConstIntM(mw) cw;
+        txCirConstIntM(mh) ch;
+        txCirConstIntM(4) c4;
+        txCirConstIntM(8) c8;
+        txCirBinOpM(3, cw, ch) wh;                     // w*h
+        txCirConstIntM(1) c1;
+        txCirBinOpM(1, wh, c1) cells;                  // w*h + 1 (scratch)
+        txCirBinOpM(3, cells, c4) pxb;                 // (w*h+1)*4
+        txCirBinOpM(1, pxb, c8) sz;                    // + 8 header
+        txCirCallRM(5, sz, 0 - 1) base;                // cssc::alloc(size) (malloc, unzeroed)
+        txCirPokeNM(36, base, cw);                     // poke32(base+0, w)
+        txCirBinOpM(1, base, c4) haddr;
+        txCirPokeNM(36, haddr, ch);                    // poke32(base+4, h)
+        // zero the pixels (malloc doesn't; interp zero-inits): memfill32(base+8, 0, w*h)
+        txCirBinOpM(1, base, c8) pxbase;
+        txCirConstIntM(0) zc;
+        #stack[int, 64] mfb = txCallArgCountM;
+        txCallArgCountM = txCallArgCountM + 3;
+        cssc::poke64(txCallArgM + mfb * 8, pxbase);
+        cssc::poke64(txCallArgM + (mfb + 1) * 8, zc);
+        cssc::poke64(txCallArgM + (mfb + 2) * 8, wh);
+        txCirCallRtNM(45, mfb, 3) mfr;
+        txNewSlot() mslot;
+        txSymAdd(nOff, nLen, mslot);
+        txCirSlotAlloc(mslot);
+        txCirSlotStore(mslot, base);
+        txMatAddM(nOff, nLen, mslot);
+        #delete[mfr];
+        #delete[mslot];
+        #delete[mfb];
+        #delete[zc]; #delete[pxbase];
+        #delete[haddr]; #delete[base]; #delete[sz]; #delete[pxb];
+        #delete[cells]; #delete[c1]; #delete[wh];
+        #delete[c8]; #delete[c4]; #delete[ch]; #delete[cw];
+        #delete[mh]; #delete[mw]; #delete[nLen]; #delete[nOff];
     }
     if (kind == 8) {                                  // ASSIGN: name = expr
         #stack[int, 64] nOff = cssc::peek64(txAstOff + node * 8);
@@ -3019,6 +4421,59 @@
         slot = s;
         #delete[s];
         if (slot >= 0) {
+            // COMPILE-TIME bit-exact assign check (mirrors the DECL check): a
+            // CONSTANT int/bool literal that overflows the slot's EXPLICIT declared
+            // width sets txBitBad -> compile-reject. Dynamic RHS is RAW.
+            #req[txSlotBits] txSlotBitsA;
+            #stack[int, 64] aBits = cssc::peek64(txSlotBitsA + slot * 8);
+            if (aBits > 0) {
+                if (aBits < 64) {
+                    #stack[int, 64] rhs = cssc::peek64(txAstA + node * 8);
+                    #stack[int, 64] litA = 0;
+                    #stack[int, 32] haveA = 0;
+                    #stack[int, 64] rk = cssc::peek64(txAstKind + rhs * 8);
+                    if (rk == 3) {
+                        if (cssc::peek64(txAstB + rhs * 8) == 0) {
+                            litA = cssc::peek64(txAstNum + rhs * 8);
+                            haveA = 1;
+                        }
+                    }
+                    if (rk == 6) {
+                        if (cssc::peek64(txAstNum + rhs * 8) == 2) {
+                            #stack[int, 64] ra = cssc::peek64(txAstA + rhs * 8);
+                            #stack[int, 64] rb = cssc::peek64(txAstB + rhs * 8);
+                            if (cssc::peek64(txAstKind + ra * 8) == 3) {
+                                if (cssc::peek64(txAstNum + ra * 8) == 0) {
+                                    if (cssc::peek64(txAstKind + rb * 8) == 3) {
+                                        if (cssc::peek64(txAstB + rb * 8) == 0) {
+                                            litA = 0 - cssc::peek64(txAstNum + rb * 8);
+                                            haveA = 1;
+                                        }
+                                    }
+                                }
+                            }
+                            #delete[rb];
+                            #delete[ra];
+                        }
+                    }
+                    if (haveA == 1) {
+                        #stack[int, 64] hiA = cssc::shl(1, aBits) - 1;
+                        #stack[int, 64] loA = 0 - cssc::shl(1, aBits - 1);
+                        #stack[int, 32] badA = 0;
+                        if (litA > hiA) { badA = 1; }
+                        if (litA < loA) { badA = 1; }
+                        if (badA == 1) { #req[txBitBad] txBitBadA; txBitBadA = 1; }
+                        #delete[badA];
+                        #delete[loA];
+                        #delete[hiA];
+                    }
+                    #delete[rk];
+                    #delete[haveA];
+                    #delete[litA];
+                    #delete[rhs];
+                }
+            }
+            #delete[aBits];
             txLowerExpr(cssc::peek64(txAstA + node * 8)) val;
             #stack[int, 64] sval = val;               // value actually stored (maybe narrowed)
             txIsStr(val) vIsStr;
@@ -3084,8 +4539,57 @@
     if (kind == 16) {                                 // EXPR_STMT: lower call, discard
         #stack[int, 64] inner = cssc::peek64(txAstA + node * 8);
         #stack[int, 64] ik = cssc::peek64(txAstKind + inner * 8);
-        if (ik == 14) { txLowerCall(inner) r; #delete[r]; }
-        if (ik != 14) { txLowerExpr(inner) r; #delete[r]; }
+        #stack[int, 32] wbDone = 0;
+        // An in-place string manipulator (upper/lower/trim/replace/append) used
+        // as a STATEMENT mutates its receiver: lower the pure transform, then
+        // rebind the receiver slot to the fresh string (release old, store new).
+        // Position-dependent, matching the interpreter -- in EXPRESSION position
+        // the same method call stays pure (handled in txLowerExpr).
+        if (ik == 23) {
+            #stack[int, 64] miOff = cssc::peek64(txAstOff + inner * 8);
+            #stack[int, 64] miLen = cssc::peek64(txAstLen + inner * 8);
+            txSpanIs(miOff, miLen, "upper") wU;
+            txSpanIs(miOff, miLen, "lower") wL;
+            txSpanIs(miOff, miLen, "trim") wT;
+            txSpanIs(miOff, miLen, "replace") wR;
+            txSpanIs(miOff, miLen, "append") wA;
+            #stack[int, 32] isInplace = 0;
+            if (wU == 1) { isInplace = 1; }
+            if (wL == 1) { isInplace = 1; }
+            if (wT == 1) { isInplace = 1; }
+            if (wR == 1) { isInplace = 1; }
+            if (wA == 1) { isInplace = 1; }
+            #delete[wA]; #delete[wR]; #delete[wT]; #delete[wL]; #delete[wU];
+            if (isInplace == 1) {
+                #stack[int, 64] rcv = cssc::peek64(txAstB + inner * 8);
+                if (cssc::peek64(txAstKind + rcv * 8) == 5) {   // IDENT receiver has a slot
+                    txSymFind(cssc::peek64(txAstOff + rcv * 8), cssc::peek64(txAstLen + rcv * 8)) slot;
+                    if (slot >= 0) {
+                        txSlotIsStr(slot) sIsStr;
+                        if (sIsStr == 1) {
+                            txLowerExpr(inner) r;             // fresh transformed string
+                            txReleaseSlotOld(slot);
+                            txCirSlotStore(slot, r);
+                            txSlotSetStr(slot, 1);
+                            txClearOwned(r);
+                            wbDone = 1;
+                            #delete[r];
+                        }
+                        #delete[sIsStr];
+                    }
+                    #delete[slot];
+                }
+                #delete[rcv];
+            }
+            #delete[isInplace];
+            #delete[miLen];
+            #delete[miOff];
+        }
+        if (wbDone == 0) {
+            if (ik == 14) { txLowerCall(inner) r; #delete[r]; }
+            if (ik != 14) { txLowerExpr(inner) r; #delete[r]; }
+        }
+        #delete[wbDone];
         #delete[ik];
         #delete[inner];
     }
@@ -3101,6 +4605,46 @@
         // `Type() inst;` -- object instantiation: run the ctor and record the
         // instance's type so `inst->member` / `inst.label()` resolve later.
         #stack[int, 32] instDone = 0;
+        // `g::Screen(...) screen;` -- a gui ctor capture: record the var's widget
+        // kind so `screen->method(...)` dispatches to the right gui rtsym.
+        #stack[int, 32] guiKind = 0;
+        if (innerK == 14) {
+            #req[txNsColon] txNsColonRc;
+            #req[txBiModKind] txBiModKindRc;
+            #stack[int, 64] gcOff = cssc::peek64(txAstOff + inner * 8);
+            #stack[int, 64] gcLen = cssc::peek64(txAstLen + inner * 8);
+            txNsColonRc(gcOff, gcLen) gcp;
+            if (gcp >= 0) {
+                txBiModKindRc(gcOff, gcp) gbk;
+                if (gbk == 7) {
+                    #stack[int, 64] cmOff = gcOff + gcp + 2;
+                    #stack[int, 64] cmLen = gcLen - gcp - 2;
+                    txSpanIs(cmOff, cmLen, "Screen") isScrRc;   if (isScrRc == 1) { guiKind = 1; } #delete[isScrRc];
+                    // GUIGEN-GUIKIND-BEGIN (generated by harness/gui_gen.py -- do not hand-edit)
+                    txSpanIs(cmOff, cmLen, "Font") isRcK2; if (isRcK2 == 1) { guiKind = 2; } #delete[isRcK2];
+                    txSpanIs(cmOff, cmLen, "Text") isRcK3; if (isRcK3 == 1) { guiKind = 3; } #delete[isRcK3];
+                    txSpanIs(cmOff, cmLen, "Button") isRcK4; if (isRcK4 == 1) { guiKind = 4; } #delete[isRcK4];
+                    txSpanIs(cmOff, cmLen, "Toolbar") isRcK5; if (isRcK5 == 1) { guiKind = 5; } #delete[isRcK5];
+                    txSpanIs(cmOff, cmLen, "TextBox") isRcK6; if (isRcK6 == 1) { guiKind = 6; } #delete[isRcK6];
+                    txSpanIs(cmOff, cmLen, "Editor") isRcK7; if (isRcK7 == 1) { guiKind = 7; } #delete[isRcK7];
+                    txSpanIs(cmOff, cmLen, "List") isRcK8; if (isRcK8 == 1) { guiKind = 8; } #delete[isRcK8];
+                    txSpanIs(cmOff, cmLen, "Tree") isRcK9; if (isRcK9 == 1) { guiKind = 9; } #delete[isRcK9];
+                    txSpanIs(cmOff, cmLen, "Terminal") isRcK10; if (isRcK10 == 1) { guiKind = 10; } #delete[isRcK10];
+                    txSpanIs(cmOff, cmLen, "Menu") isRcK11; if (isRcK11 == 1) { guiKind = 11; } #delete[isRcK11];
+                    txSpanIs(cmOff, cmLen, "Prompt") isRcK12; if (isRcK12 == 1) { guiKind = 12; } #delete[isRcK12];
+                    txSpanIs(cmOff, cmLen, "Tabs") isRcK13; if (isRcK13 == 1) { guiKind = 13; } #delete[isRcK13];
+                    txSpanIs(cmOff, cmLen, "Browser") isRcK14; if (isRcK14 == 1) { guiKind = 14; } #delete[isRcK14];
+                    txSpanIs(cmOff, cmLen, "Debugger") isRcK15; if (isRcK15 == 1) { guiKind = 15; } #delete[isRcK15];
+                    // GUIGEN-GUIKIND-END
+                    #delete[cmLen];
+                    #delete[cmOff];
+                }
+                #delete[gbk];
+            }
+            #delete[gcp];
+            #delete[gcLen];
+            #delete[gcOff];
+        }
         if (innerK == 14) {
             #req[txObjFind] txObjFind;
             #req[txInstOff] txInstOff;
@@ -3174,6 +4718,8 @@
             txClearOwned(res);                        // the slot now owns the ref
         }
         if (res < 0) { txCirConstInt(0) z; txCirSlotStore(slot, z); #delete[z]; }
+        if (guiKind > 0) { #req[txGuiAdd] txGuiAddRc; txGuiAddRc(capOff, capLen, guiKind); }
+        #delete[guiKind];
         #delete[slot];
         #delete[res];
         #delete[capLen];
@@ -3932,7 +5478,23 @@
         // SNAPSHOT the container (interpreter does `list(iterable)`, so pushes to
         // the source during the loop are NOT seen -- probe p_s_select_mutate).
         txCirConstInt(esFlag) ekc;
-        txCirCallR(36, iv, ekc) snap;                 // cssc_vec_copy(v, elemIsStr)
+        // A MAP iterable yields its VALUES (interpreter: list(map.values())) in
+        // insertion order; cssc_map_values returns a fresh owned vector so the
+        // vector loop below runs unchanged. A vector snapshots via cssc_vec_copy.
+        #req[txIsMap] txIsMapSel;
+        txIsMapSel(iv) selIsMap;
+        #stack[int, 64] snap = 0;
+        if (selIsMap == 1) {
+            txCirCallR(4119, iv, ekc) mvals;          // cssc_map_values(map, valIsStr)
+            snap = mvals;
+            #delete[mvals];
+        }
+        if (selIsMap == 0) {
+            txCirCallR(36, iv, ekc) snapv;            // cssc_vec_copy(vec, elemIsStr)
+            snap = snapv;
+            #delete[snapv];
+        }
+        #delete[selIsMap];
         txSetVec(snap);
         if (ek != 0) { txSetElem(snap, ek); }
         txNewSlot() snapSlot;
@@ -4266,6 +5828,43 @@
             if (fj >= 0) { txFuncIsRetStr(fj) fs; if (fs == 1) { r = 1; } #delete[fs]; }
             #delete[fj];
         }
+        if (k == 38) {                                      // ARROW: obj->member, string member?
+            #req[txArrowObj] txArrowObjS;
+            #req[txMemFind] txMemFindS;
+            #req[txMemKind] txMemKindS;
+            txArrowObjS(cssc::peek64(txAstA + node * 8)) aoS;
+            if (aoS >= 0) {
+                txMemFindS(aoS, cssc::peek64(txAstOff + node * 8), cssc::peek64(txAstLen + node * 8)) miS;
+                if (miS >= 0) { if (cssc::peek64(txMemKindS + miS * 8) == 1) { r = 1; } }
+                #delete[miS];
+            }
+            #delete[aoS];
+        }
+        if (k == 25) {                                      // INDEX recv[i]: string element?
+            #stack[int, 64] rcv = cssc::peek64(txAstB + node * 8);
+            // `s[i]` on a string expression -> a 1-char string.
+            txExprIsStrStatic(rcv) recvS;
+            if (recvS == 1) { r = 1; }
+            #delete[recvS];
+            // `Obj->member[i]` where the member is a container of strings
+            // (vector<string> / map<_,string>): its ELEMENT kind (txMemElem)
+            // decides, so a label returning `mirror Obj->vec[i]` types as string.
+            if (r == 0) {
+                if (cssc::peek64(txAstKind + rcv * 8) == 38) {
+                    #req[txArrowObj] txArrowObjI;
+                    #req[txMemFind] txMemFindI;
+                    #req[txMemElem] txMemElemI;
+                    txArrowObjI(cssc::peek64(txAstA + rcv * 8)) aoI;
+                    if (aoI >= 0) {
+                        txMemFindI(aoI, cssc::peek64(txAstOff + rcv * 8), cssc::peek64(txAstLen + rcv * 8)) miI;
+                        if (miI >= 0) { if (cssc::peek64(txMemElemI + miI * 8) == 1) { r = 1; } }
+                        #delete[miI];
+                    }
+                    #delete[aoI];
+                }
+            }
+            #delete[rcv];
+        }
         #delete[k];
     }
     return r;
@@ -4498,6 +6097,29 @@
                 if (mLive == 0) { txPreMarkRet(mvN, fi); }
                 #delete[mLive];
                 #delete[mvN];
+            }
+            if (k == 15) {                                                     // f(a) cap; -- a capture
+                // The capture var is a STRING if the called fn returns a string,
+                // so `mirror &cap;` later types the label. Reuses txExprIsStrStatic
+                // on the inner CALL node (its k==14 branch checks the callee).
+                txExprIsStrStatic(cssc::peek64(txAstA + s * 8)) rcS;
+                if (rcS == 1) { txPreStrAdd(cssc::peek64(txAstOff + s * 8), cssc::peek64(txAstLen + s * 8)); }
+                #delete[rcS];
+            }
+            if (k == 40) {                                                     // call lbl<..> cap;
+                #stack[int, 64] pcL = cssc::peek64(txAstC + s * 8);
+                if (pcL > 0) {
+                    #req[txLabFindAnyFn] txLabFindAnyFnP;
+                    #req[txFuncIsRetStr] txFuncIsRetStrP;
+                    txLabFindAnyFnP(cssc::peek64(txAstOff + s * 8), cssc::peek64(txAstLen + s * 8)) lfP;
+                    if (lfP >= 0) {
+                        txFuncIsRetStrP(lfP) lrsP;
+                        if (lrsP == 1) { txPreStrAdd(cssc::peek64(txAstB + s * 8), pcL); }
+                        #delete[lrsP];
+                    }
+                    #delete[lfP];
+                }
+                #delete[pcL];
             }
             if (k == 12) { txPreScanBody(cssc::peek64(txAstA + s * 8), fi); }
             if (k == 9) {
@@ -5014,12 +6636,24 @@
                 txSpanIs(mnOff, mnLen, "paths") isPathsMod;
                 txSpanIs(mnOff, mnLen, "stdio") isStdioMod;
                 txSpanIs(mnOff, mnLen, "peek") isPeekMod;
+                txSpanIs(mnOff, mnLen, "gui") isGuiMod;
+                txSpanIs(mnOff, mnLen, "video") isVideoMod;
+                txSpanIs(mnOff, mnLen, "sys") isSysMod;
+                txSpanIs(mnOff, mnLen, "env") isEnvMod;
                 #stack[int, 32] biKind = 0;
                 if (isMathMod == 1) { biKind = 1; }
                 if (isSizesMod == 1) { biKind = 2; }
                 if (isPathsMod == 1) { biKind = 4; }
                 if (isStdioMod == 1) { biKind = 5; }
                 if (isPeekMod == 1) { biKind = 6; }
+                if (isGuiMod == 1) { biKind = 7; }
+                if (isVideoMod == 1) { biKind = 8; }
+                if (isSysMod == 1) { biKind = 9; }
+                if (isEnvMod == 1) { biKind = 10; }
+                #delete[isEnvMod];
+                #delete[isSysMod];
+                #delete[isVideoMod];
+                #delete[isGuiMod];
                 if (biKind > 0) {
                     #req[txBiModAdd] txBiModAdd;            // not a sector; ignore any
                     if (aLen > 0) { txBiModAdd(aOff, aLen, biKind); } // placeholder module file
@@ -5345,6 +6979,80 @@
     while (i < txInstCount) {
         txSpanEq(off, len, cssc::peek64(txInstOff + i * 8), cssc::peek64(txInstLen + i * 8)) eq;
         if (eq == 1) { r = cssc::peek64(txInstObj + i * 8); }
+        #delete[eq];
+        i = i + 1;
+    }
+    #delete[i];
+    return r;
+}
+// gui-handle table: register a result-captured gui var (name off/len) -> widget kind.
+#stack[int, 64] txGuiAdd;
+#define(txGuiAdd) {
+    #scanp(txGuiAdd, int, 0) off;
+    #scanp(txGuiAdd, int, 1) len;
+    #scanp(txGuiAdd, int, 2) kind;
+    #req[txGuiOff] txGuiOff;
+    #req[txGuiLen] txGuiLen;
+    #req[txGuiKind] txGuiKind;
+    #req[txGuiCount] txGuiCount;
+    #stack[int, 64] i = txGuiCount;
+    cssc::poke64(txGuiOff + i * 8, off);
+    cssc::poke64(txGuiLen + i * 8, len);
+    cssc::poke64(txGuiKind + i * 8, kind);
+    txGuiCount = txGuiCount + 1;
+}
+// resolve a var name (off/len) -> its gui widget kind, or -1 if not a gui handle.
+#stack[int, 64] txGuiFind;
+#define(txGuiFind) {
+    #scanp(txGuiFind, int, 0) off;
+    #scanp(txGuiFind, int, 1) len;
+    #req[txGuiOff] txGuiOff;
+    #req[txGuiLen] txGuiLen;
+    #req[txGuiKind] txGuiKind;
+    #req[txGuiCount] txGuiCount;
+    #req[txSpanEq] txSpanEq;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] r = 0 - 1;
+    while (i < txGuiCount) {
+        txSpanEq(off, len, cssc::peek64(txGuiOff + i * 8), cssc::peek64(txGuiLen + i * 8)) eq;
+        if (eq == 1) { r = cssc::peek64(txGuiKind + i * 8); }
+        #delete[eq];
+        i = i + 1;
+    }
+    #delete[i];
+    return r;
+}
+// `#matrix[w,h]` registry: register a name -> its handle slot, and resolve a
+// name -> slot (or -1). Mirrors txGuiAdd/txGuiFind.
+#stack[int, 64] txMatAdd;
+#define(txMatAdd) {
+    #scanp(txMatAdd, int, 0) off;
+    #scanp(txMatAdd, int, 1) len;
+    #scanp(txMatAdd, int, 2) slot;
+    #req[txMatOff] txMatOff;
+    #req[txMatLen] txMatLen;
+    #req[txMatSlot] txMatSlot;
+    #req[txMatCount] txMatCount;
+    #stack[int, 64] i = txMatCount;
+    cssc::poke64(txMatOff + i * 8, off);
+    cssc::poke64(txMatLen + i * 8, len);
+    cssc::poke64(txMatSlot + i * 8, slot);
+    txMatCount = txMatCount + 1;
+}
+#stack[int, 64] txMatFind;
+#define(txMatFind) {
+    #scanp(txMatFind, int, 0) off;
+    #scanp(txMatFind, int, 1) len;
+    #req[txMatOff] txMatOff;
+    #req[txMatLen] txMatLen;
+    #req[txMatSlot] txMatSlot;
+    #req[txMatCount] txMatCount;
+    #req[txSpanEq] txSpanEq;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] r = 0 - 1;
+    while (i < txMatCount) {
+        txSpanEq(off, len, cssc::peek64(txMatOff + i * 8), cssc::peek64(txMatLen + i * 8)) eq;
+        if (eq == 1) { r = cssc::peek64(txMatSlot + i * 8); }
         #delete[eq];
         i = i + 1;
     }
@@ -6025,6 +7733,7 @@
     #req[txSFnLen] txSFnLen;
     #req[txSFnIdx] txSFnIdx;
     #req[txSFnCount] txSFnCount;
+    #req[txNsColon] txNsColon;
     #stack[int, 64] s = head;
     #stack[int, 32] go = 1;
     while (go == 1) {
@@ -6035,10 +7744,25 @@
                 txFuncAdd(0, 0, s) fi;
                 #stack[int, 64] idx = txSFnCount;
                 txSFnCount = txSFnCount + 1;
+                // A member fn may be declared `#define(fn)` (bare) OR
+                // `#define(Sec::fn)` (qualified). Store only the BARE member
+                // name so `txSFnFind(sec, "fn")` matches both the internal
+                // registration and the external `Sec::fn()` call. Cases:
+                // sector_function, sector_private_member.
+                #stack[int, 64] fnOff = cssc::peek64(txAstOff + s * 8);
+                #stack[int, 64] fnLen = cssc::peek64(txAstLen + s * 8);
+                txNsColon(fnOff, fnLen) fnCp;
+                if (fnCp >= 0) {
+                    fnOff = fnOff + fnCp + 2;
+                    fnLen = fnLen - fnCp - 2;
+                }
+                #delete[fnCp];
                 cssc::poke64(txSFnSec + idx * 8, secId);
-                cssc::poke64(txSFnOff + idx * 8, cssc::peek64(txAstOff + s * 8));
-                cssc::poke64(txSFnLen + idx * 8, cssc::peek64(txAstLen + s * 8));
+                cssc::poke64(txSFnOff + idx * 8, fnOff);
+                cssc::poke64(txSFnLen + idx * 8, fnLen);
                 cssc::poke64(txSFnIdx + idx * 8, fi);
+                #delete[fnLen];
+                #delete[fnOff];
                 #delete[idx];
                 #delete[fi];
             }
@@ -6381,6 +8105,7 @@
     #req[txAstLen] txAstLen;
     #req[txSecFind] txSecFind;
     #req[txSFnFind] txSFnFind;
+    #req[txNsColon] txNsColon;
     #req[txSecFreeFn] txSecFreeFn;
     #req[txLowerDefine] txLowerDefine;
     #req[txLowerSecFree] txLowerSecFree;
@@ -6403,7 +8128,14 @@
                     }
                     if (allgo == 1) { if (chain != 0) {
                         if (cssc::peek64(txAstKind + chain * 8) == 17) {   // FUNC_DEF
-                            txSFnFind(secId, cssc::peek64(txAstOff + chain * 8), cssc::peek64(txAstLen + chain * 8)) fi;
+                            // strip a `Sec::` prefix off the FUNC_DEF name so the
+                            // lookup matches txSecScanFns' bare-name registration.
+                            #stack[int, 64] lfOff = cssc::peek64(txAstOff + chain * 8);
+                            #stack[int, 64] lfLen = cssc::peek64(txAstLen + chain * 8);
+                            txNsColon(lfOff, lfLen) lfCp;
+                            if (lfCp >= 0) { lfOff = lfOff + lfCp + 2; lfLen = lfLen - lfCp - 2; }
+                            #delete[lfCp];
+                            txSFnFind(secId, lfOff, lfLen) fi;
                             if (fi >= 0) {
                                 txCurSector = secId;
                                 txCurSecCtor = 0;
@@ -6412,6 +8144,8 @@
                                 txCurSecCtor = 0;
                             }
                             #delete[fi];
+                            #delete[lfLen];
+                            #delete[lfOff];
                         }
                         chain = cssc::peek64(txAstNext + chain * 8);
                     } }
