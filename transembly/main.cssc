@@ -23,12 +23,14 @@
     #scanp(txLoadModules, int, 0) mainBuf;
     #scanp(txLoadModules, int, 1) mainLen;
     #scanp(txLoadModules, int, 2) comb;
+    #scanp(txLoadModules, int, 3) combCap;
     #req[txTokCount] txTokCount;
     #req[txTokCode] txTokCode;
     #req[txTokOffA] txTokOffA;
     #req[txTokLenA] txTokLenA;
     #req[txSrc] txSrc;
     #req[txSpanIs] txSpanIs;
+    #req[txCapBad] txCapBadLM;
     #stack[int, 64] cn = 0;
     #stack[int, 64] ti = 0;
     #stack[int, 32] go = 1;
@@ -45,9 +47,12 @@
                 if (isInc == 1) { cssc::modPathInc(txSrc + soff, slen); }
                 if (isLoad == 1) { cssc::modPath(txSrc + soff, slen); }
                 if (isInc + isLoad > 0) {
-                    #stack[int, 64] nr = cssc::modRead(comb + cn, 1000000);
-                    if (nr > 0) { cn = cn + nr; cssc::poke8(comb + cn, 10); cn = cn + 1; }
-                    #delete[nr];
+                    if (cn + 1000000 + 8 >= combCap) { txCapBadLM = 1; }   // module would overflow comb
+                    if (cn + 1000000 + 8 < combCap) {
+                        #stack[int, 64] nr = cssc::modRead(comb + cn, 1000000);
+                        if (nr > 0) { cn = cn + nr; cssc::poke8(comb + cn, 10); cn = cn + 1; }
+                        #delete[nr];
+                    }
                 }
                 #delete[slen]; #delete[soff];
                 #delete[isLoad]; #delete[isInc]; #delete[klen]; #delete[koff];
@@ -57,6 +62,7 @@
     }
     #delete[go];
     #delete[ti];
+    if (cn + mainLen + 1 >= combCap) { txCapBadLM = 1; return cn; }    // main would overflow comb
     #stack[int, 64] mi = 0;                                          // append the main source
     #stack[int, 32] mg = 1;
     while (mg == 1) {
@@ -69,16 +75,35 @@
     return cn;
 }
 
-// read the whole program off stdin (1 MiB cap)
-#stack[int, 64] buf = cssc::alloc(1048576);
-#stack[int, 64] n = cssc::hostRead(buf, 1000000);
+// Visible abort for a capacity overflow (input / AST / CIR / func / glob / sym /
+// code / strings / relocs / comb). Printed instead of a silently-truncated
+// artefact; the driver then sees no ENTRY/CODE/OBJ line and reports failure.
+#stack[int, 64] txCapAbortMsg;
+#define(txCapAbortMsg) {
+    #stack[string, 256] ce = "CAPACITY_EXCEEDED: program exceeds a fixed compiler table (input/AST/CIR/functions/globals/symbols/code/strings/relocs). No output emitted -- split into smaller modules.";
+    cssc::outln(ce);
+    #delete[ce];
+}
+
+// Read the whole program off stdin. ★ The buffer was 1 MiB, which SILENTLY
+// TRUNCATED any larger source (fread stops at the cap) -- a 2.4 MB kernel was cut
+// to ~42%, which then compiled+linked+booted but produced almost no output. Now
+// 32 MiB, and a fill-to-cap read is treated as OVERFLOW (txCapBad) so an even
+// bigger input aborts VISIBLY instead of losing its tail.
+#stack[int, 64] inCap = 33554432;
+#stack[int, 64] buf = cssc::alloc(inCap);
+#stack[int, 64] n = cssc::hostRead(buf, inCap - 1);
+if (n >= inCap - 1) { #req[txCapBad] txCapBadIn; txCapBadIn = 1; }
 
 txLexInit();
 txTokenizeSrc(buf, n);        // fills token columns; sets txSrc = buf
 
-// pull in #include/#load module sources, then re-tokenize the combined text.
-#stack[int, 64] comb = cssc::alloc(4194304);
-#stack[int, 64] cn = txLoadModules(buf, n, comb);
+// Pull in #include/#load module sources, then re-tokenize the combined text.
+// 64 MiB holds a large program plus its inlined modules; txLoadModules flags
+// txCapBad if the combined text would exceed it (see its guard).
+#stack[int, 64] combCap = 67108864;
+#stack[int, 64] comb = cssc::alloc(combCap);
+#stack[int, 64] cn = txLoadModules(buf, n, comb, combCap);
 txTokenizeSrc(comb, cn);      // txSrc now = comb (modules + main)
 
 txAstInit();
@@ -89,20 +114,80 @@ txParseProgram() prog;        // AST root (PROGRAM node)
 // build here too (probe p_e020_concat, rc=1), so accepting it would make us
 // disagree with the oracle on which programs are legal -- not just on what they
 // print. Emitting no container IS the rejection: run.py cannot load one.
+#req[txCapBad] txCapBadR;
+// ★ Abort BEFORE txValidateLits / txLower if the stdin read or PARSE overflowed a
+// table. The AST clamp can leave a CYCLIC node (a child pointing at the reused
+// last slot), which would make the AST walkers LOOP forever -- so this early gate
+// is what stops an over-cap program from HANGING instead of failing cleanly.
+if (txCapBadR == 1) { txCapAbortMsg(); }
+if (txCapBadR == 0) {
 txValidateLits(prog) litBad;
 if (litBad == 0) {
     txCirInit();
     txLower(prog);                // AST -> CIR (may set txIsoBad when a #define
                                   // body calls an un-#req'd sibling -- isolation)
+    // A CIR overflow during lowering would likewise make txX86Emit loop -> abort.
+    if (txCapBadR == 1) { txCapAbortMsg(); }
+    if (txCapBadR == 0) {
 
-    // Isolation violation -> reject like the reference: emit NO container, so a
-    // program that calls a strictly-isolated sibling produces no output. (A
-    // `string` literal wider than its declared bits is NOT rejected here -- it
-    // lowers to a RUNTIME trap that fires only if the decl executes.)
-    if (txIsoBad == 0) {
+    // Isolation violation OR a CONSTANT int/bool overflowing its declared bit
+    // width -> reject like the reference: emit NO container (compile-time). The
+    // bit overflow is a COMPILE-TIME contract (deterministic, no runtime guard);
+    // a dynamic value is RAW.
+    #req[txBitBad] txBitBadR;
+    #req[txIntrinBad] txIntrinBadR;
+    #req[txIntrinBadOff] txIntrinBadOffR;
+    #req[txIntrinBadLen] txIntrinBadLenR;
+    #stack[int, 32] canEmit = 0;
+    if (txIsoBad == 0) { if (txBitBadR == 0) { if (txIntrinBadR == 0) { canEmit = 1; } } }
+    // Name the builtin. "no output" on a large program costs a bisect to
+    // localise; the name costs one line here.
+    if (txIntrinBadR == 1) {
+        cssc::out("UNIMPLEMENTED_BUILTIN ");
+        cssc::printRaw(txSrc + txIntrinBadOffR, txIntrinBadLenR);
+        cssc::outln();
+    }
+    if (canEmit == 1) {
+        // Sink selection (argv[1]), decided BEFORE codegen:
+        //   (none)  -> hosted TXB1 container (run.py / selfcarry)
+        //   --free  -> standalone static Linux ELF, target 1 (raw syscalls)
+        // fsTarget is the freestanding layout id (1 = Linux static).
+        #stack[int, 32] fsMode = 0;
+        #stack[int, 32] fsTarget = 0;
+        if (cssc::argc() >= 2) {
+            #stack[int, 64] fbuf = cssc::alloc(64);
+            #stack[int, 64] fal = cssc::argStr(1, fbuf, 63);
+            cssc::poke8(fbuf + fal, 0);
+            #stack[string, 8] fdash = "--free";
+            #stack[int, 64] fda = 0;
+            #adress[fdash] fda;
+            #stack[int, 64] fdh = cssc::peek64(fda);
+            #stack[int, 32] fmatch = 1;
+            #stack[int, 64] fi = 0;
+            while (fi < 6) {
+                if (cssc::peek8(fbuf + fi) != cssc::peek8(fdh + 8 + fi)) { fmatch = 0; }
+                fi = fi + 1;
+            }
+            if (fmatch == 1) { fsMode = 1; fsTarget = 1; }   // --free -> Linux static (target 1)
+            #delete[fi];
+            #delete[fmatch];
+            #delete[fdh];
+            #delete[fda];
+            #delete[fdash];
+            #delete[fal];
+            #delete[fbuf];
+        }
         txX86Init();
         txX86Emit();              // CIR -> x86-64 bytes + relocs + string data
-        txEmitContainer(0);       // entry_off = 0
+        // ★ CODE / string-data / fixup overflow during emit -> abort visibly.
+        if (txCapBadR == 1) { txCapAbortMsg(); }
+        if (txCapBadR == 0) {
+            if (fsMode == 1) { txEmitFreestanding(0, fsTarget); }
+            if (fsMode == 0) { txEmitContainer(0); }
+        }
+        #delete[fsTarget];
+        #delete[fsMode];
+    }
     }
 }
 if (litBad != 0) {
@@ -112,6 +197,7 @@ if (litBad != 0) {
 }
 
 #delete[litBad];
+}
 #delete[prog];
 #delete[n];
 #delete[buf];

@@ -156,8 +156,10 @@
     #stack[int, 64] et = cssc::peek32(h + 12);
     #stack[int, 64] r = 0;
     ciVecPopType = et;              // real type of the returned element (auto -> per-elem)
+    #stack[int, 32] inb = 0;
     if (i >= 0) {
         if (i < size) {
+            inb = 1;
             #stack[int, 64] d = cssc::peek64(h + 16);
             #stack[int, 64] raw = cssc::peek64(d + i * 8);
             if (et == 1) {
@@ -179,6 +181,8 @@
             #delete[d];
         }
     }
+    if (inb == 0) { ciVecPopType = 3; }   // out-of-bounds read -> null (0x0), RAW
+    #delete[inb];
     #delete[et];
     #delete[size];
     return r;

@@ -18,6 +18,7 @@
     #stack[int, 32] r = 0;
     if (txSpanEqLit(mOff, mLen, "allocwatcher") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { r = 1; }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "console") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { r = 1; }
@@ -39,7 +40,10 @@
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "matrix") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { r = 1; }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { r = 1; }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { r = 1; }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { r = 1; }
     if (txSpanEqLit(mOff, mLen, "retrogadgets") == 1) { r = 1; }
@@ -86,17 +90,20 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Browser") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Callback") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Font") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "List") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Screen") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tabs") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Terminal") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Text") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tree") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { if (txSpanEqLit(nOff, nLen, "Key") == 1) { r = 1; } }
@@ -106,12 +113,8 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "MouseClient") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "attach") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "client") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "response") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Linux") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { r = 1; } }
@@ -220,6 +223,7 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "SoundObject") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "load") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "loadFromBytes") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "tft") == 1) { if (txSpanEqLit(nOff, nLen, "display") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "video") == 1) { if (txSpanEqLit(nOff, nLen, "framebuffer") == 1) { r = 1; } }
@@ -248,17 +252,43 @@
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "getOutput") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "run") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "thread") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bg") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "blink") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bold") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_out") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_outln") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "color") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "dim") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "invert") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "italic") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "paint") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "rgb") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strike") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strip") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "underline") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "abs") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "analyze") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "args") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "assemble") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "band") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bnot") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bor") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "build") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bxor") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "cli") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "clock") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "copy") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "create_runtime") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "date") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "datetime") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "detime") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "div") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "elapsed") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "exit") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "input") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "interpret") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ip") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipcall") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipto") == 1) { r = 1; } }
@@ -266,9 +296,14 @@
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "len") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mod") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mul") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nand") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nor") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ntp_sync") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "out") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "outln") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "pctrace") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "pop") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "push") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "random") == 1) { r = 1; } }
@@ -277,9 +312,13 @@
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "reboot") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sdetime") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "set_timezone") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shell") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shl") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shr") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sleep") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sort") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sqrt") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sub") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "time") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "time_format") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "timestamp") == 1) { r = 1; } }
@@ -289,6 +328,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "uptime") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "wifi_connect") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xnor") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xor") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "Binary") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { r = 1; } }
@@ -300,6 +341,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "tobinary") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clearsection") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createdll") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createsection") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "deletedll") == 1) { r = 1; } }
@@ -314,6 +357,7 @@
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listdlls") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listentries") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listsections") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "removesection") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "unlink") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "version") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "add_path") == 1) { r = 1; } }
@@ -322,7 +366,6 @@
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "expand") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "get_path") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "has") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "home") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "hostname") == 1) { r = 1; } }
@@ -331,6 +374,7 @@
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "is_windows") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "keys") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "os_name") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "remove_path") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "set") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "user") == 1) { r = 1; } }
@@ -415,28 +459,97 @@
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_up") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_walk") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "stem") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "avg") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "bounds_check") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count_where") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "cpeek") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "enumerate") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_next") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_prev") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "every_nth") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_index") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last_index") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_next") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_prev") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_empty") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_first") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_last") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_valid_index") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "matches_pattern") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "pairs") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peekback") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_ahead") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_around") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_at") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_behind") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_first") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_last") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_next") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_prev") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_range") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_safe") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_window") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip_last") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "sum") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take_last") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "zip") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "has") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "info") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "install") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "list") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "update") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "arch") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "argc") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "argv") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "beep") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clipboard_get") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clipboard_set") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clock") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "cpu_count") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "disk_usage") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "encoding") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "endianness") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getCwd") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getHostname") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getLoadAvg") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getMemory") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getPid") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getPpid") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getProc") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getTime") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getUser") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getVersion") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "killProc") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "setCwd") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "spawn") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_async") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_code") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_lines") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exit") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "float_info") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "hostname") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "is_64bit") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "is_admin") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "kill") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "line_sep") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "locale") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "max_int") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "memory") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "notify") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_file") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_url") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "os") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "path_sep") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "pid") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "platform") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "processes") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "python_path") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "python_version") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "sleep") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "temp_dir") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "time") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "timestamp") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "uptime") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "user") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "version") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "which") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "execute") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve_exists") == 1) { r = 1; } }
@@ -453,17 +566,20 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Callback") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Callbacks") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Font") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "List") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Screen") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tabs") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Terminal") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Text") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tree") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { if (txSpanEqLit(nOff, nLen, "Key") == 1) { r = 1; } }
@@ -509,13 +625,76 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "unlisten") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "x") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "y") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addr_of") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addrs") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "allocate") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "bitsize_of") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "call") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "contains_addr") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_all") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_by_name") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_namef") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "has_name") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "keys") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "pop") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set_by_name") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "swap") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "type_of") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "basic_auth") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "bearer") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "build_query") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "download") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "form_encode") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "head") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "is_ok") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_decode") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_encode") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "options") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "patch") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "response") == 1) { r = 1; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "set_timeout") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "status_text") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "upload") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_decode") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_encode") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "with_query") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "accept") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "connect") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "listen") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "local_ip") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "peer") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_exact") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_file") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send_file") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "sendall") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "bind") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "data") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_ip") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_port") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "local_ip") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "sendto") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_broadcast") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_reuse") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "socket") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "connect") == 1) { r = 1; } }
@@ -635,6 +814,7 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "crossfade") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "fadeIn") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "fadeOut") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "generic") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "getMasterVolume") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "getVolume") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "isMuted") == 1) { r = 1; } }
@@ -653,15 +833,20 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "unload") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "unmute") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdgrace") == 1) { if (txSpanEqLit(nOff, nLen, "catch") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "absolute") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "append") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createdir") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createfile") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "cwd") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "listdir") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "read") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removedir") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removefile") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "setcwd") == 1) { r = 1; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "sizeof") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg") == 1) { r = 1; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg_bool") == 1) { r = 1; } }
@@ -760,34 +945,71 @@
     if (txSpanEqLit(mOff, mLen, "allocwatcher") == 1) { if (txSpanEqLit(nOff, nLen, "watch") == 1) { return "target?"; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "getOutput") == 1) { return "handle"; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "run") == 1) { return "fn"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bg") == 1) { return "txt, hexcol"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "blink") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bold") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_out") == 1) { return "txt, hexcol"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_outln") == 1) { return "txt, hexcol"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "color") == 1) { return "txt, hexcol"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "dim") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "invert") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "italic") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "paint") == 1) { return "txt, fg, bg"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "rgb") == 1) { return "r, g, b"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strike") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strip") == 1) { return "txt"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "underline") == 1) { return "txt"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "abs") == 1) { return "x"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "analyze") == 1) { return "file, flags..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "assemble") == 1) { return "file, flags..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "band") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bnot") == 1) { return "a"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bor") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "build") == 1) { return "file, flags..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bxor") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "cli") == 1) { return "command, extra..."; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "copy") == 1) { return "val"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "create_runtime") == 1) { return "file, flags..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "div") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "elapsed") == 1) { return "start"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "exit") == 1) { return "code"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "input") == 1) { return "prompt"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "interpret") == 1) { return "file, flags..."; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipcall") == 1) { return "addr"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipto") == 1) { return "addr, release"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "is_string") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "len") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mod") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mul") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nand") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nor") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ntp_sync") == 1) { return "server"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "out") == 1) { return "args..."; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "outln") == 1) { return "args..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "pctrace") == 1) { return "file, flags..."; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "pop") == 1) { return "arr"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "push") == 1) { return "arr, val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "random_int") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "range") == 1) { return "start, end"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "set_timezone") == 1) { return "offset_sec"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shell") == 1) { return "flags..."; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shl") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shr") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sleep") == 1) { return "ms"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sort") == 1) { return "arr"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sqrt") == 1) { return "x"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sub") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "time_format") == 1) { return "fmt"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "to_float") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "to_int") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "to_string") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { return "val"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "wifi_connect") == 1) { return "ssid, pass"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xnor") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xor") == 1) { return "a, b"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { return "binary, id, data"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { return "binary, id"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "binary, id"; } }
@@ -798,6 +1020,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "tobinary") == 1) { return "value"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { return "binary"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { return "path, binary"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { return "lib"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clearsection") == 1) { return "lib, name?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createdll") == 1) { return "name, locked?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createsection") == 1) { return "lib, name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "deletedll") == 1) { return "name"; } }
@@ -805,12 +1029,13 @@
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "editlink") == 1) { return "lib, key, value, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "find") == 1) { return "lib, key"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "lib, key, section?"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "getall") == 1) { return "lib"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "getall") == 1) { return "lib, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "hasdll") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "islinked") == 1) { return "lib, key, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "link") == 1) { return "lib, key, value, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listentries") == 1) { return "lib, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listsections") == 1) { return "lib"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "removesection") == 1) { return "lib, name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "unlink") == 1) { return "lib, key, section?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "add_path") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "name"; } }
@@ -871,8 +1096,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { return "*args"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { return "*args"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "pow") == 1) { return "x, y"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "random") == 1) { return "a?, b?"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "randomint") == 1) { return "a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "random") == 1) { return "seed"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "randomint") == 1) { return "seed, lo, hi"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "round") == 1) { return "x, decimals?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "sin") == 1) { return "x"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { if (txSpanEqLit(nOff, nLen, "sqrt") == 1) { return "x"; } }
@@ -899,18 +1124,66 @@
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_up") == 1) { return "filename, start?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_walk") == 1) { return "filename, start?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "stem") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "avg") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "bounds_check") == 1) { return "collection, index"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count_where") == 1) { return "collection, pred"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "cpeek") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "enumerate") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_next") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_prev") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "every_nth") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_index") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last_index") == 1) { return "collection, value"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_next") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_prev") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_empty") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_first") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_last") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_valid_index") == 1) { return "collection, index"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "matches_pattern") == 1) { return "collection, pattern"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "pairs") == 1) { return "collection"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek") == 1) { return "collection, index?"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peekback") == 1) { return "collection, index?"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_ahead") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_around") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_at") == 1) { return "collection, index"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_behind") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_first") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_last") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_next") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_prev") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_range") == 1) { return "collection, start, end"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_safe") == 1) { return "collection, index?"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_window") == 1) { return "collection, size"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip_last") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "sum") == 1) { return "collection"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take_last") == 1) { return "collection, n"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "zip") == 1) { return "collection, other"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "has") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "info") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "install") == 1) { return "name, source?"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "update") == 1) { return "name"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec") == 1) { return "cmd, shell?"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getProc") == 1) { return "pid"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "killProc") == 1) { return "pid, signal?"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "setCwd") == 1) { return "path"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "spawn") == 1) { return "cmd, shell?"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clipboard_set") == 1) { return "text"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "disk_usage") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec") == 1) { return "cmd"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_async") == 1) { return "cmd"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_code") == 1) { return "cmd"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_lines") == 1) { return "cmd"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exit") == 1) { return "code"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "kill") == 1) { return "pid"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "notify") == 1) { return "text"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_file") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_url") == 1) { return "url"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "sleep") == 1) { return "ms"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "which") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "execute") == 1) { return "rows"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve") == 1) { return "name"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve_exists") == 1) { return "name"; } }
@@ -961,12 +1234,72 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "scrollHoriz") == 1) { return "steps"; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "sync") == 1) { return "x, y, w, h"; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "unlisten") == 1) { return "event, callback?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "url, headers?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "url, headers?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { return "url, body, headers?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { return "url, body, headers?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { return "method, url, body?, headers?"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "set_timeout") == 1) { return "seconds"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addr_of") == 1) { return "id, var"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addrs") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "allocate") == 1) { return "id, var, bitsize"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "bitsize_of") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "call") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "contains_addr") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_all") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_by_name") == 1) { return "id, var"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_namef") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "has_name") == 1) { return "id, var"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "keys") == 1) { return "id"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { return "id, addr, offset"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "pop") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set") == 1) { return "id, addr, value"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set_by_name") == 1) { return "id, var, value"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "swap") == 1) { return "id, a, b"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "type_of") == 1) { return "id, addr"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { return "base_url?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "basic_auth") == 1) { return "user, password"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "bearer") == 1) { return "token"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "build_query") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "url, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "download") == 1) { return "url, path, headers?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "form_encode") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "url, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "head") == 1) { return "url, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "is_ok") == 1) { return "status"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_decode") == 1) { return "s"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_encode") == 1) { return "value"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "options") == 1) { return "url, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "patch") == 1) { return "url, body?, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { return "url, body?, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { return "url, body?, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { return "method, url, body?, headers?, timeout?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "status_text") == 1) { return "code"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "upload") == 1) { return "url, path, headers?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_decode") == 1) { return "s"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_encode") == 1) { return "s"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "with_query") == 1) { return "url, map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "accept") == 1) { return "handle, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "connect") == 1) { return "ip, port, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "listen") == 1) { return "port, backlog?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "peer") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { return "handle, maxlen?, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_exact") == 1) { return "handle, n, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_file") == 1) { return "handle, path, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send") == 1) { return "handle, data"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send_file") == 1) { return "handle, path"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "sendall") == 1) { return "handle, data"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "bind") == 1) { return "handle, port"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "data") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_ip") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_port") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { return "handle"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { return "handle, maxlen?, timeout_ms?"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "sendto") == 1) { return "handle, ip, port, data"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_broadcast") == 1) { return "handle, on"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_reuse") == 1) { return "handle, on"; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { return "api_key, …"; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { return "api_key, model?, base_url?, timeout?"; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "connect") == 1) { return "api_key, …"; } }
@@ -979,6 +1312,7 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "crossfade") == 1) { return "from, to, duration_ms"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "fadeIn") == 1) { return "sound, duration_ms, start_vol?"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "fadeOut") == 1) { return "sound, duration_ms"; } }
+    if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "generic") == 1) { return "pitch, freq, dur"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "getVolume") == 1) { return "sound"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "listEffects") == 1) { return "sound"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "load") == 1) { return "path, name?"; } }
@@ -992,14 +1326,19 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "stop") == 1) { return "sound"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "unload") == 1) { return "sound"; } }
     if (txSpanEqLit(mOff, mLen, "stdgrace") == 1) { if (txSpanEqLit(nOff, nLen, "catch") == 1) { return "fn, sink?"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "absolute") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "append") == 1) { return "path, content"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createdir") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createfile") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "listdir") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { return "src, dst"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { return "seg1, seg2?, seg3?, seg4?, seg5?, seg6?"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "read") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removedir") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removefile") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "setcwd") == 1) { return "path"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "sizeof") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { return "path, content"; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg") == 1) { return "i"; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg_bool") == 1) { return "i"; } }
@@ -1077,28 +1416,63 @@
     if (txSpanEqLit(mOff, mLen, "allocwatcher") == 1) { if (txSpanEqLit(nOff, nLen, "watch") == 1) { return "void"; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "getOutput") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { if (txSpanEqLit(nOff, nLen, "thread") == 1) { return "thread"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bg") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "blink") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "bold") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_out") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "c_outln") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "color") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "dim") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "invert") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "italic") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "paint") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "rgb") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strike") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "strip") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { if (txSpanEqLit(nOff, nLen, "underline") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { return "console"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "abs") == 1) { return "int|float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { return "int|float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "analyze") == 1) { return "vector<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "args") == 1) { return "array<string>"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "assemble") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "band") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bnot") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bor") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "build") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "bxor") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "cli") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "clock") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "create_runtime") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "date") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "datetime") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "detime") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "div") == 1) { return "int|float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "elapsed") == 1) { return "float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "input") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "interpret") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ip") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipcall") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ipto") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "is_string") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "len") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mod") == 1) { return "int|float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "mul") == 1) { return "int|float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nand") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "nor") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "ntp_sync") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "pctrace") == 1) { return "vector<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "random") == 1) { return "float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "random_int") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "range") == 1) { return "array<int>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "reboot") == 1) { return "void"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sdetime") == 1) { return "float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "set_timezone") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shell") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shl") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "shr") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sqrt") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "sub") == 1) { return "int|float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "time") == 1) { return "float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "time_format") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "timestamp") == 1) { return "int"; } }
@@ -1108,6 +1482,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "uptime") == 1) { return "float"; } }
     if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "wifi_connect") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xnor") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { if (txSpanEqLit(nOff, nLen, "xor") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "Binary") == 1) { return "Binary"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "add") == 1) { return "Binary"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { return "bool"; } }
@@ -1119,6 +1495,8 @@
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "tobinary") == 1) { return "Binary"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "typeof") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "clearsection") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createdll") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "createsection") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "deletedll") == 1) { return "bool"; } }
@@ -1133,6 +1511,7 @@
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listdlls") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listentries") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "listsections") == 1) { return "array<string>"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "removesection") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "unlink") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { if (txSpanEqLit(nOff, nLen, "version") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "add_path") == 1) { return "bool"; } }
@@ -1141,7 +1520,6 @@
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "expand") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "string"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "get_path") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "has") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "home") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "hostname") == 1) { return "string"; } }
@@ -1150,6 +1528,7 @@
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "is_windows") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "keys") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "os_name") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "remove_path") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "set") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { if (txSpanEqLit(nOff, nLen, "user") == 1) { return "string"; } }
@@ -1234,28 +1613,97 @@
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_up") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "search_walk") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { if (txSpanEqLit(nOff, nLen, "stem") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "avg") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "bounds_check") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "contains") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "count_where") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "cpeek") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "enumerate") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_next") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "equals_prev") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "every_nth") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_index") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "find_last_index") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_next") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "has_prev") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_empty") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_first") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_last") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "is_valid_index") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "matches_pattern") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "max") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "min") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "pairs") == 1) { return "any"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek") == 1) { return "any"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peekback") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_ahead") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_around") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_at") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_behind") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_first") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_last") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_next") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_prev") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_range") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_safe") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "peek_window") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "skip_last") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "sum") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "take_last") == 1) { return "any"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { if (txSpanEqLit(nOff, nLen, "zip") == 1) { return "any"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "has") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "info") == 1) { return "map"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "install") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "list") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { if (txSpanEqLit(nOff, nLen, "update") == 1) { return "bool"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec") == 1) { return "map"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getCwd") == 1) { return "string"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getHostname") == 1) { return "string"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getLoadAvg") == 1) { return "array<float>"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getMemory") == 1) { return "map"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getPid") == 1) { return "int"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getPpid") == 1) { return "int"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getProc") == 1) { return "map"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getTime") == 1) { return "float"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getUser") == 1) { return "string"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "getVersion") == 1) { return "string"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "killProc") == 1) { return "bool"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "setCwd") == 1) { return "bool"; } }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "spawn") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "arch") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "argc") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "argv") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "beep") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clipboard_get") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clipboard_set") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "clock") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "cpu_count") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "disk_usage") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "encoding") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "endianness") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_async") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_code") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exec_lines") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "exit") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "float_info") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "hostname") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "is_64bit") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "is_admin") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "kill") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "line_sep") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "locale") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "max_int") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "memory") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "notify") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_file") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "open_url") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "os") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "path_sep") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "pid") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "platform") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "processes") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "python_path") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "python_version") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "sleep") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "temp_dir") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "time") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "timestamp") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "uptime") == 1) { return "float"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "user") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "version") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { if (txSpanEqLit(nOff, nLen, "which") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "execute") == 1) { return "array<string>"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve") == 1) { return "any"; } }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { if (txSpanEqLit(nOff, nLen, "resolve_exists") == 1) { return "bool"; } }
@@ -1272,17 +1720,20 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { return "Button"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Callback") == 1) { return "Callback"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Callbacks") == 1) { return "function"; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { return "Checkbox"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { return "Debugger"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { return "Editor"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Font") == 1) { return "Font"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "List") == 1) { return "List"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { return "Menu"; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { return "ProgressBar"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { return "Prompt"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Screen") == 1) { return "Screen"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tabs") == 1) { return "Tabs"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Terminal") == 1) { return "Terminal"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Text") == 1) { return "Text"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { return "TextBox"; } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { return "TextView"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { return "Toolbar"; } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tree") == 1) { return "Tree"; } }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { if (txSpanEqLit(nOff, nLen, "Key") == 1) { return "Key"; } }
@@ -1309,12 +1760,76 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "unlisten") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "x") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "y") == 1) { return "int"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "response"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "response"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { return "response"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { return "response"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { return "response"; } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "response") == 1) { return "response"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addr_of") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "addrs") == 1) { return "array<int>"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "allocate") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "bitsize_of") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "call") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "clear") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "contains_addr") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "count") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "auto"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_all") == 1) { return "array<auto>"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_by_name") == 1) { return "auto"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "get_namef") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "has_name") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "keys") == 1) { return "array<string>"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "pop") == 1) { return "auto"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "remove") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "set_by_name") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "swap") == 1) { return "void"; } }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { if (txSpanEqLit(nOff, nLen, "type_of") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { return "HttpClient"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { return "HttpClient"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "basic_auth") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "bearer") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "build_query") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "download") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "form_encode") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "head") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "is_ok") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_decode") == 1) { return "auto"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "json_encode") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "options") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "patch") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "status_text") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "upload") == 1) { return "map"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_decode") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "url_encode") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "with_query") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "accept") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "connect") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "listen") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "local_ip") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "peer") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_exact") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "recv_file") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "send_file") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { if (txSpanEqLit(nOff, nLen, "sendall") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "bind") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "close") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "data") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_ip") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "from_port") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "local_ip") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "port") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "recv") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "sendto") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_broadcast") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "set_reuse") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { if (txSpanEqLit(nOff, nLen, "socket") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { return "OpenAIClient"; } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Linux") == 1) { return "Linux"; } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { return "Windows"; } }
@@ -1438,15 +1953,20 @@
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "stopAll") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "unload") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdgrace") == 1) { if (txSpanEqLit(nOff, nLen, "catch") == 1) { return "array"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "absolute") == 1) { return "string"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "append") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createdir") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "createfile") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "cwd") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "exists") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "listdir") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "move") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { return "path"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "read") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removedir") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "removefile") == 1) { return "bool"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "setcwd") == 1) { return "int"; } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "sizeof") == 1) { return "int"; } }
     if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "write") == 1) { return "bool"; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg") == 1) { return "string"; } }
     if (txSpanEqLit(mOff, mLen, "sys") == 1) { if (txSpanEqLit(nOff, nLen, "arg_bool") == 1) { return "bool"; } }
@@ -1522,17 +2042,20 @@
     if (txSpanEqLit(mOff, mLen, "gipeo") == 1) { if (txSpanEqLit(nOff, nLen, "uart") == 1) { txEmitFiltered(pOff, pLen, "begin\nwrite_byte\nread"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Browser") == 1) { txEmitFiltered(pOff, pLen, "open\nisOpen\nresult\nchosen\nsetScale\nsetColor\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { txEmitFiltered(pOff, pLen, "setLabel\nlabel\nsetRect\nposition\nsize\nsetColor\nsetHoverColor\nsetTextColor\nonClick\nupdate\nisHovered\nisPressed\ndraw\nhide\nshow"); } }
-    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { txEmitFiltered(pOff, pLen, "start\nupdate\nactive\nfocused\nclick\ndraw\nipLine\nclose\nhandleKey\nhandleChar"); } }
-    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetText\ntext\nlineCount\ncursorLine\ncursorCol\nrevision\ncaretPixelX\ncaretPixelY\nlineHeight\ncompleteReq\ncompleteActive\ncompleteCancel\ncompletionQuery\nsetCompletions\nhoverReq\nhoverActive\nhoverCancel\nhoverQuery\nsetHover\nsetDiagnostics\nsetStickyDiag\nclearStickyDiag\nstickyCount\nsigReq\nsigActive\nsigCancel\nsigQuery\nsetSignature\ngotoLine\nsetCursor\nhasSelection\nselectedText\nsaveRequested\nundo\nredo\nselectAll\nsearch\nmarkAll\nclearSearch\nsearchCount\nreplaceAll\nsetFocus\nsetScale\nsetColor\nsetGutter\nsetVisible\nsetLanguage\nsetLanguageForPath\nsetOwnership\nupdate\ndraw"); } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetLabel\nsetChecked\nisChecked\nsetColor\nsetTextColor\nupdate\ndraw\nhide\nshow"); } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { txEmitFiltered(pOff, pLen, "start\nupdate\nactive\nfocused\nclick\ndraw\nipLine\nipFollow\nipFile\nclose\nhandleKey\nhandleChar"); } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetText\ntext\nlineCount\ncursorLine\ncursorCol\nrevision\ncaretPixelX\ncaretPixelY\nlineHeight\ncompleteReq\ncompleteActive\ncompleteCancel\ncompletionQuery\nsetCompletions\nhoverReq\nhoverActive\nhoverCancel\nhoverQuery\nsetHover\nsetDiagnostics\nsetStickyDiag\nclearStickyDiag\nstickyCount\nsetIpLine\nrevealIp\nsigReq\nsigActive\nsigCancel\nsigQuery\nsetSignature\ngotoLine\nsetCursor\nhasSelection\nselectedText\nsaveRequested\nundo\nredo\nselectAll\nsearch\nmarkAll\nclearSearch\nsearchCount\nreplaceAll\nsetFocus\nsetScale\nsetColor\nsetGutter\nsetVisible\nsetLanguage\nsetLanguageForPath\nsetOwnership\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Font") == 1) { txEmitFiltered(pOff, pLen, "setScale\nscale\nsetColor\ncolor\nmeasure\nheight"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "List") == 1) { txEmitFiltered(pOff, pLen, "setRect\nadd\naddAt\nclear\ncount\nselected\nrightClicked\nselectedText\nsetSelected\nsetFocus\nsetScale\nsetColor\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { txEmitFiltered(pOff, pLen, "setRect\naddMenu\naddItem\nsetScale\nsetColor\nsetRightText\nsetRightColor\nisOpen\naction\nupdate\ndraw"); } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetValue\nvalue\nsetColors\ndraw\nhide\nshow"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { txEmitFiltered(pOff, pLen, "open\nisOpen\nresult\ntext\nsetScale\nsetColor\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Screen") == 1) { txEmitFiltered(pOff, pLen, "clear\npresent\nisOpen\nclose\nupdate\nrender\nwidth\nheight\nadd\nmouseX\nmouseY\nmouseDown\nmouseRight\nmouseClicked\nctrlDown\nshiftDown\naltDown\nhotkey\nfuncKey\nsetFullscreen\ntoggleFullscreen\nisFullscreen\nfkeyDown\nclipboardSet\npollChar\npollKey\nwheel\nfillRect\ndrawRect\ndrawText"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tabs") == 1) { txEmitFiltered(pOff, pLen, "setRect\nadd\nindexOf\ncount\nactive\nactivePath\npathOf\nsetActive\nremove\nclicked\ncloseRequested\nsetScale\nsetColor\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Terminal") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetCwd\nsetFocus\nsetScale\nsetColor\nisRunning\nrun\nwrite\nclear\nsetVisible\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Text") == 1) { txEmitFiltered(pOff, pLen, "setText\ntext\nsetPos\nx\ny\nsetColor\nsetScale\nsetFont\nmeasure\ndraw\nhide\nshow"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetText\ntext\nlength\nsetFocus\nisFocused\nsetColor\nsetScale\nupdate\ndraw"); } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { txEmitFiltered(pOff, pLen, "setRect\nsetText\nsetColor\nsetScale\nscrollTo\nupdate\ndraw\nhide\nshow"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { txEmitFiltered(pOff, pLen, "add\nsetPos\nsetSize\nsetOrientation\nsetSpacing\nsetRightText\nsetRightColor\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Tree") == 1) { txEmitFiltered(pOff, pLen, "setRoot\nsetIconDir\nsetRect\nwidth\nrefresh\ncount\nselected\nselectedPath\nselectedName\nselectedIsDir\nrightClicked\ndropReady\ndropSrc\ndropDst\nsetFocus\nsetScale\nsetColor\nsetVisible\nupdate\ndraw"); } }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { if (txSpanEqLit(nOff, nLen, "KeyState") == 1) { txEmitFiltered(pOff, pLen, "isPressed\nisHeld\npressTime\nreleaseTime"); } }
@@ -1541,18 +2064,15 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "MouseClient") == 1) { txEmitFiltered(pOff, pLen, "getX\ngetY\ngetPos\nisClicked\nisHeld\nisReleased\nisOver\nupdate\nsync\nclamp\nclampX\nclampY"); } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "attach") == 1) { txEmitFiltered(pOff, pLen, "getX\ngetY\ngetPos\nisClicked\nisHeld\nisReleased\nisOver\nupdate\nsync\nclamp\nclampX\nclampY"); } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "client") == 1) { txEmitFiltered(pOff, pLen, "getX\ngetY\ngetPos\nisClicked\nisHeld\nisReleased\nisOver\nupdate\nsync\nclamp\nclampX\nclampY"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "response") == 1) { txEmitFiltered(pOff, pLen, "status\nbody\nheader\nok"); } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { txEmitFiltered(pOff, pLen, "get\nhead\noptions\npost\nput\npatch\ndelete\nrequest\ndownload\nupload\nset_header\nremove_header\nclear_headers\nget_headers\nset_bearer\nset_basic_auth\nset_base_url\nset_timeout\nset_verify_ssl"); } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { txEmitFiltered(pOff, pLen, "get\nhead\noptions\npost\nput\npatch\ndelete\nrequest\ndownload\nupload\nset_header\nremove_header\nclear_headers\nget_headers\nset_bearer\nset_basic_auth\nset_base_url\nset_timeout\nset_verify_ssl"); } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { txEmitFiltered(pOff, pLen, "chat\ncompletion\nembedding\nset_model\nset_system\nset_base_url\nset_timeout\nmodel\nhas_key\nlist_models"); } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Linux") == 1) { txEmitFiltered(pOff, pLen, "getDistro\ngetMounts\ngetServices\nstartService\nkillProcess\ngetUsers\nchmod\ngetInterfaces\nping\ngetCpuInfo\ngetMemInfo\ngetDiskUsage\nisRoot"); } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { txEmitFiltered(pOff, pLen, "getVersion\ngetEdition\ngetRegistry\nsetRegistry\ngetDrives\ngetServices\nstartService\nstopService\ngetProcesses\nkillProcess\ngetNetAdapters\ngetIpAddresses\nshutdown\nrestart\nisAdmin\ngetTotalMemory"); } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "SoundObject") == 1) { txEmitFiltered(pOff, pLen, "isPlaying\nisPaused\nisStopped\ninfo"); } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "load") == 1) { txEmitFiltered(pOff, pLen, "isPlaying\nisPaused\nisStopped\ninfo"); } }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { if (txSpanEqLit(nOff, nLen, "loadFromBytes") == 1) { txEmitFiltered(pOff, pLen, "isPlaying\nisPaused\nisStopped\ninfo"); } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { txEmitFiltered(pOff, pLen, "str\njoin\nparent\nname\nlist"); } }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { txEmitFiltered(pOff, pLen, "out\ncout\noutln\nclear\nclear_all\nclear_line\ncursor_col\ncursor_set\ncursor_pos\ngetLine\ncursor_get_line\ncursor_at\nsync\ndesync\nclose"); } }
     if (txSpanEqLit(mOff, mLen, "tft") == 1) { if (txSpanEqLit(nOff, nLen, "display") == 1) { txEmitFiltered(pOff, pLen, "begin\nfill\nclear\npixel\nline\nrect\nfillrect\ntext\nshow\nwidth\nheight\nclose"); } }
     if (txSpanEqLit(mOff, mLen, "video") == 1) { if (txSpanEqLit(nOff, nLen, "framebuffer") == 1) { txEmitFiltered(pOff, pLen, "pixel\nfill\nwidth\nheight"); } }
@@ -1657,6 +2177,12 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { if (txSpanEqLit(tOff, tLen, "setTextColor") == 1) { return "argb"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { if (txSpanEqLit(tOff, tLen, "size") == 1) { return "w, h"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Button") == 1) { if (txSpanEqLit(tOff, tLen, "update") == 1) { return "screen?"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "setChecked") == 1) { return "on"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "setColor") == 1) { return "argb"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "setLabel") == 1) { return "text"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "setRect") == 1) { return "x, y, w, h"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "setTextColor") == 1) { return "argb"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Checkbox") == 1) { if (txSpanEqLit(tOff, tLen, "update") == 1) { return "screen?"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { if (txSpanEqLit(tOff, tLen, "click") == 1) { return "mx, my, clicked"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { if (txSpanEqLit(tOff, tLen, "handleChar") == 1) { return "ch"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Debugger") == 1) { if (txSpanEqLit(tOff, tLen, "handleKey") == 1) { return "vk"; } } }
@@ -1672,6 +2198,7 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setFocus") == 1) { return "on"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setGutter") == 1) { return "on"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setHover") == 1) { return "text"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setIpLine") == 1) { return "line"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setLanguage") == 1) { return "lang"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setLanguageForPath") == 1) { return "path"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Editor") == 1) { if (txSpanEqLit(tOff, tLen, "setOwnership") == 1) { return "mapText"; } } }
@@ -1701,6 +2228,9 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { if (txSpanEqLit(tOff, tLen, "setRightText") == 1) { return "text"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { if (txSpanEqLit(tOff, tLen, "setScale") == 1) { return "scale"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Menu") == 1) { if (txSpanEqLit(tOff, tLen, "update") == 1) { return "screen?"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { if (txSpanEqLit(tOff, tLen, "setColors") == 1) { return "bg, fill"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { if (txSpanEqLit(tOff, tLen, "setRect") == 1) { return "x, y, w, h"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "ProgressBar") == 1) { if (txSpanEqLit(tOff, tLen, "setValue") == 1) { return "percent"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { if (txSpanEqLit(tOff, tLen, "open") == 1) { return "label"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { if (txSpanEqLit(tOff, tLen, "setColor") == 1) { return "bg, fg"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Prompt") == 1) { if (txSpanEqLit(tOff, tLen, "setScale") == 1) { return "scale"; } } }
@@ -1742,6 +2272,12 @@
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { if (txSpanEqLit(tOff, tLen, "setScale") == 1) { return "scale"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { if (txSpanEqLit(tOff, tLen, "setText") == 1) { return "text"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextBox") == 1) { if (txSpanEqLit(tOff, tLen, "update") == 1) { return "screen?"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "scrollTo") == 1) { return "line"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "setColor") == 1) { return "bg, fg"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "setRect") == 1) { return "x, y, w, h"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "setScale") == 1) { return "scale"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "setText") == 1) { return "text"; } } }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "TextView") == 1) { if (txSpanEqLit(tOff, tLen, "update") == 1) { return "screen?"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { if (txSpanEqLit(tOff, tLen, "add") == 1) { return "button"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { if (txSpanEqLit(tOff, tLen, "setOrientation") == 1) { return "orient"; } } }
     if (txSpanEqLit(mOff, mLen, "gui") == 1) { if (txSpanEqLit(nOff, nLen, "Toolbar") == 1) { if (txSpanEqLit(tOff, tLen, "setPos") == 1) { return "x, y"; } } }
@@ -1786,12 +2322,40 @@
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "client") == 1) { if (txSpanEqLit(tOff, tLen, "isOver") == 1) { return "x, y, w, h"; } } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "client") == 1) { if (txSpanEqLit(tOff, tLen, "isReleased") == 1) { return "button"; } } }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { if (txSpanEqLit(nOff, nLen, "client") == 1) { if (txSpanEqLit(tOff, tLen, "sync") == 1) { return "x, y, w, h"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "delete") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "get") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "post") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "put") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "request") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "response") == 1) { if (txSpanEqLit(tOff, tLen, "header") == 1) { return "name"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "delete") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "download") == 1) { return "path, dest"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "get") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "head") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "options") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "patch") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "post") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "put") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "remove_header") == 1) { return "name"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "request") == 1) { return "method, path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_base_url") == 1) { return "base_url"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_basic_auth") == 1) { return "user, password"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_bearer") == 1) { return "token"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_header") == 1) { return "name, value"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_timeout") == 1) { return "seconds"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "set_verify_ssl") == 1) { return "verify"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "Client") == 1) { if (txSpanEqLit(tOff, tLen, "upload") == 1) { return "path, src, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "delete") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "download") == 1) { return "path, dest"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "get") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "head") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "options") == 1) { return "path, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "patch") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "post") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "put") == 1) { return "path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "remove_header") == 1) { return "name"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "request") == 1) { return "method, path, body?, headers?"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_base_url") == 1) { return "base_url"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_basic_auth") == 1) { return "user, password"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_bearer") == 1) { return "token"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_header") == 1) { return "name, value"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_timeout") == 1) { return "seconds"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "set_verify_ssl") == 1) { return "verify"; } } }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { if (txSpanEqLit(nOff, nLen, "HttpClient") == 1) { if (txSpanEqLit(tOff, tLen, "upload") == 1) { return "path, src, headers?"; } } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { if (txSpanEqLit(tOff, tLen, "chat") == 1) { return "prompt, model?"; } } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { if (txSpanEqLit(tOff, tLen, "completion") == 1) { return "messages, model?"; } } }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { if (txSpanEqLit(nOff, nLen, "OpenAIClient") == 1) { if (txSpanEqLit(tOff, tLen, "embedding") == 1) { return "text, model?"; } } }
@@ -1811,6 +2375,7 @@
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { if (txSpanEqLit(tOff, tLen, "shutdown") == 1) { return "delay_sec"; } } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { if (txSpanEqLit(tOff, tLen, "startService") == 1) { return "name"; } } }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { if (txSpanEqLit(nOff, nLen, "Windows") == 1) { if (txSpanEqLit(tOff, tLen, "stopService") == 1) { return "name"; } } }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { if (txSpanEqLit(nOff, nLen, "path") == 1) { if (txSpanEqLit(tOff, tLen, "join") == 1) { return "seg"; } } }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { if (txSpanEqLit(tOff, tLen, "clear_line") == 1) { return "n"; } } }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { if (txSpanEqLit(tOff, tLen, "cout") == 1) { return "text"; } } }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { if (txSpanEqLit(nOff, nLen, "console") == 1) { if (txSpanEqLit(tOff, tLen, "cursor_col") == 1) { return "rgb"; } } }
@@ -1848,15 +2413,16 @@
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { txEmitFiltered(pOff, pLen, "Binary"); }
     if (txSpanEqLit(mOff, mLen, "cssc.ini") == 1) { txEmitFiltered(pOff, pLen, "IniHandler"); }
     if (txSpanEqLit(mOff, mLen, "gipeo") == 1) { txEmitFiltered(pOff, pLen, "adc\ni2c\npin\npwm\nspi\ntimer\nuart"); }
-    if (txSpanEqLit(mOff, mLen, "gui") == 1) { txEmitFiltered(pOff, pLen, "Browser\nButton\nCallback\nDebugger\nEditor\nFont\nList\nMenu\nPrompt\nScreen\nTabs\nTerminal\nText\nTextBox\nToolbar\nTree"); }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { txEmitFiltered(pOff, pLen, "Browser\nButton\nCallback\nCheckbox\nDebugger\nEditor\nFont\nList\nMenu\nProgressBar\nPrompt\nScreen\nTabs\nTerminal\nText\nTextBox\nTextView\nToolbar\nTree"); }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { txEmitFiltered(pOff, pLen, "Key\nKeyState"); }
     if (txSpanEqLit(mOff, mLen, "matrix") == 1) { txEmitFiltered(pOff, pLen, "matrix"); }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { txEmitFiltered(pOff, pLen, "MouseClient"); }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { txEmitFiltered(pOff, pLen, "response"); }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { txEmitFiltered(pOff, pLen, "HttpClient"); }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { txEmitFiltered(pOff, pLen, "OpenAIClient"); }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { txEmitFiltered(pOff, pLen, "Linux\nWindows"); }
     if (txSpanEqLit(mOff, mLen, "retrogadgets") == 1) { txEmitFiltered(pOff, pLen, "AnalogStick0\nAnalogStick1\nAnalogStick2\nAnalogStick3\nAnalogStick4\nAnalogStick5\nAnalogStick6\nAnalogStick7\nAudioChip0\nAudioChip1\nAudioChip2\nAudioChip3\nCPU0\nCPU1\nCPU2\nCPU3\nColor\nDPad0\nDPad1\nDPad2\nDPad3\nDPad4\nDPad5\nDPad6\nDPad7\nFlashMemory0\nFlashMemory1\nFlashMemory2\nFlashMemory3\nGamepadChip0\nGamepadChip1\nGamepadChip2\nGamepadChip3\nKeyboardChip0\nKeyboardChip1\nKeyboardChip2\nKeyboardChip3\nKnob0\nKnob1\nKnob2\nKnob3\nKnob4\nKnob5\nKnob6\nKnob7\nLcd0\nLcd1\nLcd2\nLcd3\nLcd4\nLcd5\nLcd6\nLcd7\nLed0\nLed1\nLed2\nLed3\nLed4\nLed5\nLed6\nLed7\nMultitool\nPowerButton\nROM\nRealityChip\nScreen0\nScreen1\nScreen2\nScreen3\nSegmentDisplay0\nSegmentDisplay1\nSegmentDisplay2\nSegmentDisplay3\nSerial0\nSerial1\nSerial2\nSerial3\nSlider0\nSlider1\nSlider2\nSlider3\nSlider4\nSlider5\nSlider6\nSlider7\nSwitch0\nSwitch1\nSwitch2\nSwitch3\nSwitch4\nSwitch5\nSwitch6\nSwitch7\nVec\nVideoChip0\nVideoChip1\nVideoChip2\nVideoChip3\nWifi0\nWifi1\nWifi2\nWifi3"); }
     if (txSpanEqLit(mOff, mLen, "sound") == 1) { txEmitFiltered(pOff, pLen, "SoundObject"); }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { txEmitFiltered(pOff, pLen, "path"); }
     if (txSpanEqLit(mOff, mLen, "sys.console") == 1) { txEmitFiltered(pOff, pLen, "console"); }
     if (txSpanEqLit(mOff, mLen, "tft") == 1) { txEmitFiltered(pOff, pLen, "display"); }
     if (txSpanEqLit(mOff, mLen, "video") == 1) { txEmitFiltered(pOff, pLen, "framebuffer\nvideo"); }
@@ -1876,30 +2442,38 @@
     #req[txEmitFiltered] txEmitFiltered;
     if (txSpanEqLit(mOff, mLen, "allocwatcher") == 1) { txEmitFiltered(pOff, pLen, "snapshot\nstop\nwatch"); }
     if (txSpanEqLit(mOff, mLen, "asyncthreads") == 1) { txEmitFiltered(pOff, pLen, "getOutput\nrun"); }
-    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { txEmitFiltered(pOff, pLen, "abs\nargs\nclock\ncopy\ndate\ndatetime\ndetime\nelapsed\nexit\ninput\nip\nipcall\nipto\nis_string\nlen\nmax\nmin\nntp_sync\nout\noutln\npop\npush\nrandom\nrandom_int\nrange\nreboot\nsdetime\nset_timezone\nsleep\nsort\nsqrt\ntime\ntime_format\ntimestamp\nto_float\nto_int\nto_string\ntypeof\nuptime\nwifi_connect"); }
+    if (txSpanEqLit(mOff, mLen, "colors") == 1) { txEmitFiltered(pOff, pLen, "bg\nblink\nbold\nc_out\nc_outln\ncolor\ndim\ninvert\nitalic\npaint\nrgb\nstrike\nstrip\nunderline"); }
+    if (txSpanEqLit(mOff, mLen, "cssc") == 1) { txEmitFiltered(pOff, pLen, "PI\nabs\nadd\nanalyze\nargs\nassemble\nband\nbnot\nbor\nbuild\nbxor\ncli\nclock\ncopy\ncreate_runtime\ndate\ndatetime\ndetime\ndiv\nelapsed\nexit\ninput\ninterpret\nip\nipcall\nipto\nis_string\nlen\nmax\nmin\nmod\nmul\nnand\nnor\nntp_sync\nout\noutln\npctrace\npop\npush\nrandom\nrandom_int\nrange\nreboot\nsdetime\nset_timezone\nshell\nshl\nshr\nsleep\nsort\nsqrt\nsub\ntime\ntime_format\ntimestamp\nto_float\nto_int\nto_string\ntypeof\nuptime\nwifi_connect\nxnor\nxor"); }
     if (txSpanEqLit(mOff, mLen, "cssc.binary") == 1) { txEmitFiltered(pOff, pLen, "add\ncontains\ndelete\nfind\nfrombinary\nget\nread\ntobinary\ntypeof\nwrite"); }
-    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { txEmitFiltered(pOff, pLen, "createdll\ncreatesection\ndeletedll\ndllinfo\neditlink\nfind\nget\ngetall\nhasdll\nislinked\nlink\nlistdlls\nlistentries\nlistsections\nunlink\nversion"); }
-    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { txEmitFiltered(pOff, pLen, "add_path\nall\narch\ndelete\nexpand\nget\nget_path\nhas\nhome\nhostname\nis_linux\nis_mac\nis_windows\nkeys\nos_name\nremove_path\nset\nuser"); }
+    if (txSpanEqLit(mOff, mLen, "cssc.dll") == 1) { txEmitFiltered(pOff, pLen, "clear\nclearsection\ncreatedll\ncreatesection\ndeletedll\ndllinfo\neditlink\nfind\nget\ngetall\nhasdll\nislinked\nlink\nlistdlls\nlistentries\nlistsections\nremovesection\nunlink\nversion"); }
+    if (txSpanEqLit(mOff, mLen, "cssc.env") == 1) { txEmitFiltered(pOff, pLen, "add_path\nall\narch\ndelete\nexpand\nget\nhas\nhome\nhostname\nis_linux\nis_mac\nis_windows\nkeys\nos_name\npath\nremove_path\nset\nuser"); }
     if (txSpanEqLit(mOff, mLen, "cssc.fastif") == 1) { txEmitFiltered(pOff, pLen, "if"); }
     if (txSpanEqLit(mOff, mLen, "cssc.ini") == 1) { txEmitFiltered(pOff, pLen, "add_section\nall\nbackup\ncreate\ndelete\ndiff\nhas_key\nhas_section\nkeys\nmerge\nopen\nread\nremove_section\nrestore\nsections\nvalidate\nvalues\nwrite"); }
     if (txSpanEqLit(mOff, mLen, "cssc.io") == 1) { txEmitFiltered(pOff, pLen, "append\ncopy\ndelete\nexists\nmd5\nmove\nread\nread_bytes\nread_csv\nread_json\nread_lines\nsha256\nsize\nwrite\nwrite_bytes\nwrite_csv\nwrite_json\nwrite_lines"); }
-    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { txEmitFiltered(pOff, pLen, "abs\nacos\nasin\natan\natan2\nceil\ncos\nexp\nfloor\nlog\nlog10\nlog2\nmax\nmin\npow\nrandom\nrandomint\nround\nsin\nsqrt\ntan"); }
+    if (txSpanEqLit(mOff, mLen, "cssc.math") == 1) { txEmitFiltered(pOff, pLen, "E\nPI\nabs\nacos\nasin\natan\natan2\nceil\ncos\nexp\nfloor\nlog\nlog10\nlog2\nmax\nmin\npow\nrandom\nrandomint\nround\nsin\nsqrt\ntan"); }
     if (txSpanEqLit(mOff, mLen, "cssc.paths") == 1) { txEmitFiltered(pOff, pLen, "abs\nbasename\ncopy\ndelete\ndirname\nexists\next\nis_dir\nis_file\njoin\nlist\nlist_dirs\nlist_files\nmkdir\nmove\nrel\nresolve\nrmdir\nsearch_glob\nsearch_up\nsearch_walk\nstem"); }
-    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { txEmitFiltered(pOff, pLen, "peek\npeekback"); }
+    if (txSpanEqLit(mOff, mLen, "cssc.peek") == 1) { txEmitFiltered(pOff, pLen, "avg\nbounds_check\ncontains\ncount\ncount_where\ncpeek\nenumerate\nequals_next\nequals_prev\nevery_nth\nfind\nfind_index\nfind_last\nfind_last_index\nhas_next\nhas_prev\nis_empty\nis_first\nis_last\nis_valid_index\nmatches_pattern\nmax\nmin\npairs\npeek\npeek_ahead\npeek_around\npeek_at\npeek_behind\npeek_first\npeek_last\npeek_next\npeek_prev\npeek_range\npeek_safe\npeek_window\nskip\nskip_last\nsum\ntake\ntake_last\nzip"); }
     if (txSpanEqLit(mOff, mLen, "cssc.sidepackagetools") == 1) { txEmitFiltered(pOff, pLen, "has\ninfo\ninstall\nlist\nremove\nupdate"); }
-    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { txEmitFiltered(pOff, pLen, "exec\ngetCwd\ngetHostname\ngetLoadAvg\ngetMemory\ngetPid\ngetPpid\ngetProc\ngetTime\ngetUser\ngetVersion\nkillProc\nsetCwd\nspawn"); }
+    if (txSpanEqLit(mOff, mLen, "cssc.sys") == 1) { txEmitFiltered(pOff, pLen, "arch\nargc\nargv\nbeep\nclipboard_get\nclipboard_set\nclock\ncpu_count\ndisk_usage\nencoding\nendianness\nexec\nexec_async\nexec_code\nexec_lines\nexit\nfloat_info\nhostname\nis_64bit\nis_admin\nkill\nline_sep\nlocale\nmax_int\nmemory\nnotify\nopen_file\nopen_url\nos\npath_sep\npid\nplatform\nprocesses\npython_path\npython_version\nsleep\ntemp_dir\ntime\ntimestamp\nuptime\nuser\nversion\nwhich"); }
     if (txSpanEqLit(mOff, mLen, "cssl") == 1) { txEmitFiltered(pOff, pLen, "execute\nresolve\nresolve_exists\nrun\nvalidate"); }
-    if (txSpanEqLit(mOff, mLen, "gui") == 1) { txEmitFiltered(pOff, pLen, "Browser\nButton\nCallbacks\nDebugger\nEditor\nFont\nList\nMenu\nPrompt\nScreen\nTabs\nTerminal\nText\nTextBox\nToolbar\nTree"); }
+    if (txSpanEqLit(mOff, mLen, "devdebug") == 1) { txEmitFiltered(pOff, pLen, "stdout"); }
+    if (txSpanEqLit(mOff, mLen, "gipeo") == 1) { txEmitFiltered(pOff, pLen, "HIGH\nINPUT\nLOW\nOUTPUT\nPULLUP"); }
+    if (txSpanEqLit(mOff, mLen, "gui") == 1) { txEmitFiltered(pOff, pLen, "Browser\nButton\nCallbacks\nDebugger\nEditor\nFont\nHORIZONTAL\nList\nMenu\nPrompt\nScreen\nTabs\nTerminal\nText\nTextBox\nToolbar\nTree\nVERTICAL"); }
     if (txSpanEqLit(mOff, mLen, "keyboard") == 1) { txEmitFiltered(pOff, pLen, "clearHotkeys\nclearListeners\ngetPressedKeys\ngetState\nhotkey\nisHeld\nisListening\nisPressed\nlisten\npress\nrelease\nstart\nstop\ntap\ntype\nunlisten\nwaitFor"); }
     if (txSpanEqLit(mOff, mLen, "mouse") == 1) { txEmitFiltered(pOff, pLen, "attach\nclamp\nclampX\nclampY\nclick\nclient\ndoubleClick\ngetButtons\nisOver\nisPressed\nlisten\nmove\nmoveRelative\nposition\npress\nrelease\nscroll\nscrollHoriz\nsync\nunlisten\nx\ny"); }
-    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { txEmitFiltered(pOff, pLen, "delete\nget\npost\nput\nrequest\nset_timeout"); }
+    if (txSpanEqLit(mOff, mLen, "mutier") == 1) { txEmitFiltered(pOff, pLen, "addr_of\naddrs\nallocate\nbitsize_of\ncall\nclear\ncontains_addr\ncount\nexists\nget\nget_all\nget_by_name\nget_namef\nhas_name\nkeys\nmove\npop\nremove\nset\nset_by_name\nswap\ntype_of"); }
+    if (txSpanEqLit(mOff, mLen, "network.http") == 1) { txEmitFiltered(pOff, pLen, "Client\nNOT_FOUND\nOK\nSERVER_ERR\nbasic_auth\nbearer\nbuild_query\ndelete\ndownload\nform_encode\nget\nhead\nis_ok\njson_decode\njson_encode\noptions\npatch\npost\nput\nrequest\nstatus_text\nupload\nurl_decode\nurl_encode\nwith_query"); }
+    if (txSpanEqLit(mOff, mLen, "network.tcp") == 1) { txEmitFiltered(pOff, pLen, "accept\nclose\nconnect\nlisten\nlocal_ip\npeer\nport\nrecv\nrecv_exact\nrecv_file\nsend\nsend_file\nsendall"); }
+    if (txSpanEqLit(mOff, mLen, "network.udp") == 1) { txEmitFiltered(pOff, pLen, "bind\nclose\ndata\nfrom_ip\nfrom_port\nlocal_ip\nport\nrecv\nsendto\nset_broadcast\nset_reuse\nsocket"); }
     if (txSpanEqLit(mOff, mLen, "openai") == 1) { txEmitFiltered(pOff, pLen, "Client\nOpenAIClient\nconnect"); }
     if (txSpanEqLit(mOff, mLen, "os") == 1) { txEmitFiltered(pOff, pLen, "current\ngetOS"); }
     if (txSpanEqLit(mOff, mLen, "serialcommunication") == 1) { txEmitFiltered(pOff, pLen, "listen\nout\nread\nsend"); }
-    if (txSpanEqLit(mOff, mLen, "sound") == 1) { txEmitFiltered(pOff, pLen, "addEffect\nclearEffects\ncrossfade\nfadeIn\nfadeOut\ngetMasterVolume\ngetVolume\nisMuted\nlistEffects\nload\nloadFromBytes\nmute\npause\nplay\nremoveEffect\nresume\nsetMasterVolume\nsetVolume\nstop\nstopAll\nunload\nunmute"); }
+    if (txSpanEqLit(mOff, mLen, "sizes") == 1) { txEmitFiltered(pOff, pLen, "large_array\nlarge_int\nnormal_array\nnormal_float\nnormal_int\nsmall_array\nsmall_float\nsmall_int"); }
+    if (txSpanEqLit(mOff, mLen, "sound") == 1) { txEmitFiltered(pOff, pLen, "addEffect\nclearEffects\ncrossfade\nfadeIn\nfadeOut\ngeneric\ngetMasterVolume\ngetVolume\nisMuted\nlistEffects\nload\nloadFromBytes\nmute\npause\nplay\nremoveEffect\nresume\nsetMasterVolume\nsetVolume\nstop\nstopAll\nunload\nunmute"); }
     if (txSpanEqLit(mOff, mLen, "stdgrace") == 1) { txEmitFiltered(pOff, pLen, "catch"); }
-    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { txEmitFiltered(pOff, pLen, "createdir\ncreatefile\ncwd\nexists\nlistdir\nmove\nread\nremovedir\nremovefile\nwrite"); }
-    if (txSpanEqLit(mOff, mLen, "sys") == 1) { txEmitFiltered(pOff, pLen, "arg\narg_bool\narg_float\narg_int\nhas_arg"); }
+    if (txSpanEqLit(mOff, mLen, "stdio") == 1) { txEmitFiltered(pOff, pLen, "absolute\nappend\ncreatedir\ncreatefile\ncwd\nexists\nlistdir\nmove\npath\nread\nremovedir\nremovefile\nsetcwd\nsizeof\nwrite"); }
+    if (txSpanEqLit(mOff, mLen, "sys") == 1) { txEmitFiltered(pOff, pLen, "arg\narg_bool\narg_float\narg_int\nargc\nargs\nhas_arg"); }
+    if (txSpanEqLit(mOff, mLen, "tft") == 1) { txEmitFiltered(pOff, pLen, "BLACK\nBLUE\nCYAN\nEPAPER\nGREEN\nILI9341\nMAGENTA\nRED\nSH1106\nSSD1306\nST7735\nST7789\nWHITE\nYELLOW"); }
     if (txSpanEqLit(mOff, mLen, "video.font") == 1) { txEmitFiltered(pOff, pLen, "builtin\ndraw\ndrawColored\ndrawScaled\ndrawWrapped\nglyphHeight\nglyphWidth\nlineHeight\nloadBmp\nmeasureHeight\nmeasureWidth\nsetKerning\nsetLineGap\nsetScale"); }
     if (txSpanEqLit(mOff, mLen, "video.sprite") == 1) { txEmitFiltered(pOff, pLen, "animCreate\nanimCurrentFrame\nanimDraw\nanimFinished\nanimReset\nanimUpdate\nclear\ncreate\ncreateFromAscii\ndraw\ndrawAlpha\ndrawFlipped\ndrawScaled\ndrawTinted\ngetPixel\nheight\nhitAabb\nhitPoint\nloadBmp\nsetKey\nsetPixel\nsheetCols\nsheetCreate\nsheetDrawFrame\nsheetFrame\nsheetLoadBmp\nsheetRows\nwidth"); }
     if (txSpanEqLit(mOff, mLen, "video.tilemap") == 1) { txEmitFiltered(pOff, pLen, "cameraCreate\ncameraFollow\ncameraMove\ncameraSet\ncameraSetBounds\ncameraX\ncameraY\ncollideAabb\ncreate\ndraw\nfill\ngetTile\nheight\nisSolid\npixelHeight\npixelWidth\nscreenToWorld\nsetLayout\nsetSolid\nsetTile\ntileAtWorld\ntileHeight\ntileWidth\ntilesetCreate\ntilesetLoadBmp\nwidth\nworldToScreen"); }

@@ -2611,7 +2611,7 @@
         cssc::poke8(buf + n, 48 + d);
         n = n + 1;
         #delete[d];
-        place = place / 10;
+        place = cssc::div(place, 10);
         if (place == 0) {
             more = 0;
         }
@@ -3138,8 +3138,10 @@
     #stack[int, 64] et = cssc::peek32(h + 12);
     #stack[int, 64] r = 0;
     ciVecPopType = et;              // real type of the returned element (auto -> per-elem)
+    #stack[int, 32] inb = 0;
     if (i >= 0) {
         if (i < size) {
+            inb = 1;
             #stack[int, 64] d = cssc::peek64(h + 16);
             #stack[int, 64] raw = cssc::peek64(d + i * 8);
             if (et == 1) {
@@ -3161,6 +3163,8 @@
             #delete[d];
         }
     }
+    if (inb == 0) { ciVecPopType = 3; }   // out-of-bounds read -> null (0x0), RAW
+    #delete[inb];
     #delete[et];
     #delete[size];
     return r;
@@ -7663,7 +7667,7 @@
     if (mid == 1) {
         #stack[int, 64] pp = p;
         if (pp < 0) { pp = pp + 1000; }
-        cx = pp * (w - 1) / 1000;
+        cx = cssc::div(pp * (w - 1), 1000);
         if (cx < 0) { cx = 0; }
         if (cx > w - 1) { cx = w - 1; }
         #delete[pp];
@@ -8424,6 +8428,7 @@
     #req[ciSecFind] ciSecFind;
     #req[ciObjFind] ciObjFind;
     #req[ciRaiseNamed] ciRaiseNamed;
+    #req[ciRaiseSector] ciRaiseSector;
     #req[ciLineAt] ciLineAt;
     #req[ciModOf] ciModOf;
     #req[ciTokFloat] ciTokFloat;
@@ -11444,6 +11449,7 @@
                         ciVecType(iv) vet;
                         #stack[int, 64] elt = vet;
                         if (vet == 8) { elt = ciVecPopType; }   // auto: real per-element type
+                        if (ciVecPopType == 3) { elt = 3; }     // out-of-bounds read -> null (0x0)
                         ciEvalType = elt;
                         if (elt == 1) { leftOwns = 1; }
                         #delete[elt];
@@ -12498,7 +12504,7 @@
                                     ciRaiseNamed("Unknown cssc builtin: ", ciSrc + o + uqcc + 2, l - uqcc - 2, guln);
                                 }
                                 if (guisc == 0) {
-                                    ciRaiseNamed("Unknown namespace: ", ciSrc + o, uqcc, guln);
+                                    ciRaiseSector(ciSrc + o, uqcc, guln);
                                 }
                                 left = 0;
                                 ciEvalType = 3;
@@ -12845,6 +12851,7 @@
                     ciVecType(iv) vet;
                     #stack[int, 64] elt = vet;
                     if (vet == 8) { elt = ciVecPopType; }   // auto: real per-element type
+                    if (ciVecPopType == 3) { elt = 3; }     // out-of-bounds read -> null (0x0)
                     ciEvalType = elt;
                     if (elt == 1) { leftOwns = 1; }
                     #delete[elt];
@@ -13166,18 +13173,15 @@
             if (op == 7) {
                 if (isFloat == 1) { cssc::fDiv(la, ra) r; left = r; leftType = 2; didFloat = 1; #delete[r]; }
                 if (isFloat == 0) {
-                    if (right == 0) { left = 0; didNull = 1; }
-                    if (right != 0) {
-                        cssc::iToF(left) lf;
-                        cssc::iToF(right) rf;
-                        cssc::fDiv(lf, rf) r;
-                        left = r;
-                        leftType = 2;
-                        didFloat = 1;
-                        #delete[lf];
-                        #delete[rf];
-                        #delete[r];
-                    }
+                    cssc::iToF(left) lf;
+                    cssc::iToF(right) rf;
+                    cssc::fDiv(lf, rf) r;
+                    left = r;
+                    leftType = 2;
+                    didFloat = 1;
+                    #delete[lf];
+                    #delete[rf];
+                    #delete[r];
                 }
             }
             if (op == 8) {
@@ -13189,11 +13193,11 @@
                         if (rm != 0) {
                             #stack[int, 32] rn = 0;
                             if (rm < 0) { rn = 1; }
-                            #stack[int, 32] bn = 0;
-                            if (right < 0) { bn = 1; }
-                            if (rn != bn) { rm = rm + right; }
+                            #stack[int, 32] ln = 0;
+                            if (left < 0) { ln = 1; }
+                            if (rn != ln) { rm = rm - right; }
                             #delete[rn];
-                            #delete[bn];
+                            #delete[ln];
                         }
                         left = rm;
                         #delete[rm];
@@ -15857,7 +15861,7 @@
                     // FX-BINDLIT: flat bind `{a, b, c}` -> pairWidth 2, ceil rows,
                     // null-pad the trailing odd cell so it renders as 0x0.
                     pairWidth = 2;
-                    pairCount = (cellIdx + 1) / 2;
+                    pairCount = cssc::div(cellIdx + 1, 2);
                     if (cellIdx < pairCount * 2) { ciBindRawSet(bh, cellIdx, 3, 0); }
                 }
                 cssc::poke32(bh + 12, pairWidth);
@@ -16016,7 +16020,13 @@
                     // FX-SCALARCOERCE: coerce the initializer to the declared
                     // scalar type (explicit `int` / `float` only; auto/bool keep).
                     if (declIsInt == 1) {
-                        if (et == 2) { cssc::fToI(e) ci; e = ci; #delete[ci]; et = 0; eo = 0; }
+                        if (et == 2) {
+                            cssc::band(e, 9218868437227405312) expb;
+                            if (expb == 9218868437227405312) { e = 0; }
+                            if (expb != 9218868437227405312) { cssc::fToI(e) ci; e = ci; #delete[ci]; }
+                            #delete[expb];
+                            et = 0; eo = 0;
+                        }
                         if (et == 3) { e = 0; et = 0; eo = 0; }
                         if (et == 9) { et = 0; }
                         if (et == 1) { if (eo == 1) { cssc::free(e); } e = 0; et = 0; eo = 0; }
@@ -16029,12 +16039,12 @@
                     #stack[int, 32] bitBad = 0;
                     if (declBits < 64) {
                         #stack[int, 64] reqBits = 0;
-                        if (et == 2) { reqBits = 64; }
+                        if (et == 2) { if (declType != 2) { reqBits = 64; } }
                         if (et == 0) {
                             #stack[int, 64] av = e;
                             if (av < 0) { av = 0 - av; }
                             #stack[int, 64] nb = 1;
-                            while (av >= 256) { av = av / 256; nb = nb + 1; }
+                            while (av >= 256) { cssc::shr(av, 8) shv; av = shv; #delete[shv]; nb = nb + 1; }
                             reqBits = nb * 8;
                             #delete[av];
                             #delete[nb];
@@ -16397,6 +16407,7 @@
     #req[ciObjFind] ciObjFind;
     #req[ciLineAt] ciLineAt;
     #req[ciRaiseNamed] ciRaiseNamed;
+    #req[ciRaiseSector] ciRaiseSector;
     #req[ciRaiseMsg] ciRaiseMsg;
     #req[ciRaise] ciRaise;
     #req[ciObjNameIs] ciObjNameIs;
@@ -16949,7 +16960,9 @@
                     if (mstdo == 1) { mknown = 1; }
                     if (mmou == 1) { mknown = 1; }
                     if (mknown == 0) {
-                        ciRaiseNamed("Unknown module: ", ciSrc + mo, ml, 0);
+                        #stack[int, 64] mln = ciLineAt(mo);
+                        ciRaiseNamed("Unknown module: ", ciSrc + mo, ml, mln);
+                        #delete[mln];
                     }
                     #delete[mknown];
                     if (modid > 0) {
@@ -19509,7 +19522,7 @@
                     }
                     if (uisc == 0) {
                         #stack[int, 64] uln = ciLineAt(o);
-                        ciRaiseNamed("Unknown namespace: ", ciSrc + o, uqcc, uln);
+                        ciRaiseSector(ciSrc + o, uqcc, uln);
                         #delete[uln];
                     }
                     #delete[uisc];
@@ -21066,6 +21079,40 @@
     cssc::free(db);
     #delete[p];
     #delete[tot];
+    return 0;
+}
+
+#define(ciRaiseSector) {
+    #scanp(ciRaiseSector, int, 0) nameAddr;
+    #scanp(ciRaiseSector, int, 1) nameLen;
+    #scanp(ciRaiseSector, int, 2) line;
+    #req[ciAppLit] ciAppLit;
+    #req[ciRaise] ciRaise;
+    #stack[int, 64] db = cssc::alloc(nameLen + nameLen + 600);
+    #stack[int, 64] p1 = ciAppLit(db, 0, "Unknown sector: ");
+    #stack[int, 32] q = 0;
+    while (q < nameLen) {
+        cssc::poke8(db + p1 + q, cssc::peek8(nameAddr + q));
+        q = q + 1;
+    }
+    #delete[q];
+    #stack[int, 64] p2 = p1 + nameLen;
+    #stack[int, 64] p3 = ciAppLit(db, p2, " (declare, #include or #load it before `");
+    #stack[int, 32] q2 = 0;
+    while (q2 < nameLen) {
+        cssc::poke8(db + p3 + q2, cssc::peek8(nameAddr + q2));
+        q2 = q2 + 1;
+    }
+    #delete[q2];
+    #stack[int, 64] p4 = p3 + nameLen;
+    #stack[int, 64] p5 = ciAppLit(db, p4, "::` access)");
+    ciRaise(db, p5, line, 0);
+    cssc::free(db);
+    #delete[p1];
+    #delete[p2];
+    #delete[p3];
+    #delete[p4];
+    #delete[p5];
     return 0;
 }
 

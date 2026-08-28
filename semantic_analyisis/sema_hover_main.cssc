@@ -19,6 +19,28 @@ if (cssc::argc() >= 2) {
     #stack[int, 64] rn = cssc::osReadFile(pathBuf, plen, buf, 1000000);
     if (rn < 0) { rn = 0; }
     n = rn;
+    // Keep the edited file's DIRECTORY so `alias::member` hover can resolve a
+    // `#load["rel.cssc"] alias;` path against it (mirrors sema_complete_main).
+    #req[txCompDirBuf] txCompDirBuf;
+    #req[txCompDirLen] txCompDirLen;
+    txCompDirBuf = cssc::alloc(4096);
+    #stack[int, 64] dcut = 0 - 1;
+    #stack[int, 64] di = 0;
+    while (di < plen) {
+        #stack[int, 64] dc = cssc::peek8(pathBuf + di);
+        if (dc == 47) { dcut = di; }
+        if (dc == 92) { dcut = di; }
+        #delete[dc];
+        di = di + 1;
+    }
+    #delete[di];
+    if (dcut >= 0) {
+        #stack[int, 64] dk = 0;
+        while (dk < dcut) { cssc::poke8(txCompDirBuf + dk, cssc::peek8(pathBuf + dk)); dk = dk + 1; }
+        txCompDirLen = dcut;
+        #delete[dk];
+    }
+    #delete[dcut];
     #delete[pathBuf];
     #delete[plen];
     #delete[rn];

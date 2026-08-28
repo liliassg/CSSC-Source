@@ -980,7 +980,7 @@
         cssc::poke8(buf + n, 48 + d);
         n = n + 1;
         #delete[d];
-        place = place / 10;
+        place = cssc::div(place, 10);
         if (place == 0) {
             more = 0;
         }
