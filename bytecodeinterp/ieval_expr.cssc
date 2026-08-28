@@ -159,6 +159,8 @@
     #req[ciArgOwns] ciArgOwns;
     #req[ciArgCount] ciArgCount;
     #req[ciVecPush] ciVecPush;
+    #req[ciVecPushRef] ciVecPushRef;
+    #req[ciVarFind] ciVarFind;
     #req[ciScopeBase] ciScopeBase;
     #req[ciVCount] ciVCount;
     #req[ciSignal] ciSignal;
@@ -3773,16 +3775,40 @@
             #stack[int, 64] vao = ciEvalOwns;
             #stack[int, 64] vat = ciEvalType;
             if (ciCur == 21) { ciAdvance(); }
+            // bare = reference: a lone identifier argument stores a cell reference
+            // to its variable (later mutations track; a freed/scoped-out referent
+            // reads null). An expression, literal, or `&copy` stores a value.
+            #stack[int, 64] rNO = 0;
+            #stack[int, 64] rNL = 0;
+            #stack[int, 32] rCand = 0;
+            if (ciCur == 2) { rNO = ciTokOff; rNL = ciTokLen; rCand = 1; }
             ciExpr(0) xa;
             #stack[int, 64] xat = ciEvalType;
             #stack[int, 64] xao = ciEvalOwns;
             if (ciCur == 10) { ciAdvance(); }
-            if (ciExec == 1) { ciVecPush(va, xa, xat); }
+            #stack[int, 32] didRef = 0;
+            if (ciExec == 1) {
+                if (rCand == 1) { if (xao == 0) {
+                    #stack[int, 32] prim = 0;
+                    if (xat == 0) { prim = 1; }
+                    if (xat == 2) { prim = 1; }
+                    if (xat == 9) { prim = 1; }
+                    if (prim == 1) {
+                        ciVarFind(rNO, rNL) rFi;
+                        if (rFi >= 0) { ciVecPushRef(va, rNO, rNL); didRef = 1; }
+                        #delete[rFi];
+                    }
+                    #delete[prim];
+                } }
+                if (didRef == 0) { ciVecPush(va, xa, xat); }
+            }
             left = va;
             ciEvalType = 4;
             leftOwns = vao;
             if (xao == 1) { if (xat == 1) { if (xa != 0) { cssc::free(xa); } } }
             handled = 1;
+            #delete[didRef];
+            #delete[rNO]; #delete[rNL]; #delete[rCand];
             #delete[xat]; #delete[xao]; #delete[xa];
             #delete[vao]; #delete[vat]; #delete[va];
         } }
@@ -4054,6 +4080,7 @@
             ciVecGet(va, gi) rr;
             left = rr;
             ciEvalType = et;
+            if (ciVecPopType == 3) { ciEvalType = 3; }   // OOB / dangled-ref read -> null (0x0)
             if (et == 1) { leftOwns = 1; }
             #delete[rr]; #delete[et]; #delete[gi];
             if (vao == 1) { ciValFree(vat, va); }
@@ -4276,6 +4303,7 @@
                 left = ixv;
                 ciVecTypeAt(ixh, ixe) ixt;
                 ciEvalType = ixt;
+                if (ciVecPopType == 3) { ciEvalType = 3; }   // dangled-ref read -> null (0x0)
                 if (ixt == 1) { leftOwns = 1; }
                 #delete[ixt];
                 #delete[ixv];

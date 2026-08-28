@@ -41,6 +41,9 @@
 #stack[int, 64] txGlobFixOff = 0;    // disp32 operand offset of a rip-relative global access
 #stack[int, 64] txGlobFixIdx = 0;    // global index
 #stack[int, 64] txGlobFixCount = 0;
+// Shared capacity for the fixup tables (reloc / lea / branch / call / globfix).
+// Raised from 65536 so larger programs fit; overflow past it sets txCapBad (abort).
+#stack[int, 64] txFixCap = 262144;
 
 #stack[int, 64] txX86Init;
 #define(txX86Init) {
@@ -51,27 +54,28 @@
     #req[txLabelOff] txLabelOff; #req[txBrOff] txBrOff; #req[txBrLabel] txBrLabel; #req[txBrCount] txBrCount;
     #req[txCallFixOff] txCallFixOff; #req[txCallFixFunc] txCallFixFunc; #req[txCallFixCount] txCallFixCount;
     #req[txGlobFixOff] txGlobFixOff; #req[txGlobFixIdx] txGlobFixIdx; #req[txGlobFixCount] txGlobFixCount;
-    txCodeCap = 1048576;
+    #req[txFixCap] txFixCap;
+    txCodeCap = 8388608;                              // 8 MB code
     txCode = cssc::alloc(txCodeCap);
     txCodeLen = 0;
-    txRelocOff = cssc::alloc(65536 * 8);
-    txRelocSym = cssc::alloc(65536 * 8);
+    txRelocOff = cssc::alloc(txFixCap * 8);
+    txRelocSym = cssc::alloc(txFixCap * 8);
     txRelocCount = 0;
-    txStrDataCap = 1048576;
+    txStrDataCap = 8388608;                           // 8 MB string data
     txStrData = cssc::alloc(txStrDataCap);
     txStrDataLen = 0;
-    txLeaOff = cssc::alloc(65536 * 8);
-    txLeaStr = cssc::alloc(65536 * 8);
+    txLeaOff = cssc::alloc(txFixCap * 8);
+    txLeaStr = cssc::alloc(txFixCap * 8);
     txLeaCount = 0;
-    txLabelOff = cssc::alloc(65536 * 8);
-    txBrOff = cssc::alloc(65536 * 8);
-    txBrLabel = cssc::alloc(65536 * 8);
+    txLabelOff = cssc::alloc(txFixCap * 8);
+    txBrOff = cssc::alloc(txFixCap * 8);
+    txBrLabel = cssc::alloc(txFixCap * 8);
     txBrCount = 0;
-    txCallFixOff = cssc::alloc(65536 * 8);
-    txCallFixFunc = cssc::alloc(65536 * 8);
+    txCallFixOff = cssc::alloc(txFixCap * 8);
+    txCallFixFunc = cssc::alloc(txFixCap * 8);
     txCallFixCount = 0;
-    txGlobFixOff = cssc::alloc(65536 * 8);
-    txGlobFixIdx = cssc::alloc(65536 * 8);
+    txGlobFixOff = cssc::alloc(txFixCap * 8);
+    txGlobFixIdx = cssc::alloc(txFixCap * 8);
     txGlobFixCount = 0;
 }
 
@@ -92,15 +96,20 @@
     #req[txGlobFixOff] txGlobFixOff;
     #req[txGlobFixIdx] txGlobFixIdx;
     #req[txGlobFixCount] txGlobFixCount;
+    #req[txFixCap] txFixCapGx;
+    #req[txCapBad] txCapBadGx;
     txEmitByte(0x48);
     // 0 = load rax,[rip+g] ; 1 = store [rip+g],rax ; 2 = lea rax,[rip+g]
     if (isStore == 1) { txEmitByte(0x89); }
     if (isStore == 2) { txEmitByte(0x8D); }
     if (isStore == 0) { txEmitByte(0x8B); }
     txEmitByte(0x05);
-    cssc::poke64(txGlobFixOff + txGlobFixCount * 8, txCodeLen);
-    cssc::poke64(txGlobFixIdx + txGlobFixCount * 8, byteOff);
-    txGlobFixCount = txGlobFixCount + 1;
+    if (txGlobFixCount >= txFixCapGx) { txCapBadGx = 1; }
+    if (txGlobFixCount < txFixCapGx) {
+        cssc::poke64(txGlobFixOff + txGlobFixCount * 8, txCodeLen);
+        cssc::poke64(txGlobFixIdx + txGlobFixCount * 8, byteOff);
+        txGlobFixCount = txGlobFixCount + 1;
+    }
     txEmitLE(0, 4);
 }
 
@@ -109,8 +118,13 @@
     #scanp(txEmitByte, int, 0) b;
     #req[txCode] txCode;
     #req[txCodeLen] txCodeLen;
-    cssc::poke8(txCode + txCodeLen, cssc::band(b, 255));
-    txCodeLen = txCodeLen + 1;
+    #req[txCodeCap] txCodeCap;
+    #req[txCapBad] txCapBadB;
+    if (txCodeLen >= txCodeCap) { txCapBadB = 1; }   // OVERFLOW -> flag, drop the byte (no OOB write)
+    if (txCodeLen < txCodeCap) {
+        cssc::poke8(txCode + txCodeLen, cssc::band(b, 255));
+        txCodeLen = txCodeLen + 1;
+    }
 }
 
 #stack[int, 64] txEmitLE;
@@ -258,11 +272,16 @@
     #req[txRelocOff] txRelocOff;
     #req[txRelocSym] txRelocSym;
     #req[txRelocCount] txRelocCount;
+    #req[txFixCap] txFixCapR;
+    #req[txCapBad] txCapBadR;
     txEmitByte(0x48);
     txEmitByte(0xB8);
-    cssc::poke64(txRelocOff + txRelocCount * 8, txCodeLen);
-    cssc::poke64(txRelocSym + txRelocCount * 8, sym);
-    txRelocCount = txRelocCount + 1;
+    if (txRelocCount >= txFixCapR) { txCapBadR = 1; }
+    if (txRelocCount < txFixCapR) {
+        cssc::poke64(txRelocOff + txRelocCount * 8, txCodeLen);
+        cssc::poke64(txRelocSym + txRelocCount * 8, sym);
+        txRelocCount = txRelocCount + 1;
+    }
     txEmitLE(0, 8);
 }
 
@@ -277,30 +296,147 @@
     #req[txLeaOff] txLeaOff;
     #req[txLeaStr] txLeaStr;
     #req[txLeaCount] txLeaCount;
+    #req[txFixCap] txFixCapL;
+    #req[txCapBad] txCapBadL;
     txEmitByte(0x48);
     txEmitByte(0x8D);
     txEmitByte(cssc::band(cssc::bor(cssc::shl(cssc::band(reg, 7), 3), 5), 255));
-    cssc::poke64(txLeaOff + txLeaCount * 8, txCodeLen);
-    cssc::poke64(txLeaStr + txLeaCount * 8, strOff);
-    txLeaCount = txLeaCount + 1;
+    if (txLeaCount >= txFixCapL) { txCapBadL = 1; }
+    if (txLeaCount < txFixCapL) {
+        cssc::poke64(txLeaOff + txLeaCount * 8, txCodeLen);
+        cssc::poke64(txLeaStr + txLeaCount * 8, strOff);
+        txLeaCount = txLeaCount + 1;
+    }
     txEmitLE(0, 4);
+}
+
+// Process the backslash escapes in a raw source string span [srcOff, srcOff+srcLen)
+// into their byte values -- byte-for-byte the interpreter's tokenizer:
+//   \n=10 \t=9 \r=13 \\=92 \"=34 \'=39 \0=0 ; \xNN=one hex byte ; \<newline>=
+//   line-continuation (nothing) ; any other \X keeps both bytes. A LONE trailing
+//   backslash is emitted raw. `dst`=0 counts only (returns the processed length);
+//   otherwise the processed bytes are written to dst[0..] . Shared by txAddStrData
+//   (data emission) and the literal-length sites so both agree on the length.
+#stack[int, 64] txStrEsc;
+#define(txStrEsc) {
+    #scanp(txStrEsc, int, 0) srcOff;
+    #scanp(txStrEsc, int, 1) srcLen;
+    #scanp(txStrEsc, int, 2) dst;
+    #req[txSrc] txSrc;
+    #stack[int, 64] out = 0;
+    #stack[int, 64] i = 0;
+    while (i < srcLen) {
+        #stack[int, 64] c = cssc::peek8(txSrc + srcOff + i);
+        if (c != 92) {
+            if (dst != 0) { cssc::poke8(dst + out, c); }
+            out = out + 1;
+            i = i + 1;
+        }
+        if (c == 92) {
+            #stack[int, 32] canEsc = 0;
+            if (i + 1 < srcLen) { canEsc = 1; }
+            if (canEsc == 0) {
+                if (dst != 0) { cssc::poke8(dst + out, 92); }   // lone trailing backslash
+                out = out + 1;
+                i = i + 1;
+            }
+            if (canEsc == 1) {
+                #stack[int, 64] nxt = cssc::peek8(txSrc + srcOff + i + 1);
+                #stack[int, 32] handled = 0;
+                if (nxt == 10) { i = i + 2; handled = 1; }              // \ + LF -> nothing
+                if (handled == 0) { if (nxt == 13) {                    // \ + CR(LF) -> nothing
+                    i = i + 2;
+                    if (i < srcLen) { if (cssc::peek8(txSrc + srcOff + i) == 10) { i = i + 1; } }
+                    handled = 1;
+                } }
+                if (handled == 0) { if (nxt == 120) {                  // \xNN
+                    #stack[int, 64] hv = 0;
+                    #stack[int, 64] hn = 0;
+                    #stack[int, 64] j = i + 2;
+                    #stack[int, 32] hgo = 1;
+                    while (hgo == 1) {
+                        if (hn >= 2) { hgo = 0; }
+                        if (hgo == 1) { if (j >= srcLen) { hgo = 0; } }
+                        if (hgo == 1) {
+                            #stack[int, 64] hc = cssc::peek8(txSrc + srcOff + j);
+                            #stack[int, 64] dv = 0 - 1;
+                            if (hc >= 48) { if (hc <= 57) { dv = hc - 48; } }
+                            if (hc >= 97) { if (hc <= 102) { dv = hc - 87; } }
+                            if (hc >= 65) { if (hc <= 70) { dv = hc - 55; } }
+                            if (dv < 0) { hgo = 0; }
+                            if (dv >= 0) { hv = hv * 16 + dv; hn = hn + 1; j = j + 1; }
+                            #delete[dv];
+                            #delete[hc];
+                        }
+                    }
+                    if (hn > 0) {
+                        if (dst != 0) { cssc::poke8(dst + out, hv); }
+                        out = out + 1;
+                        i = j;
+                    }
+                    if (hn == 0) {
+                        if (dst != 0) { cssc::poke8(dst + out, 92); }
+                        out = out + 1;
+                        if (dst != 0) { cssc::poke8(dst + out, 120); }
+                        out = out + 1;
+                        i = i + 2;
+                    }
+                    #delete[hgo];
+                    #delete[j];
+                    #delete[hn];
+                    #delete[hv];
+                    handled = 1;
+                } }
+                if (handled == 0) {
+                    #stack[int, 64] ev = 0 - 1;
+                    if (nxt == 110) { ev = 10; }   // n
+                    if (nxt == 116) { ev = 9; }    // t
+                    if (nxt == 114) { ev = 13; }   // r
+                    if (nxt == 92) { ev = 92; }    // backslash
+                    if (nxt == 34) { ev = 34; }    // "
+                    if (nxt == 39) { ev = 39; }    // '
+                    if (nxt == 48) { ev = 0; }     // 0 -> NUL
+                    if (ev >= 0) {
+                        if (dst != 0) { cssc::poke8(dst + out, ev); }
+                        out = out + 1;
+                        i = i + 2;
+                    }
+                    if (ev < 0) {                  // unknown escape: keep both bytes
+                        if (dst != 0) { cssc::poke8(dst + out, 92); }
+                        out = out + 1;
+                        if (dst != 0) { cssc::poke8(dst + out, nxt); }
+                        out = out + 1;
+                        i = i + 2;
+                    }
+                    #delete[ev];
+                }
+                #delete[handled];
+                #delete[nxt];
+            }
+            #delete[canEsc];
+        }
+        #delete[c];
+    }
+    #delete[i];
+    return out;
 }
 
 #stack[int, 64] txAddStrData;
 #define(txAddStrData) {
     #scanp(txAddStrData, int, 0) srcOff;
     #scanp(txAddStrData, int, 1) len;
-    #req[txSrc] txSrc;
     #req[txStrData] txStrData;
     #req[txStrDataLen] txStrDataLen;
+    #req[txStrDataCap] txStrDataCap;
+    #req[txStrEsc] txStrEsc;
+    #req[txCapBad] txCapBadStr;
     #stack[int, 64] at = txStrDataLen;
-    #stack[int, 64] i = 0;
-    while (i < len) {
-        cssc::poke8(txStrData + at + i, cssc::peek8(txSrc + srcOff + i));
-        i = i + 1;
-    }
-    #delete[i];
-    txStrDataLen = txStrDataLen + len;
+    // escaped length <= 2*len; keep headroom so txStrEsc never writes past the
+    // buffer. OVERFLOW -> flag + skip the write (emit aborts anyway).
+    if (at + len * 2 + 8 >= txStrDataCap) { txCapBadStr = 1; return at; }
+    txStrEsc(srcOff, len, txStrData + at) n;
+    txStrDataLen = txStrDataLen + n;
+    #delete[n];
     return at;
 }
 
@@ -810,6 +946,24 @@
             txSsaOff(bbR) bro; txStoreRbp(0, bro); #delete[bro];
             #delete[bbR]; #delete[bbB]; #delete[bbA];
         } }
+        if (op == 41) {                                  // BXOR: res = A ^ B
+            #stack[int, 64] xA = cssc::peek64(txCirA + o);
+            #stack[int, 64] xB = cssc::peek64(txCirB + o);
+            #stack[int, 64] xR = cssc::peek64(txCirRes + o);
+            txSsaOff(xA) xao; txLoadRbp(0, xao); #delete[xao];   // rax = A
+            txSsaOff(xB) xbo; txLoadRbp(1, xbo); #delete[xbo];   // rcx = B
+            txEmitByte(0x48); txEmitByte(0x31); txEmitByte(0xC8); // xor rax,rcx
+            txSsaOff(xR) xro; txStoreRbp(0, xro); #delete[xro];
+            #delete[xR]; #delete[xB]; #delete[xA];
+        }
+        if (op == 42) {                                  // BNOT: res = ~A (B unused)
+            #stack[int, 64] nA = cssc::peek64(txCirA + o);
+            #stack[int, 64] nR = cssc::peek64(txCirRes + o);
+            txSsaOff(nA) nao; txLoadRbp(0, nao); #delete[nao];   // rax = A
+            txEmitByte(0x48); txEmitByte(0xF7); txEmitByte(0xD0); // not rax
+            txSsaOff(nR) nro; txStoreRbp(0, nro); #delete[nro];
+            #delete[nR]; #delete[nA];
+        }
         if (op == 33) {                                  // PEEK8: res = *(u8*)A
             #stack[int, 64] p8A = cssc::peek64(txCirA + o);
             #stack[int, 64] p8R = cssc::peek64(txCirRes + o);
@@ -1083,6 +1237,68 @@
             #delete[argStart];
             #delete[res];
             #delete[funcIdx];
+        }
+        if (op == 40) {                                  // CALL_RTN sym, argStart, argCount -> res
+            #stack[int, 64] rsym = cssc::peek64(txCirImm + o);
+            #stack[int, 64] rres = cssc::peek64(txCirRes + o);
+            #stack[int, 64] rArgStart = cssc::peek64(txCirA + o);
+            #stack[int, 64] rArgCount = cssc::peek64(txCirB + o);
+            // stack args (>6) pushed in reverse, with a 16-align pad
+            #stack[int, 64] rns = 0;
+            if (rArgCount > 6) { rns = rArgCount - 6; }
+            #stack[int, 64] rpad = 0;
+            if (rns > 0) {
+                if (cssc::band(rns, 1) == 1) { rpad = 1; }
+                if (rpad == 1) { txEmitByte(0x48); txEmitByte(0x83); txEmitByte(0xEC); txEmitByte(8); }
+                #stack[int, 64] rpj = rArgCount - 1;
+                #stack[int, 32] rpgo = 1;
+                while (rpgo == 1) {
+                    if (rpj < 6) { rpgo = 0; }
+                    if (rpgo == 1) {
+                        #stack[int, 64] rpsid = cssc::peek64(txCallArg + (rArgStart + rpj) * 8);
+                        txSsaOff(rpsid) rpso;
+                        txLoadRbp(0, rpso);
+                        txEmitByte(0x50);                   // push rax
+                        #delete[rpso];
+                        rpj = rpj - 1;
+                    }
+                }
+                #delete[rpgo];
+                #delete[rpj];
+            }
+            // register args 0..min(6,argCount)-1 via the SysV arg registers
+            #stack[int, 64] rnload = rArgCount;
+            if (rnload > 6) { rnload = 6; }
+            #stack[int, 64] rai = 0;
+            while (rai < rnload) {
+                #stack[int, 64] rsid = cssc::peek64(txCallArg + (rArgStart + rai) * 8);
+                txArgReg(rai) rareg;
+                txSsaOff(rsid) raso;
+                txLoadRbp(rareg, raso);
+                #delete[raso];
+                #delete[rareg];
+                #delete[rsid];
+                rai = rai + 1;
+            }
+            #delete[rai];
+            #delete[rnload];
+            // rtsym reloc call (mov rax, imm64=0 + reloc record; call rax)
+            txMovRaxReloc(rsym);
+            txEmitByte(0xFF); txEmitByte(0xD0);          // call rax
+            if (rres >= 0) { txSsaOff(rres) rrso; txStoreRbp(0, rrso); #delete[rrso]; }
+            // caller cleans up the stack args it pushed (+ the alignment pad)
+            if (rns > 0) {
+                #stack[int, 64] rcl = (rns + rpad) * 8;
+                if (rcl < 128) { txEmitByte(0x48); txEmitByte(0x83); txEmitByte(0xC4); txEmitByte(cssc::band(rcl, 255)); }
+                if (rcl >= 128) { txEmitByte(0x48); txEmitByte(0x81); txEmitByte(0xC4); txEmitLE(rcl, 4); }
+                #delete[rcl];
+            }
+            #delete[rpad];
+            #delete[rns];
+            #delete[rArgCount];
+            #delete[rArgStart];
+            #delete[rres];
+            #delete[rsym];
         }
         #delete[op];
         #delete[o];

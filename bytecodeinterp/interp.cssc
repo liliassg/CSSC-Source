@@ -3129,11 +3129,66 @@
     #delete[size];
     #delete[cap];
 }
+#define(ciVecPushRef) {
+    #scanp(ciVecPushRef, int, 0) h;
+    #scanp(ciVecPushRef, int, 1) no;
+    #scanp(ciVecPushRef, int, 2) nl;
+    #stack[int, 64] size = cssc::peek32(h + 4);
+    #stack[int, 64] cap = cssc::peek32(h + 8);
+    #stack[int, 64] et = cssc::peek32(h + 12);
+    // a bare-value reference needs a per-element tag array so ciVecGet knows the
+    // element is a reference (tag 6), not a plain value. Allocate it lazily even
+    // for a typed vector, seeding the existing elements with the declared type.
+    #stack[int, 64] tp0 = cssc::peek64(h + 24);
+    if (tp0 == 0) {
+        #stack[int, 64] itp = cssc::alloc(cap * 8);
+        cssc::memfill32(itp, et, cap * 2);
+        cssc::poke64(h + 24, itp);
+        #delete[itp];
+    }
+    #delete[tp0];
+    if (size >= cap) {
+        #stack[int, 64] ncap = cap * 2;
+        #stack[int, 64] nd = cssc::alloc(ncap * 8);
+        #stack[int, 64] od = cssc::peek64(h + 16);
+        cssc::memcopy(nd, od, size * 2);
+        cssc::free(od);
+        cssc::poke64(h + 16, nd);
+        #stack[int, 64] otp = cssc::peek64(h + 24);
+        #stack[int, 64] ntp = cssc::alloc(ncap * 8);
+        cssc::memfill32(ntp, et, ncap * 2);
+        cssc::memcopy(ntp, otp, size * 2);
+        cssc::free(otp);
+        cssc::poke64(h + 24, ntp);
+        cssc::poke32(h + 8, ncap);
+        #delete[od];
+        #delete[nd];
+        #delete[otp];
+        #delete[ntp];
+        #delete[ncap];
+    }
+    #stack[int, 64] rec = cssc::alloc(16);
+    cssc::poke64(rec, no);
+    cssc::poke64(rec + 8, nl);
+    #stack[int, 64] d = cssc::peek64(h + 16);
+    cssc::poke64(d + size * 8, rec);
+    #stack[int, 64] tp = cssc::peek64(h + 24);
+    cssc::poke32(tp + size * 8, 6);
+    cssc::poke32(h + 4, size + 1);
+    #delete[d];
+    #delete[tp];
+    #delete[rec];
+    #delete[et];
+    #delete[size];
+    #delete[cap];
+}
 #define(ciVecGet) {
     #scanp(ciVecGet, int, 0) h;
     #scanp(ciVecGet, int, 1) i;
     #req[ciStrClone] ciStrClone;
     #req[ciVecPopType] ciVecPopType;
+    #req[ciVarGet] ciVarGet;
+    #req[ciEvalType] ciEvalType;
     #stack[int, 64] size = cssc::peek32(h + 4);
     #stack[int, 64] et = cssc::peek32(h + 12);
     #stack[int, 64] r = 0;
@@ -3144,21 +3199,44 @@
             inb = 1;
             #stack[int, 64] d = cssc::peek64(h + 16);
             #stack[int, 64] raw = cssc::peek64(d + i * 8);
-            if (et == 1) {
-                ciStrClone(raw) cr;
-                r = cr;
-                #delete[cr];
+            #stack[int, 32] isRef = 0;
+            #stack[int, 64] rtpa = cssc::peek64(h + 24);
+            if (rtpa != 0) {
+                #stack[int, 64] rtag = cssc::peek32(rtpa + i * 8);
+                if (rtag == 6) { isRef = 1; }
+                #delete[rtag];
             }
-            if (et == 8) {
-                #stack[int, 64] tp = cssc::peek64(h + 24);
-                #stack[int, 64] pt = cssc::peek32(tp + i * 8);
-                ciVecPopType = pt;
-                if (pt == 1) { ciStrClone(raw) cr8; r = cr8; #delete[cr8]; }
-                if (pt != 1) { r = raw; }
-                #delete[tp];
-                #delete[pt];
+            #delete[rtpa];
+            if (isRef == 1) {
+                // bare-value reference: deref the referenced variable by name;
+                // a mutated var reads live, a freed/scoped-out var reads null.
+                #stack[int, 64] rno = cssc::peek64(raw);
+                #stack[int, 64] rnl = cssc::peek64(raw + 8);
+                ciVarGet(rno, rnl) live;
+                r = live;
+                ciVecPopType = ciEvalType;
+                #delete[live];
+                #delete[rno];
+                #delete[rnl];
             }
-            if (et != 1) { if (et != 8) { r = raw; } }
+            if (isRef == 0) {
+                if (et == 1) {
+                    ciStrClone(raw) cr;
+                    r = cr;
+                    #delete[cr];
+                }
+                if (et == 8) {
+                    #stack[int, 64] tp = cssc::peek64(h + 24);
+                    #stack[int, 64] pt = cssc::peek32(tp + i * 8);
+                    ciVecPopType = pt;
+                    if (pt == 1) { ciStrClone(raw) cr8; r = cr8; #delete[cr8]; }
+                    if (pt != 1) { r = raw; }
+                    #delete[tp];
+                    #delete[pt];
+                }
+                if (et != 1) { if (et != 8) { r = raw; } }
+            }
+            #delete[isRef];
             #delete[raw];
             #delete[d];
         }
@@ -3291,6 +3369,27 @@
         #delete[d];
         #delete[size];
     }
+    // free reference-element records (tag 6) regardless of declared type
+    #stack[int, 64] rtp = cssc::peek64(h + 24);
+    if (rtp != 0) {
+        #stack[int, 64] rsize = cssc::peek32(h + 4);
+        #stack[int, 64] rd = cssc::peek64(h + 16);
+        #stack[int, 64] ri = 0;
+        while (ri < rsize) {
+            #stack[int, 64] rt = cssc::peek32(rtp + ri * 8);
+            if (rt == 6) {
+                #stack[int, 64] rrec = cssc::peek64(rd + ri * 8);
+                if (rrec != 0) { cssc::free(rrec); }
+                #delete[rrec];
+            }
+            #delete[rt];
+            ri = ri + 1;
+        }
+        #delete[ri];
+        #delete[rd];
+        #delete[rsize];
+    }
+    #delete[rtp];
     cssc::poke32(h + 4, 0);
     #delete[et];
 }
@@ -3300,13 +3399,9 @@
     ciVecClear(h);
     #stack[int, 64] d = cssc::peek64(h + 16);
     cssc::free(d);
-    #stack[int, 64] et = cssc::peek32(h + 12);
-    if (et == 8) {
-        #stack[int, 64] tp = cssc::peek64(h + 24);
-        if (tp != 0) { cssc::free(tp); }
-        #delete[tp];
-    }
-    #delete[et];
+    #stack[int, 64] tp = cssc::peek64(h + 24);
+    if (tp != 0) { cssc::free(tp); }
+    #delete[tp];
     cssc::free(h);
     #delete[d];
 }
@@ -8501,6 +8596,8 @@
     #req[ciArgOwns] ciArgOwns;
     #req[ciArgCount] ciArgCount;
     #req[ciVecPush] ciVecPush;
+    #req[ciVecPushRef] ciVecPushRef;
+    #req[ciVarFind] ciVarFind;
     #req[ciScopeBase] ciScopeBase;
     #req[ciVCount] ciVCount;
     #req[ciSignal] ciSignal;
@@ -12115,16 +12212,40 @@
             #stack[int, 64] vao = ciEvalOwns;
             #stack[int, 64] vat = ciEvalType;
             if (ciCur == 21) { ciAdvance(); }
+            // bare = reference: a lone identifier argument stores a cell reference
+            // to its variable (later mutations track; a freed/scoped-out referent
+            // reads null). An expression, literal, or `&copy` stores a value.
+            #stack[int, 64] rNO = 0;
+            #stack[int, 64] rNL = 0;
+            #stack[int, 32] rCand = 0;
+            if (ciCur == 2) { rNO = ciTokOff; rNL = ciTokLen; rCand = 1; }
             ciExpr(0) xa;
             #stack[int, 64] xat = ciEvalType;
             #stack[int, 64] xao = ciEvalOwns;
             if (ciCur == 10) { ciAdvance(); }
-            if (ciExec == 1) { ciVecPush(va, xa, xat); }
+            #stack[int, 32] didRef = 0;
+            if (ciExec == 1) {
+                if (rCand == 1) { if (xao == 0) {
+                    #stack[int, 32] prim = 0;
+                    if (xat == 0) { prim = 1; }
+                    if (xat == 2) { prim = 1; }
+                    if (xat == 9) { prim = 1; }
+                    if (prim == 1) {
+                        ciVarFind(rNO, rNL) rFi;
+                        if (rFi >= 0) { ciVecPushRef(va, rNO, rNL); didRef = 1; }
+                        #delete[rFi];
+                    }
+                    #delete[prim];
+                } }
+                if (didRef == 0) { ciVecPush(va, xa, xat); }
+            }
             left = va;
             ciEvalType = 4;
             leftOwns = vao;
             if (xao == 1) { if (xat == 1) { if (xa != 0) { cssc::free(xa); } } }
             handled = 1;
+            #delete[didRef];
+            #delete[rNO]; #delete[rNL]; #delete[rCand];
             #delete[xat]; #delete[xao]; #delete[xa];
             #delete[vao]; #delete[vat]; #delete[va];
         } }
@@ -12396,6 +12517,7 @@
             ciVecGet(va, gi) rr;
             left = rr;
             ciEvalType = et;
+            if (ciVecPopType == 3) { ciEvalType = 3; }   // OOB / dangled-ref read -> null (0x0)
             if (et == 1) { leftOwns = 1; }
             #delete[rr]; #delete[et]; #delete[gi];
             if (vao == 1) { ciValFree(vat, va); }
@@ -12618,6 +12740,7 @@
                 left = ixv;
                 ciVecTypeAt(ixh, ixe) ixt;
                 ciEvalType = ixt;
+                if (ciVecPopType == 3) { ciEvalType = 3; }   // dangled-ref read -> null (0x0)
                 if (ixt == 1) { leftOwns = 1; }
                 #delete[ixt];
                 #delete[ixv];
@@ -16343,6 +16466,7 @@
     #req[ciVarSet] ciVarSet;
     #req[ciVecNew] ciVecNew;
     #req[ciVecPush] ciVecPush;
+    #req[ciVecPushRef] ciVecPushRef;
     #req[ciVecSet] ciVecSet;
     #req[ciVecClear] ciVecClear;
     #req[ciVecPop] ciVecPop;
@@ -19555,12 +19679,16 @@
                     #stack[int, 64] vg0 = 0;
                     #stack[int, 64] vg0T = 0;
                     #stack[int, 64] vg0O = 0;
+                    #stack[int, 64] vRefNO = 0;
+                    #stack[int, 64] vRefNL = 0;
+                    #stack[int, 32] vRefCand = 0;
                     #stack[int, 64] vg1 = 0;
                     #stack[int, 64] vg1T = 0;
                     #stack[int, 64] vg1O = 0;
                     if (ciCur == 9) {
                         ciAdvance();
                         if (ciCur != 10) {
+                            if (ciCur == 2) { vRefNO = ciTokOff; vRefNL = ciTokLen; vRefCand = 1; }
                             ciExpr(0) ve0;
                             vg0 = ve0;
                             vg0T = ciEvalType;
@@ -19582,8 +19710,27 @@
                         ciIdentIs(vmo, vml, "push_back") vmpb;
                         ciIdentIs(vmo, vml, "set") vms;
                         ciIdentIs(vmo, vml, "clear") vmc;
-                        if (vmp == 1) { ciVecPush(vh, vg0, vg0T); }
-                        if (vmpb == 1) { ciVecPush(vh, vg0, vg0T); }
+                        #stack[int, 32] vEndPush = 0;
+                        if (vmp == 1) { vEndPush = 1; }
+                        if (vmpb == 1) { vEndPush = 1; }
+                        if (vEndPush == 1) {
+                            #stack[int, 32] vDidRef = 0;
+                            if (vRefCand == 1) { if (vg0O == 0) {
+                                #stack[int, 32] vPrim = 0;
+                                if (vg0T == 0) { vPrim = 1; }
+                                if (vg0T == 2) { vPrim = 1; }
+                                if (vg0T == 9) { vPrim = 1; }
+                                if (vPrim == 1) {
+                                    ciVarFind(vRefNO, vRefNL) vFi;
+                                    if (vFi >= 0) { ciVecPushRef(vh, vRefNO, vRefNL); vDidRef = 1; }
+                                    #delete[vFi];
+                                }
+                                #delete[vPrim];
+                            } }
+                            if (vDidRef == 0) { ciVecPush(vh, vg0, vg0T); }
+                            #delete[vDidRef];
+                        }
+                        #delete[vEndPush];
                         if (vms == 1) { ciVecSet(vh, vg0, vg1); }
                         if (vmc == 1) { ciVecClear(vh); }
                         // in-place mutators (void). push_front/emplace_front insert
@@ -19709,6 +19856,9 @@
                     #delete[vg0];
                     #delete[vg0T];
                     #delete[vg0O];
+                    #delete[vRefNO];
+                    #delete[vRefNL];
+                    #delete[vRefCand];
                     #delete[vg1];
                     #delete[vg1T];
                     #delete[vg1O];
