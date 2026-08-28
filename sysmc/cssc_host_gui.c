@@ -46,6 +46,9 @@ extern void    cssc_video_draw_rect(void* v, int64_t x, int64_t y,
                                     int64_t w, int64_t h, int64_t argb);
 extern void    cssc_video_draw_text(void* v, int64_t x, int64_t y,
                                     const char* text, int64_t argb, int64_t scale);
+extern void    cssc_video_draw_text_styled(void* v, int64_t x, int64_t y,
+                                    const char* text, int64_t argb, int64_t scale,
+                                    int64_t style);
 extern int64_t cssc_video_poll_char(void* v);
 extern int64_t cssc_video_poll_key(void* v);
 extern int64_t cssc_video_wheel(void* v);
@@ -75,7 +78,8 @@ typedef struct cssc_gui_screen {
     int64_t  cssc_modal;          /* a host-drawn overlay (e.g. color picker) owns input */
     int64_t  hk_prev_b, hk_prev_j; /* Ctrl+B / Ctrl+J edge state for hotkey() */
     int64_t  hk_prev_caret;        /* Alt+^ edge state for hotkey() (color picker) */
-    int64_t  hk_prev_f1, hk_prev_f2, hk_prev_f5, hk_prev_f6, hk_prev_f9, hk_prev_f11; /* F-key edge state for funcKey() */
+    int64_t  dk_prev_plus, dk_prev_minus, dk_prev_hash; /* + / - / # edge state for dbgKey() */
+    int64_t  hk_prev_f1, hk_prev_f2, hk_prev_f5, hk_prev_f6, hk_prev_f9, hk_prev_f10, hk_prev_f11; /* F-key edge state for funcKey() */
     void**   widgets;
     int      n_widgets, cap_widgets;
     int64_t  last_cb;
@@ -141,6 +145,7 @@ typedef struct {
     int              dbl_line, dbl_col, dbl_timer;
     int              dbl_fired;   /* one-shot: set on a double-click, read+cleared by the host */
     int              click_fired; /* one-shot: set on ANY editor click (host clears a held debug highlight) */
+    int              rclick_fired; /* one-shot: set on a right-click over a word (host opens the semantic menu) */
     /* Semantic double-click: last scanned declaration of a token. Filled by
      * cssc_gui_editor_scandecl, read via the decl* accessors. */
     int              decl_isvar, decl_bits, decl_isauto;
@@ -189,6 +194,10 @@ typedef struct {
     /* F5 Debugger instruction pointer: 1-based source line to highlight red
      * (like an analyzer mark), 0 = none. Set by cssc_gui_editor_setipline. */
     int              ip_line;
+    /* F10 autoclean review marks: 1-based lines the cleanup INSERTED, drawn with
+     * a green wash so the author reviews each; cleared by F2. */
+    int              clean_marks[512];
+    int              clean_nmarks;
 } cssc_gui_editor;
 
 typedef struct {
@@ -212,6 +221,7 @@ typedef struct {
     char**           names;       /* basename per visible row */
     int*             depths;      /* indent level per row */
     int*             isdir;       /* 1 folder / 0 file per row */
+    long long*       sizes;       /* file size in bytes per row (-1 for dirs) */
     int              nrows, cap;
     int              selected, top, right_hit;
     int64_t          scale, bg, fg, sel_bg, sel_fg;
@@ -232,6 +242,7 @@ typedef struct {
     /* drag-and-drop move: press-drag a row onto a folder row to move it. */
     int              drag_on, drag_idx, drag_active, drag_dx, drag_dy;
     int              drop_ready;
+    int              resizing;    /* dragging the right edge to resize the panel */
     char             drop_src[520], drop_dst[520];
 } cssc_gui_tree;
 
@@ -267,6 +278,21 @@ typedef struct {
     int              line_col_set;  /* 1 once a non-reset fg applied this line */
     unsigned int     utf_cp;        /* UTF-8 codepoint accumulator */
     int              utf_need;      /* remaining continuation bytes */
+    /* F5 console-debugger IP marker: `pctrace --console` writes an invisible
+     * SOH line STX file SOH sequence on every step; we strip it from the visible
+     * stream and expose ip_line/ip_file so the editor follows the executing line
+     * (and switches source file across #load boundaries). */
+    int              ipm_st;        /* 1 while capturing a marker */
+    char             ipm_buf[1200];
+    int              ipm_len;
+    int              ip_line;       /* current instruction-pointer source line */
+    char             ip_file[1024]; /* absolute path of the file it sits in */
+    int              input_locked;  /* while a debug trace runs: swallow typed
+                                     * input (only Ctrl+X interrupt / Ctrl+C copy
+                                     * pass) so the transport keys own the panel */
+    int              input_wanted;  /* the traced program is blocked in cssc::input
+                                     * (an I1/I0 marker) — temporarily lift the lock
+                                     * so the answer can be typed, then re-lock */
 } cssc_gui_terminal;
 
 typedef struct {
@@ -551,6 +577,35 @@ CSSC_GUI_EXPORT int64_t cssc_gui_screen_hotkey(void* p) {
 #endif
 }
 
+/* Edge-triggered debugger transport keys, polled via key-STATE (not the WM_CHAR
+ * queue) so they work as global controls while the terminal has focus for the
+ * traced program's input: returns 1 = '+' (faster), 2 = '-' (slower),
+ * 3 = '#' (pause toggle), 0 = none. Accepts numpad +/- and the DE-layout OEM
+ * keys. One event per physical press. */
+CSSC_GUI_EXPORT int64_t cssc_gui_screen_dbgkey(void* p) {
+    cssc_gui_screen* s = (cssc_gui_screen*)p;
+    if (!s) return 0;
+#ifdef _WIN32
+    int plus  = ((GetAsyncKeyState(VK_ADD) & 0x8000) ||
+                 (GetAsyncKeyState(0xBB) & 0x8000)) ? 1 : 0;   /* VK_OEM_PLUS */
+    int minus = ((GetAsyncKeyState(VK_SUBTRACT) & 0x8000) ||
+                 (GetAsyncKeyState(0xBD) & 0x8000)) ? 1 : 0;   /* VK_OEM_MINUS */
+    int hash  = (GetAsyncKeyState(0xBF) & 0x8000) ? 1 : 0;     /* VK_OEM_2 = '#' on DE */
+    if (!screen_focused(s)) {
+        s->dk_prev_plus = plus; s->dk_prev_minus = minus; s->dk_prev_hash = hash;
+        return 0;
+    }
+    int64_t r = 0;
+    if (plus && !s->dk_prev_plus)        r = 1;
+    else if (minus && !s->dk_prev_minus) r = 2;
+    else if (hash && !s->dk_prev_hash)   r = 3;
+    s->dk_prev_plus = plus; s->dk_prev_minus = minus; s->dk_prev_hash = hash;
+    return r;
+#else
+    return 0;
+#endif
+}
+
 /* Edge-triggered function keys (independent of focus / the WM_CHAR queue):
  * returns 1 = F1, 5 = F5, 6 = F6, 9 = F9, 11 = F11, 0 = none. One per press. */
 CSSC_GUI_EXPORT int64_t cssc_gui_screen_funckey(void* p) {
@@ -562,10 +617,11 @@ CSSC_GUI_EXPORT int64_t cssc_gui_screen_funckey(void* p) {
     int f5 = (GetAsyncKeyState(VK_F5) & 0x8000) ? 1 : 0;
     int f6 = (GetAsyncKeyState(VK_F6) & 0x8000) ? 1 : 0;
     int f9 = (GetAsyncKeyState(VK_F9) & 0x8000) ? 1 : 0;
+    int f10 = (GetAsyncKeyState(VK_F10) & 0x8000) ? 1 : 0;
     int f11 = (GetAsyncKeyState(VK_F11) & 0x8000) ? 1 : 0;
     if (!screen_focused(s)) {          /* not the active window -> ignore, no edge */
         s->hk_prev_f1 = f1; s->hk_prev_f2 = f2; s->hk_prev_f5 = f5;
-        s->hk_prev_f6 = f6; s->hk_prev_f9 = f9; s->hk_prev_f11 = f11;
+        s->hk_prev_f6 = f6; s->hk_prev_f9 = f9; s->hk_prev_f10 = f10; s->hk_prev_f11 = f11;
         return 0;
     }
     int64_t r = 0;
@@ -574,12 +630,14 @@ CSSC_GUI_EXPORT int64_t cssc_gui_screen_funckey(void* p) {
     else if (f5 && !s->hk_prev_f5) r = 5;
     else if (f6 && !s->hk_prev_f6) r = 6;
     else if (f9 && !s->hk_prev_f9) r = 9;
+    else if (f10 && !s->hk_prev_f10) r = 10;
     else if (f11 && !s->hk_prev_f11) r = 11;
     s->hk_prev_f1 = f1;
     s->hk_prev_f2 = f2;
     s->hk_prev_f5 = f5;
     s->hk_prev_f6 = f6;
     s->hk_prev_f9 = f9;
+    s->hk_prev_f10 = f10;
     s->hk_prev_f11 = f11;
     return r;
 #else
@@ -1774,7 +1832,7 @@ static void ed_cmp_accept(cssc_gui_editor* e) {
 /* After a printable char (cc) was inserted, decide whether to (re)fetch or just
  * refilter the popup, and where the completed token starts. */
 static void ed_cmp_on_type(cssc_gui_editor* e, char cc) {
-    if (e->language != 1) { ed_cmp_close(e); return; }   /* CSSC files only */
+    if (e->language != 1) { ed_cmp_close(e); return; }
     char* ln = e->lines[e->cur_line];
     int cur = e->cur_col;
     char b2 = cur >= 2 ? ln[cur - 2] : 0;
@@ -1815,7 +1873,8 @@ static void ed_sig_close(cssc_gui_editor* e) {
  * only when the enclosing call changes; the active arg (top-level comma count to
  * the caret) updates the highlight without a re-fetch. */
 static void ed_sig_scan(cssc_gui_editor* e) {
-    if (e->language != 1 || e->cmp_open) { ed_sig_close(e); return; }
+    if (e->language != 1) { ed_sig_close(e); return; }
+    if (e->cmp_open) { ed_sig_close(e); return; }
     const char* L = e->lines[e->cur_line];
     int col = e->cur_col;
     int ll = (int)strlen(L); if (col > ll) col = ll;
@@ -1937,16 +1996,23 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_revision(void* p) {
 /* F5 Debugger: highlight `line` (1-based) red as the instruction pointer, or
  * pass 0 to clear. The editor auto-scrolls to keep the IP in view (IP-follow;
  * the overlay's F1 toggle drives whether a live line is passed in). */
+/* Set (or clear, line=0) the red IP marker. PURE state — never scrolls: the
+ * view only tracks the IP when the IDE explicitly calls revealIp() (gated on
+ * the debugger's ipFollow), so free-cam / post-stop browsing is never yanked. */
 CSSC_GUI_EXPORT void cssc_gui_editor_setipline(void* p, int64_t line) {
     cssc_gui_editor* e = (cssc_gui_editor*)p; if (!e) return;
-    int prev = e->ip_line;
     e->ip_line = (int)line;
-    if (e->ip_line > 0 && e->ip_line != prev) {
+}
+/* Scroll/caret the current IP line into view (draw() reveals e->cur_line when
+ * e->follow is set). Called each frame while actively following. */
+CSSC_GUI_EXPORT void cssc_gui_editor_revealip(void* p) {
+    cssc_gui_editor* e = (cssc_gui_editor*)p; if (!e) return;
+    if (e->ip_line > 0) {
         int target = e->ip_line - 1;
         if (target >= 0 && target < e->nlines) {
             e->cur_line = target;
             if (e->cur_col < 0) e->cur_col = 0;
-            e->follow = 1;                    /* draw() scrolls the IP into view */
+            e->follow = 1;
         }
     }
 }
@@ -2225,6 +2291,26 @@ CSSC_GUI_EXPORT void cssc_gui_editor_setstickydiag(void* p, const char* text) {
 CSSC_GUI_EXPORT void cssc_gui_editor_clearstickydiag(void* p) {
     ed_sticky_clear((cssc_gui_editor*)p);
 }
+/* F10 autoclean: mark the given comma-separated 1-based line numbers with the
+ * green review wash (the lines the cleanup just inserted). */
+CSSC_GUI_EXPORT void cssc_gui_editor_setcleanmarks(void* p, const char* csv) {
+    cssc_gui_editor* e = (cssc_gui_editor*)p; if (!e) return;
+    e->clean_nmarks = 0;
+    if (!csv) return;
+    int n = 0;
+    for (const char* s = csv; *s; s++) {
+        if (*s >= '0' && *s <= '9') {
+            n = n * 10 + (*s - '0');
+        } else if (n > 0) {
+            if (e->clean_nmarks < 512) e->clean_marks[e->clean_nmarks++] = n;
+            n = 0;
+        }
+    }
+    if (n > 0 && e->clean_nmarks < 512) e->clean_marks[e->clean_nmarks++] = n;
+}
+CSSC_GUI_EXPORT void cssc_gui_editor_clearcleanmarks(void* p) {
+    cssc_gui_editor* e = (cssc_gui_editor*)p; if (e) e->clean_nmarks = 0;
+}
 CSSC_GUI_EXPORT int64_t cssc_gui_editor_stickycount(void* p) {
     cssc_gui_editor* e = (cssc_gui_editor*)p; return e ? (int64_t)e->sd_n : 0;
 }
@@ -2329,10 +2415,10 @@ CSSC_GUI_EXPORT void cssc_gui_editor_redo(void* p) {
 CSSC_GUI_EXPORT void cssc_gui_editor_selectall(void* p) {
     cssc_gui_editor* e = (cssc_gui_editor*)p; if (e) ed_select_all(e);
 }
-/* Set the active find term; every occurrence is highlighted magenta while it
- * stays set. Returns the total match count across the document. Empty term
- * clears the search. */
-CSSC_GUI_EXPORT int64_t cssc_gui_editor_search(void* p, const char* term) {
+/* Highlight every occurrence of `term` magenta WITHOUT moving the caret or
+ * touching the selection. Returns the match count. Empty term clears it. Used
+ * by double-click, which must keep the word it just selected marked in place. */
+CSSC_GUI_EXPORT int64_t cssc_gui_editor_markall(void* p, const char* term) {
     cssc_gui_editor* e = (cssc_gui_editor*)p;
     if (!e) return 0;
     if (e->search) { free(e->search); e->search = NULL; e->search_len = 0; }
@@ -2341,15 +2427,24 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_search(void* p, const char* term) {
     e->search_len = (int)strlen(term);
     int count = 0;
     for (int i = 0; i < e->nlines; ++i) {
-        const char* hay = e->lines[i];
-        const char* hit = hay;
+        const char* hit = e->lines[i];
         while ((hit = strstr(hit, e->search)) != NULL) { count++; hit += e->search_len; }
     }
-    /* Jump the caret to the first match so the user sees it. */
-    for (int i = 0; i < e->nlines; ++i) {
-        const char* hit = strstr(e->lines[i], e->search);
-        if (hit) { e->cur_line = i; e->cur_col = (int)(hit - e->lines[i]);
-                   e->sel_active = 0; ed_clamp(e); break; }
+    return count;
+}
+/* Set the active find term; every occurrence is highlighted magenta while it
+ * stays set, and the caret JUMPS to the first match (Find behaviour). Returns
+ * the total match count. Empty term clears the search. */
+CSSC_GUI_EXPORT int64_t cssc_gui_editor_search(void* p, const char* term) {
+    cssc_gui_editor* e = (cssc_gui_editor*)p;
+    if (!e) return 0;
+    int64_t count = cssc_gui_editor_markall(p, term);
+    if (e->search) {
+        for (int i = 0; i < e->nlines; ++i) {
+            const char* hit = strstr(e->lines[i], e->search);
+            if (hit) { e->cur_line = i; e->cur_col = (int)(hit - e->lines[i]);
+                       e->sel_active = 0; ed_clamp(e); break; }
+        }
     }
     return count;
 }
@@ -2433,6 +2528,14 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_clicked(void* p) {
     cssc_gui_editor* e = (cssc_gui_editor*)p;
     if (!e || !e->click_fired) return 0;
     e->click_fired = 0;
+    return 1;
+}
+/* One-shot: 1 on the frame a right-click landed on a word (the host then opens
+ * the semantic menu for the token under the cursor). Cleared on read. */
+CSSC_GUI_EXPORT int64_t cssc_gui_editor_rightclicked(void* p) {
+    cssc_gui_editor* e = (cssc_gui_editor*)p;
+    if (!e || !e->rclick_fired) return 0;
+    e->rclick_fired = 0;
     return 1;
 }
 /* Scan the buffer for the declaration of `word` — `#stack[T,N] word`,
@@ -2563,7 +2666,8 @@ CSSC_GUI_EXPORT void cssc_gui_editor_setvisible(void* p, int64_t vis) {
 CSSC_GUI_EXPORT void cssc_gui_editor_setlanguage(void* p, int64_t lang) {
     cssc_gui_editor* e = (cssc_gui_editor*)p; if (e) e->language = (int)lang;
 }
-/* Enable CSSC highlighting (language=1) for .cssc files, else plain (0). */
+/* Editor language by extension: 1 = CSSC (.cssc), 2 = x86 assembly (.asm/.s),
+ * 3 = cssc.cproject config, 0 = plain text. Drives which highlighter runs. */
 CSSC_GUI_EXPORT void cssc_gui_editor_setlangforpath(void* p, const char* path) {
     cssc_gui_editor* e = (cssc_gui_editor*)p;
     if (!e) return;
@@ -2571,6 +2675,8 @@ CSSC_GUI_EXPORT void cssc_gui_editor_setlangforpath(void* p, const char* path) {
     if (path) {
         const char* dot = strrchr(path, '.');
         if (dot && !strcmp(dot, ".cssc")) lang = 1;
+        else if (dot && (!strcmp(dot, ".asm") || !strcmp(dot, ".s"))) lang = 2;
+        else if (dot && !strcmp(dot, ".cproject")) lang = 3;
     }
     e->language = lang;
 }
@@ -2698,10 +2804,25 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_update(void* ep, void* sp) {
         e->dragging = 0;
     }
 
+    /* Right-click — positions the caret over the clicked word, selects it (so
+     * selectedText/scanDecl see the token), and fires the one-shot the host
+     * reads to open the semantic menu. Distinct from double-click (mark-all). */
+    if (s->rdown && !s->prev_rdown && !s->input_captured) {
+        if (ed_hittest(e, s->mx, s->my, &ml, &mc)) {
+            if (e->search) { free(e->search); e->search = NULL; e->search_len = 0; }
+            ed_cmp_close(e);
+            e->follow = 1;
+            e->cur_line = ml; e->cur_col = mc;
+            ed_select_word(e, ml, mc);
+            e->dragging = 0;
+            e->rclick_fired = 1;
+        }
+    }
+
     /* Hover: a stationary mouse (button up) dwelling over a CSSC word requests
      * sema hover info. The box stays over that word and closes on move/off. */
     {
-        int overed = (e->language == 1 && !s->input_captured && !e->cmp_open &&
+        int overed = ((e->language == 1) && !s->input_captured && !e->cmp_open &&
                       !s->down && !e->dragging &&
                       s->mx >= e->x && s->mx < e->x + e->w &&
                       s->my >= e->y && s->my < e->y + e->h);
@@ -2812,7 +2933,29 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_update(void* ep, void* sp) {
             char at = line[e->cur_col];
             if (cc == '(' || cc == '[' || cc == '{') {
                 char closer = cc == '(' ? ')' : cc == '[' ? ']' : '}';
-                ed_insert_char(e, cc); ed_insert_char(e, closer); e->cur_col--;
+                /* Smart wrap: typing '(' DIRECTLY before a bare word closes the
+                 * paren AFTER that word, turning a fused `typeof|variables` into
+                 * `typeof(variables)` (caret left just inside, before the word).
+                 * Only for '(' and only when the next char begins an identifier;
+                 * every other case keeps the plain `(|)` auto-pair. */
+                int aw_word = ((at >= 'a' && at <= 'z') || (at >= 'A' && at <= 'Z')
+                               || at == '_');
+                if (cc == '(' && aw_word) {
+                    int wend = e->cur_col;
+                    while (line[wend]) {
+                        char wc = line[wend];
+                        if ((wc >= 'a' && wc <= 'z') || (wc >= 'A' && wc <= 'Z')
+                                || (wc >= '0' && wc <= '9') || wc == '_') wend++;
+                        else break;
+                    }
+                    ed_insert_char(e, cc);          /* '(' — cur_col now after it */
+                    int caret = e->cur_col;         /* inside, before the word */
+                    e->cur_col = wend + 1;          /* word shifted right by the '(' */
+                    ed_insert_char(e, closer);      /* ')' after the word */
+                    e->cur_col = caret;
+                } else {
+                    ed_insert_char(e, cc); ed_insert_char(e, closer); e->cur_col--;
+                }
             } else if (cc == '"') {
                 if (at == '"') e->cur_col++;
                 else { ed_insert_char(e, '"'); ed_insert_char(e, '"'); e->cur_col--; }
@@ -2922,11 +3065,18 @@ CSSC_GUI_EXPORT int64_t cssc_gui_editor_update(void* ep, void* sp) {
             ed_clamp(e);
         }
     }
-    int64_t wh = cssc_video_wheel(s->vid);
-    if (wh) {
-        e->top_line -= (int)wh * 3;
-        if (e->top_line < 0) e->top_line = 0;
-        if (e->top_line >= e->nlines) e->top_line = e->nlines - 1;
+    /* Wheel scrolls the editor whenever the mouse is OVER it — independent of
+     * keyboard focus, so the code stays scrollable while a debug trace holds the
+     * terminal focused. Read (which consumes the delta) only when hovered so the
+     * hovered widget wins regardless of widget update order. */
+    if (s->mx >= e->x && s->mx < e->x + e->w &&
+        s->my >= e->y && s->my < e->y + e->h) {
+        int64_t wh = cssc_video_wheel(s->vid);
+        if (wh) {
+            e->top_line -= (int)wh * 3;
+            if (e->top_line < 0) e->top_line = 0;
+            if (e->top_line >= e->nlines) e->top_line = e->nlines - 1;
+        }
     }
     ed_sig_scan(e);                /* signature help: caret inside a call? */
     return 0;
@@ -3032,17 +3182,126 @@ static int tk_is_type(const char* s, int n) {
         "long", "short", "uint", 0};
     return tk_word_in(s, n, ty);
 }
+/* Track /* … *​/ block-comment state across lines. Returns 1 if the line ENDS
+ * inside a block comment. `in` = whether it STARTS inside one. A `//` line
+ * comment ends the scan (its rest can't open/close a block). */
+static int csc_scan_block(const char* line, int in) {
+    int n = (int)strlen(line), i = 0;
+    while (i < n) {
+        if (in) {
+            if (line[i] == '*' && i + 1 < n && line[i + 1] == '/') { in = 0; i += 2; continue; }
+            i++;
+        } else {
+            if (line[i] == '/' && i + 1 < n && line[i + 1] == '*') { in = 1; i += 2; continue; }
+            if (line[i] == '/' && i + 1 < n && line[i + 1] == '/') return in;
+            if (line[i] == '"') { i++; while (i < n && line[i] != '"') { if (line[i] == '\\' && i + 1 < n) i++; i++; } if (i < n) i++; continue; }
+            i++;
+        }
+    }
+    return in;
+}
+
+/* Render a styled line comment `s` (starting at "//"). baseColor is the comment
+ * colour (grey, or the prefix colour for //!,//?,//$,//%,//& / doc-grey for //d).
+ * `mstart` is where content begins (2 for plain "//", 3 when a prefix/marker byte
+ * follows). When `conceal`==0 (the cursor is on this line) the raw text is drawn
+ * flat so the markup stays editable. When `conceal`==1 (inactive line) the markup
+ * is HIDDEN and applied: the "//" + marker collapse to "//", `**bold**` renders
+ * bold, `~~italic~~` italic, `\r<R>g<G>b<B>` sets a colour run (\r0g0b0 resets to
+ * baseColor). True conceal — visible text reflows, so cx advances only for drawn
+ * glyphs. */
+/* Draw s[start..end) applying the bold, italic and colour-run styling with the
+ * markup CONCEALED (the visible text reflows: cx advances only for drawn glyphs).
+ * One shared parser for both line and block comments. A zero-RGB code resets to
+ * baseColor. Markup: double-asterisk = bold, double-tilde = italic, backslash-r
+ * R g G b B = colour. */
+static void ed_draw_styled_span(void* v, int64_t x, int64_t y, const char* s,
+                                int start, int end, int64_t baseColor,
+                                int64_t glyph, int64_t scale) {
+    int64_t cx = x, color = baseColor; int bold = 0, ital = 0;
+    char run[512]; int rn = 0;
+    int i = start;
+    while (i < end) {
+        if (s[i] == '*' && i + 1 < end && s[i + 1] == '*') {
+            if (rn) { run[rn] = 0; cssc_video_draw_text_styled(v, cx, y, run, color, scale, (bold ? 1 : 0) | (ital ? 2 : 0)); cx += (int64_t)rn * glyph; rn = 0; }
+            bold = !bold; i += 2;
+        } else if (s[i] == '~' && i + 1 < end && s[i + 1] == '~') {
+            if (rn) { run[rn] = 0; cssc_video_draw_text_styled(v, cx, y, run, color, scale, (bold ? 1 : 0) | (ital ? 2 : 0)); cx += (int64_t)rn * glyph; rn = 0; }
+            ital = !ital; i += 2;
+        } else if (s[i] == '\\' && i + 1 < end && s[i + 1] == 'r') {
+            int j = i + 2, R = 0, G = 0, B = 0, ok = 0;
+            while (j < end && s[j] >= '0' && s[j] <= '9') R = R * 10 + (s[j++] - '0');
+            if (j < end && s[j] == 'g') { j++;
+                while (j < end && s[j] >= '0' && s[j] <= '9') G = G * 10 + (s[j++] - '0');
+                if (j < end && s[j] == 'b') { j++;
+                    while (j < end && s[j] >= '0' && s[j] <= '9') B = B * 10 + (s[j++] - '0');
+                    ok = 1; } }
+            if (ok) {
+                if (rn) { run[rn] = 0; cssc_video_draw_text_styled(v, cx, y, run, color, scale, (bold ? 1 : 0) | (ital ? 2 : 0)); cx += (int64_t)rn * glyph; rn = 0; }
+                color = (R == 0 && G == 0 && B == 0) ? baseColor :
+                        (int64_t)0xFF000000 | ((int64_t)(R & 255) << 16) |
+                        ((int64_t)(G & 255) << 8) | (int64_t)(B & 255);
+                i = j;
+            } else { if (rn < 511) run[rn++] = s[i]; i++; }
+        } else { if (rn < 511) run[rn++] = s[i]; i++; }
+    }
+    if (rn) { run[rn] = 0; cssc_video_draw_text_styled(v, cx, y, run, color, scale, (bold ? 1 : 0) | (ital ? 2 : 0)); }
+}
+
+static void ed_draw_comment_hl(void* v, int64_t x, int64_t y, const char* s,
+                               int mstart, int64_t baseColor, int64_t glyph,
+                               int64_t scale, int conceal) {
+    if (!conceal) { cssc_video_draw_text(v, x, y, s, baseColor, scale); return; }
+    cssc_video_draw_text(v, x, y, "//", baseColor, scale);   /* opener; marker hidden */
+    ed_draw_styled_span(v, x + 2 * glyph, y, s, mstart, (int)strlen(s), baseColor, glyph, scale);
+}
+
+/* Draw a block-comment segment s[0..seglen) - grey base, styled + concealed on
+ * inactive lines, raw on the caret line. The opener/closer delimiters carry no
+ * markup so they render plainly when raw. */
+static void ed_draw_block_seg(void* v, int64_t x, int64_t y, const char* s, int seglen,
+                              int64_t baseColor, int64_t glyph, int64_t scale, int conceal) {
+    if (!conceal) {
+        char tmp[512]; int nn = seglen < 511 ? seglen : 511;
+        memcpy(tmp, s, (size_t)nn); tmp[nn] = 0;
+        cssc_video_draw_text(v, x, y, tmp, baseColor, scale);
+        return;
+    }
+    ed_draw_styled_span(v, x, y, s, 0, seglen, baseColor, glyph, scale);
+}
+
 /* Draw one source line with CSSC token colours, clipped to the visible
- * column window [left_col, left_col+max_cols). Kept byte-identical to the
- * interpreter's _draw_line_hl so compiled == interpreted. */
+ * column window [left_col, left_col+max_cols). `active` = 1 when the caret is on
+ * this line (styled comments render raw for editing). `csc_block` threads the
+ * /* … *​/ block-comment state across lines. */
 static void ed_draw_line_hl(cssc_gui_editor* e, void* v, const char* line,
                             int64_t ly, int64_t text_x, int64_t glyph,
-                            int max_cols) {
+                            int max_cols, int active, int* csc_block) {
     int n = (int)strlen(line);
     int i = 0;
     char buf[512];
     int first_nonws = 0;                     /* first non-blank column (for label detection) */
     while (first_nonws < n && (line[first_nonws] == ' ' || line[first_nonws] == '\t')) first_nonws++;
+    if (*csc_block) {                        /* this line opened inside a /* … *​/ block */
+        int end = 0;
+        while (end < n && !(line[end] == '*' && end + 1 < n && line[end + 1] == '/')) end++;
+        int cend;
+        if (end < n) { cend = end + 2; *csc_block = 0; } else { cend = n; }
+        if (e->left_col == 0) {
+            ed_draw_block_seg(v, text_x, ly, line, cend, tk_color(TK_COMMENT), glyph, e->scale, active ? 0 : 1);
+        } else {
+            int cs = 0, ce = cend;
+            if (cs < e->left_col) cs = e->left_col;
+            if (ce > e->left_col + max_cols) ce = e->left_col + max_cols;
+            int cnt = ce - cs;
+            if (cnt > 0 && cnt < 512) {
+                memcpy(buf, line + cs, (size_t)cnt); buf[cnt] = 0;
+                cssc_video_draw_text(v, text_x + (int64_t)(cs - e->left_col) * glyph, ly, buf,
+                                     tk_color(TK_COMMENT), e->scale);
+            }
+        }
+        i = cend;
+    }
     while (i < n) {
         char c = line[i];
         int start = i;
@@ -3053,8 +3312,54 @@ static void ed_draw_line_hl(cssc_gui_editor* e, void* v, const char* line,
         } else if (c == '#') {
             i++; while (i < n && tk_isident(line[i])) i++;
             t = TK_DIR;
+        } else if (c == '/' && i + 1 < n && line[i + 1] == '*') {
+            int end = i + 2;
+            while (end < n && !(line[end] == '*' && end + 1 < n && line[end + 1] == '/')) end++;
+            int cend;
+            if (end < n) { cend = end + 2; } else { cend = n; *csc_block = 1; }
+            if (i >= e->left_col) {
+                ed_draw_block_seg(v, text_x + (int64_t)(i - e->left_col) * glyph, ly,
+                                  line + i, cend - i, tk_color(TK_COMMENT), glyph, e->scale,
+                                  active ? 0 : 1);
+            } else {
+                int cs = i, ce = cend;
+                if (cs < e->left_col) cs = e->left_col;
+                if (ce > e->left_col + max_cols) ce = e->left_col + max_cols;
+                int cnt = ce - cs;
+                if (cnt > 0 && cnt < 512) {
+                    memcpy(buf, line + cs, (size_t)cnt); buf[cnt] = 0;
+                    cssc_video_draw_text(v, text_x + (int64_t)(cs - e->left_col) * glyph, ly, buf,
+                                         tk_color(TK_COMMENT), e->scale);
+                }
+            }
+            i = cend; continue;
         } else if (c == '/' && i + 1 < n && line[i + 1] == '/') {
-            i = n; t = TK_COMMENT;
+            int64_t base = tk_color(TK_COMMENT);
+            int mstart = 2;
+            if (i + 2 < n) {
+                char m = line[i + 2];
+                if      (m == '!') { base = (int64_t)0xFFE0605A; mstart = 3; }   /* red    */
+                else if (m == '?') { base = (int64_t)0xFF4DA6FF; mstart = 3; }   /* blue   */
+                else if (m == '$') { base = (int64_t)0xFFFFD700; mstart = 3; }   /* gold   */
+                else if (m == '%') { base = (int64_t)0xFFE060C0; mstart = 3; }   /* magenta*/
+                else if (m == '&') { base = (int64_t)0xFF5FE0A0; mstart = 3; }   /* green  */
+                else if (m == 'd') { base = (int64_t)0xFFAEB6C6; mstart = 3; }   /* docstr */
+            }
+            if (i >= e->left_col) {
+                ed_draw_comment_hl(v, text_x + (int64_t)(i - e->left_col) * glyph, ly,
+                                   line + i, mstart, base, glyph, e->scale, active ? 0 : 1);
+            } else {
+                int cs = i, ce = n;
+                if (cs < e->left_col) cs = e->left_col;
+                if (ce > e->left_col + max_cols) ce = e->left_col + max_cols;
+                int cnt = ce - cs;
+                if (cnt > 0 && cnt < 512) {
+                    memcpy(buf, line + cs, (size_t)cnt); buf[cnt] = 0;
+                    cssc_video_draw_text(v, text_x + (int64_t)(cs - e->left_col) * glyph, ly, buf,
+                                         base, e->scale);
+                }
+            }
+            i = n; continue;
         } else if (c == '"') {
             i++;
             while (i < n && line[i] != '"') { if (line[i] == '\\' && i + 1 < n) i++; i++; }
@@ -3098,6 +3403,129 @@ static void ed_draw_line_hl(cssc_gui_editor* e, void* v, const char* line,
             int64_t dx = text_x + (int64_t)(cs - e->left_col) * glyph;
             cssc_video_draw_text(v, dx, ly, buf, tk_color(t), e->scale);
         }
+    }
+}
+
+/* Shared token-emit tail for the asm/cproject highlighters: clip [start,i) to
+ * the visible column window and draw it in the token's colour. */
+static void ed_emit_tok(cssc_gui_editor* e, void* v, const char* line,
+                        int start, int i, int t, int64_t ly, int64_t text_x,
+                        int64_t glyph, int max_cols) {
+    char buf[512];
+    int cs = start, ce = i;
+    if (cs < e->left_col) cs = e->left_col;
+    if (ce > e->left_col + max_cols) ce = e->left_col + max_cols;
+    int cnt = ce - cs;
+    if (cnt > 0 && cnt < 512) {
+        memcpy(buf, line + cs, (size_t)cnt); buf[cnt] = 0;
+        int64_t dx = text_x + (int64_t)(cs - e->left_col) * glyph;
+        cssc_video_draw_text(v, dx, ly, buf, tk_color(t), e->scale);
+    }
+}
+
+/* x86 GAS assembly highlighter (language 2): directives (.foo) purple,
+ * registers (%reg) teal, immediates ($imm)/numbers green, labels (foo:) sand,
+ * mnemonics (first word on the line) magenta, '#' comments grey, strings rose.
+ * The embedded `# CSSC_RT_SRC_*` runtime-source header reads as comments. */
+static void ed_draw_line_hl_asm(cssc_gui_editor* e, void* v, const char* line,
+                                int64_t ly, int64_t text_x, int64_t glyph,
+                                int max_cols) {
+    int n = (int)strlen(line);
+    int i = 0;
+    int first_nonws = 0;
+    while (first_nonws < n && (line[first_nonws] == ' ' || line[first_nonws] == '\t')) first_nonws++;
+    while (i < n) {
+        char c = line[i];
+        int start = i;
+        int t;
+        if (c == ' ' || c == '\t') {
+            while (i < n && (line[i] == ' ' || line[i] == '\t')) i++;
+            continue;
+        } else if (c == '#') {
+            i = n; t = TK_COMMENT;
+        } else if (c == '/' && i + 1 < n && line[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < n && !(line[i] == '*' && line[i + 1] == '/')) i++;
+            if (i + 1 < n) i += 2; else i = n;
+            t = TK_COMMENT;
+        } else if (c == '"') {
+            i++;
+            while (i < n && line[i] != '"') { if (line[i] == '\\' && i + 1 < n) i++; i++; }
+            if (i < n) i++;
+            t = TK_STR;
+        } else if (c == '.' && i + 1 < n && tk_isidstart(line[i + 1])) {
+            i++;
+            while (i < n && (tk_isident(line[i]) || line[i] == '.')) i++;
+            t = TK_DIR;
+        } else if (c == '%') {
+            i++;
+            while (i < n && tk_isident(line[i])) i++;
+            t = TK_TYPE;
+        } else if (c == '$') {
+            i++;
+            while (i < n && (tk_isident(line[i]) || line[i] == '.' || line[i] == '-')) i++;
+            t = TK_NUM;
+        } else if (c >= '0' && c <= '9') {
+            while (i < n && (tk_isident(line[i]) || line[i] == '.')) i++;
+            t = TK_NUM;
+        } else if (tk_isidstart(c) || c == '@') {
+            i++;
+            while (i < n && (tk_isident(line[i]) || line[i] == '.' || line[i] == '@')) i++;
+            int j = i; while (j < n && line[j] == ' ') j++;
+            if (j < n && line[j] == ':') t = TK_LABEL;
+            else if (start == first_nonws) t = TK_KW;
+            else t = TK_IDENT;
+        } else {
+            i++; t = TK_PUNCT;
+        }
+        ed_emit_tok(e, v, line, start, i, t, ly, text_x, glyph, max_cols);
+    }
+}
+
+/* cssc.cproject config highlighter (language 3): keys (LHS identifiers, dotted)
+ * blue, true/false magenta, strings rose, numbers green, '//'+'#' comments grey,
+ * '='/'+='/brackets muted. */
+static void ed_draw_line_hl_cproject(cssc_gui_editor* e, void* v, const char* line,
+                                     int64_t ly, int64_t text_x, int64_t glyph,
+                                     int max_cols) {
+    int n = (int)strlen(line);
+    int i = 0;
+    int seen_eq = 0;
+    while (i < n) {
+        char c = line[i];
+        int start = i;
+        int t;
+        if (c == ' ' || c == '\t') {
+            while (i < n && (line[i] == ' ' || line[i] == '\t')) i++;
+            continue;
+        } else if (c == '#') {
+            i = n; t = TK_COMMENT;
+        } else if (c == '/' && i + 1 < n && line[i + 1] == '/') {
+            i = n; t = TK_COMMENT;
+        } else if (c == '"' || c == '\'') {
+            char q = c; i++;
+            while (i < n && line[i] != q) { if (line[i] == '\\' && i + 1 < n) i++; i++; }
+            if (i < n) i++;
+            t = TK_STR;
+        } else if (c >= '0' && c <= '9') {
+            while (i < n && (tk_isident(line[i]) || line[i] == '.')) i++;
+            t = TK_NUM;
+        } else if (tk_isidstart(c)) {
+            while (i < n && (tk_isident(line[i]) || line[i] == '.')) i++;
+            int len = i - start;
+            const char* id = line + start;
+            if ((len == 4 && !strncmp(id, "true", 4)) ||
+                (len == 5 && !strncmp(id, "false", 5))) t = TK_KW;
+            else if (!seen_eq) t = TK_FUNC;
+            else t = TK_IDENT;
+        } else if (c == '+' && i + 1 < n && line[i + 1] == '=') {
+            seen_eq = 1; i += 2; t = TK_PUNCT;
+        } else if (c == '=') {
+            seen_eq = 1; i++; t = TK_PUNCT;
+        } else {
+            i++; t = TK_PUNCT;
+        }
+        ed_emit_tok(e, v, line, start, i, t, ly, text_x, glyph, max_cols);
     }
 }
 
@@ -3250,6 +3678,11 @@ CSSC_GUI_EXPORT void cssc_gui_editor_draw(void* ep) {
         active_kind = ed_alloc_var(e->lines[e->cur_line], active, (int)sizeof(active));
     }
     char sub[512];
+    int csc_block = 0;
+    if (e->language == 1) {
+        int top = e->top_line; if (top > e->nlines) top = e->nlines;
+        for (int pl = 0; pl < top; pl++) csc_block = csc_scan_block(e->lines[pl], csc_block);
+    }
     for (int r = 0; r < visible_rows; ++r) {
         int li = e->top_line + r;
         if (li >= e->nlines) break;
@@ -3283,6 +3716,13 @@ CSSC_GUI_EXPORT void cssc_gui_editor_draw(void* ep) {
         if (e->ip_line == li + 1) {          /* F5 debugger instruction pointer */
             cssc_video_fillrect(v, e->x + 1, ly - 1, e->w - 2, line_h, (int64_t)0x40FF3B54);
             cssc_video_fillrect(v, e->x + 1, ly - 1, 3 * e->scale, line_h, (int64_t)0xFFFF3B54);
+        }
+        for (int cm = 0; cm < e->clean_nmarks; cm++) {   /* F10 autoclean insertions */
+            if (e->clean_marks[cm] == li + 1) {
+                cssc_video_fillrect(v, e->x + 1, ly - 1, e->w - 2, line_h, (int64_t)0x385FE0A0);
+                cssc_video_fillrect(v, e->x + 1, ly - 1, 3 * e->scale, line_h, (int64_t)0xFF5FE0A0);
+                break;
+            }
         }
         if (e->gutter_on) {
             char num[16]; int nlen = ed_itoa(li + 1, num);
@@ -3322,7 +3762,12 @@ CSSC_GUI_EXPORT void cssc_gui_editor_draw(void* ep) {
             }
         }
         if (e->language == 1) {
-            ed_draw_line_hl(e, v, line, ly, text_x, glyph, max_cols);
+            ed_draw_line_hl(e, v, line, ly, text_x, glyph, max_cols,
+                            (li == e->cur_line) ? 1 : 0, &csc_block);
+        } else if (e->language == 2) {
+            ed_draw_line_hl_asm(e, v, line, ly, text_x, glyph, max_cols);
+        } else if (e->language == 3) {
+            ed_draw_line_hl_cproject(e, v, line, ly, text_x, glyph, max_cols);
         } else {
             int from = e->left_col; if (from > slen) from = slen;
             int cnt = slen - from; if (cnt > max_cols) cnt = max_cols;
@@ -3769,11 +4214,13 @@ static void tree_rows_grow(cssc_gui_tree* t, int need) {
     char** nn = (char**)realloc(t->names, (size_t)nc * sizeof(char*));
     int*   nd = (int*)realloc(t->depths, (size_t)nc * sizeof(int));
     int*   ni = (int*)realloc(t->isdir, (size_t)nc * sizeof(int));
+    long long* nz = (long long*)realloc(t->sizes, (size_t)nc * sizeof(long long));
     if (np) t->paths = np;
     if (nn) t->names = nn;
     if (nd) t->depths = nd;
     if (ni) t->isdir = ni;
-    if (np && nn && nd && ni) t->cap = nc;
+    if (nz) t->sizes = nz;
+    if (np && nn && nd && ni && nz) t->cap = nc;
 }
 static void tree_emit(cssc_gui_tree* t, const char* full, const char* name,
                       int depth, int isdir) {
@@ -3783,6 +4230,18 @@ static void tree_emit(cssc_gui_tree* t, const char* full, const char* name,
     t->names[t->nrows] = gui_strdup(name);
     t->depths[t->nrows] = depth;
     t->isdir[t->nrows] = isdir;
+    long long sz = -1;
+    if (!isdir) {
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA fa;
+        if (GetFileAttributesExA(full, GetFileExInfoStandard, &fa))
+            sz = ((long long)fa.nFileSizeHigh << 32) | (long long)fa.nFileSizeLow;
+#else
+        struct stat st;
+        if (stat(full, &st) == 0) sz = (long long)st.st_size;
+#endif
+    }
+    t->sizes[t->nrows] = sz;
     t->nrows++;
 }
 static void tree_push(char*** arr, int* n, int* cap, const char* s) {
@@ -3880,7 +4339,16 @@ CSSC_GUI_EXPORT void* cssc_gui_tree_new(void* screen) {
 }
 CSSC_GUI_EXPORT void cssc_gui_tree_setrect(void* p, int64_t x, int64_t y,
                                            int64_t w, int64_t h) {
-    cssc_gui_tree* t = (cssc_gui_tree*)p; if (t) { t->x = x; t->y = y; t->w = w; t->h = h; }
+    cssc_gui_tree* t = (cssc_gui_tree*)p;
+    if (t) {
+        t->x = x; t->y = y; t->h = h;
+        /* Preserve a user-dragged width: once the panel has been resized, the
+         * host's per-frame layout should not stomp it back to the default. */
+        if (!t->resizing) t->w = w;
+    }
+}
+CSSC_GUI_EXPORT int64_t cssc_gui_tree_width(void* p) {
+    cssc_gui_tree* t = (cssc_gui_tree*)p; return t ? t->w : 0;
 }
 CSSC_GUI_EXPORT void cssc_gui_tree_setroot(void* p, const char* dir) {
     cssc_gui_tree* t = (cssc_gui_tree*)p; if (!t) return;
@@ -3969,10 +4437,27 @@ CSSC_GUI_EXPORT int64_t cssc_gui_tree_update(void* tp, void* sp) {
     if (visible_rows < 1) visible_rows = 1;
     int64_t activated = 0;
     t->right_hit = 0;
-    int inside = (!s->input_captured && s->mx >= t->x && s->mx < t->x + t->w &&
+    /* Right-edge resize handle: a 6px grip at the panel's right border lets the
+     * user drag the whole file panel wider/narrower. Handled before row logic so
+     * an edge drag never selects a row. */
+    int on_edge = (!s->input_captured &&
+                   s->mx >= t->x + t->w - 4 && s->mx <= t->x + t->w + 4 &&
+                   s->my >= t->y && s->my < t->y + t->h);
+    if (s->down && !s->prev_down && on_edge && !t->drag_on) t->resizing = 1;
+    if (t->resizing) {
+        if (s->down) {
+            int64_t nw = s->mx - t->x;
+            if (nw < 140) nw = 140;
+            if (nw > 900) nw = 900;
+            t->w = nw;
+        } else {
+            t->resizing = 0;
+        }
+    }
+    int inside = (!t->resizing && !s->input_captured && s->mx >= t->x && s->mx < t->x + t->w &&
                   s->my >= t->y && s->my < t->y + t->h);
     if (t->drop_ready) t->drop_ready = 0;   /* one-frame signal, cleared next update */
-    if (s->down && !s->prev_down && inside) {
+    if (!t->resizing && s->down && !s->prev_down && inside) {
         int row = (int)((s->my - t->y - 2) / row_h);
         int idx = t->top + row;
         if (idx >= 0 && idx < t->nrows) {
@@ -4181,6 +4666,9 @@ CSSC_GUI_EXPORT void cssc_gui_tree_draw(void* tp) {
     cssc_video_fillrect(v, t->x, t->y, t->w, t->h, t->bg);
     cssc_video_draw_rect(v, t->x, t->y, t->w, t->h,
                          t->focused ? (int64_t)0xC0C74DE0 : (int64_t)0x50FFFFFF);
+    /* resize grip on the right edge (brighter while actively dragging) */
+    cssc_video_fillrect(v, t->x + t->w - 2, t->y + 2, 2, t->h - 4,
+                        t->resizing ? (int64_t)0xFFC74DE0 : (int64_t)0x40C74DE0);
     int64_t glyph = 8 * t->scale;
     int64_t row_h = glyph + 4;
     int visible_rows = (int)((t->h - 4) / row_h);
@@ -4213,12 +4701,77 @@ CSSC_GUI_EXPORT void cssc_gui_tree_draw(void* tp) {
                                          : list_icon_color(t->names[idx]);
             cssc_video_fillrect(v, ix, ry + (row_h - isz) / 2, isz, isz, icol);
         }
-        cssc_video_draw_text(v, ix + glyph + 2, ry + 2, t->names[idx], col, t->scale);
+        {
+            /* Name clipped to the panel's right edge with an ellipsis so long
+             * file names never bleed out of the (resizeable) tree; a compact
+             * right-aligned KB/MB size is shown too when the row is wide enough
+             * to keep a readable slice of the name beside it. */
+            int64_t cw = 8 * t->scale;
+            int64_t namex = ix + glyph + 2;
+            int64_t right = t->x + t->w - 6;
+            const char* nm = t->names[idx];
+
+            char szbuf[24]; szbuf[0] = 0; int64_t szw = 0;
+            if (!t->isdir[idx] && t->sizes[idx] >= 0) {
+                long long b = t->sizes[idx];
+                if (b < 1024LL)
+                    snprintf(szbuf, sizeof(szbuf), "%lld B", b);
+                else if (b < 1024LL * 1024)
+                    snprintf(szbuf, sizeof(szbuf), "%.1f KB", (double)b / 1024.0);
+                else if (b < 1024LL * 1024 * 1024)
+                    snprintf(szbuf, sizeof(szbuf), "%.1f MB", (double)b / (1024.0 * 1024.0));
+                else
+                    snprintf(szbuf, sizeof(szbuf), "%.1f GB", (double)b / (1024.0 * 1024.0 * 1024.0));
+                szw = (int64_t)strlen(szbuf) * cw;
+            }
+
+            int64_t name_right = right;
+            if (szbuf[0] && (right - szw - cw * 2 - namex) >= cw * 5) {
+                name_right = right - szw - cw * 2;   /* 2-char gap before size */
+                int64_t szcol = (idx == t->selected) ? t->sel_fg : (int64_t)0xFF8A84A0;
+                cssc_video_draw_text(v, right - szw, ry + 2, szbuf, szcol, t->scale);
+            }
+
+            int64_t maxch = cw > 0 ? (name_right - namex) / cw : 0;
+            if (maxch > 0) {
+                int nlen = (int)strlen(nm);
+                if ((int64_t)nlen <= maxch) {
+                    cssc_video_draw_text(v, namex, ry + 2, nm, col, t->scale);
+                } else {
+                    char buf[300];
+                    int keep = (int)maxch;
+                    if (keep > (int)sizeof(buf) - 1) keep = (int)sizeof(buf) - 1;
+                    if (keep >= 4) {
+                        memcpy(buf, nm, (size_t)(keep - 3));
+                        buf[keep - 3] = '.'; buf[keep - 2] = '.';
+                        buf[keep - 1] = '.'; buf[keep] = 0;
+                    } else {
+                        memcpy(buf, nm, (size_t)keep); buf[keep] = 0;
+                    }
+                    cssc_video_draw_text(v, namex, ry + 2, buf, col, t->scale);
+                }
+            }
+        }
     }
 }
 
 /* ---- Terminal (scrollback + input line + async child process) ----------- */
 #define TERM_MAX_LINES 5000
+/* A single scrollback line is clamped to this many bytes. A runaway program
+ * (e.g. a `while` loop printing without newlines, or one very long line) can
+ * otherwise hand us an enormous string; the on-screen font only ever renders a
+ * few hundred columns, so anything past this is invisible weight. */
+#define TERM_MAX_LINE_LEN 2048
+/* When the scrollback overflows TERM_MAX_LINES we drop this many oldest lines
+ * at once instead of one-per-append, so the O(n) compaction amortises to O(1)
+ * under a fast producer (loop output) rather than memmoving every single line. */
+#define TERM_DROP_BATCH 256
+/* Upper bound on bytes drained from the child pipe per poll (per frame). An
+ * infinite / very fast producer would otherwise keep `avail > 0` forever and
+ * spin term_poll without returning — freezing the whole IDE (the reported
+ * "loops crash the IDE"). Past the budget we stop; the OS pipe buffers the rest
+ * (back-pressuring the child) and we resume next frame, keeping the UI live. */
+#define TERM_POLL_BUDGET (256 * 1024)
 #define TERM_COL_ECHO  ((int64_t)0xFFC74DE0)   /* command echo — magenta */
 #define TERM_COL_OK    ((int64_t)0xFF5FE0A0)   /* success exit — green   */
 #define TERM_COL_ERR   ((int64_t)0xFFFF5FB0)   /* failure / error — pink */
@@ -4237,16 +4790,32 @@ static void term_grow(cssc_gui_terminal* t, int need) {
 static void term_add_line(cssc_gui_terminal* t, const char* s, int64_t col) {
     term_grow(t, t->nlines + 1);
     if (t->cap < t->nlines + 1) return;
-    t->lines[t->nlines] = gui_strdup(s ? s : "");
+    if (!s) s = "";
+    /* clamp per-line length so a runaway line can't balloon the heap */
+    size_t sl = strlen(s);
+    char* dup;
+    if (sl > TERM_MAX_LINE_LEN) {
+        dup = (char*)malloc((size_t)TERM_MAX_LINE_LEN + 1);
+        if (dup) { memcpy(dup, s, (size_t)TERM_MAX_LINE_LEN); dup[TERM_MAX_LINE_LEN] = 0; }
+    } else {
+        dup = gui_strdup(s);
+    }
+    if (!dup) return;
+    t->lines[t->nlines] = dup;
     t->line_col[t->nlines] = col;
     t->nlines++;
     if (t->nlines > TERM_MAX_LINES) {
-        int drop = t->nlines - TERM_MAX_LINES;
+        /* trim a chunk of the oldest lines (amortised O(1) under loop output) */
+        int drop = t->nlines - (TERM_MAX_LINES - TERM_DROP_BATCH);
+        if (drop < 1) drop = 1;
+        if (drop > t->nlines) drop = t->nlines;
         for (int i = 0; i < drop; i++) free(t->lines[i]);
         memmove(t->lines, t->lines + drop, (size_t)(t->nlines - drop) * sizeof(char*));
         memmove(t->line_col, t->line_col + drop,
                 (size_t)(t->nlines - drop) * sizeof(int64_t));
         t->nlines -= drop;
+        t->top -= drop;                 /* keep a scrolled-up view anchored */
+        if (t->top < 0) t->top = 0;
     }
     t->stick = 1;   /* new output pins the view to the bottom */
 }
@@ -4258,7 +4827,8 @@ static int term_is_cssc_cmd(const char* w) {
     static const char* const c[] = {"build", "run", "hsim", "module", "doc",
         "help", "settings", "new", "flash", "test", "convert", "release",
         "update", "configure", "introspect", "workspace", "vscode",
-        "analyze", "diagnostics", 0};
+        "analyze", "diagnostics", "assembly", "aseprite", "shell",
+        "pctrace", "transpile", 0};
     for (int i = 0; c[i]; i++) if (!strcmp(w, c[i])) return 1;
     return 0;
 }
@@ -4400,6 +4970,27 @@ static void term_feed_byte(cssc_gui_terminal* t, unsigned char c) {
         else if (c == 0x1b) t->esc_st = 1;      /* ST (ESC \) or next sequence */
         return;
     }
+    if (t->ipm_st) {                      /* inside a marker: SOH ends it */
+        if (c == 0x01) {
+            t->ipm_buf[t->ipm_len] = 0;
+            if (t->ipm_buf[0] == 'I') {
+                /* input-wait marker: I1 = program is reading (unlock), I0 = done */
+                t->input_wanted = (t->ipm_buf[1] == '1') ? 1 : 0;
+            } else {
+                char* sep = strchr(t->ipm_buf, 0x02);   /* IP marker: line STX file */
+                if (sep) {
+                    *sep = 0;
+                    t->ip_line = atoi(t->ipm_buf);
+                    snprintf(t->ip_file, sizeof(t->ip_file), "%s", sep + 1);
+                }
+            }
+            t->ipm_st = 0;
+        } else if (t->ipm_len < (int)sizeof(t->ipm_buf) - 1) {
+            t->ipm_buf[t->ipm_len++] = (char)c;
+        }
+        return;                           /* never shown in the scrollback */
+    }
+    if (c == 0x01) { t->ipm_st = 1; t->ipm_len = 0; return; }   /* SOH starts one */
     if (c == 0x1b) { t->esc_st = 1; return; }
     if (c == '\r') return;
     if (c == '\n') { term_finalize_line(t); t->utf_need = 0; return; }
@@ -4418,7 +5009,65 @@ static void term_feed_byte(cssc_gui_terminal* t, unsigned char c) {
     term_emit_ch(t, '?');
 }
 
+/* Resolve the REAL `cssc` launcher by scanning PATH, skipping the current
+ * directory — otherwise a `cssc.bat` sitting in the cwd (e.g. the self-contained
+ * installer in C:\CSSC) shadows the installed CLI and every console command runs
+ * the installer instead. Found once, cached. Returns "" if not on PATH (caller
+ * then falls back to a bare `cssc`). */
+static const char* term_cssc_launcher(void) {
+    static char cached[700];
+    static int  resolved = 0;
+    if (resolved) return cached;
+    resolved = 1;
+    cached[0] = 0;
+    /* The command that launched the IDE tells us WHICH CSSC toolchain to run in
+     * the console — `csscd` (dev/source: the newest features) when the IDE was
+     * built/started via csscd, or `cssc` (installed) otherwise. It passes the
+     * resolved launcher path (or bare name) via CSSC_CONSOLE_LAUNCHER so console
+     * commands use the SAME toolchain that built the IDE. */
+    {
+        const char* forced = getenv("CSSC_CONSOLE_LAUNCHER");
+        if (forced && forced[0]) {
+            snprintf(cached, sizeof(cached), "%s", forced);
+            return cached;
+        }
+    }
+#ifdef _WIN32
+    const char* path = getenv("PATH");
+    if (!path) return cached;
+    static const char* const exts[] = { "cssc.exe", "cssc.cmd", "cssc.bat", 0 };
+    char dir[700];
+    const char* s = path;
+    while (*s) {
+        int n = 0;
+        while (*s && *s != ';' && n < (int)sizeof(dir) - 1) dir[n++] = *s++;
+        dir[n] = 0;
+        if (*s == ';') s++;
+        if (n == 0) continue;
+        /* skip the cwd (and "." ) so a local cssc.bat can never win */
+        char cwd[700]; GetCurrentDirectoryA(sizeof(cwd), cwd);
+        if (!strcmp(dir, ".") || !_stricmp(dir, cwd)) continue;
+        for (int e = 0; exts[e]; e++) {
+            char cand[900];
+            char sep = (n > 0 && (dir[n - 1] == '\\' || dir[n - 1] == '/')) ? 0 : '\\';
+            if (sep) snprintf(cand, sizeof(cand), "%s%c%s", dir, sep, exts[e]);
+            else     snprintf(cand, sizeof(cand), "%s%s", dir, exts[e]);
+            DWORD at = GetFileAttributesA(cand);
+            if (at != INVALID_FILE_ATTRIBUTES && !(at & FILE_ATTRIBUTE_DIRECTORY)) {
+                snprintf(cached, sizeof(cached), "%s", cand);
+                return cached;
+            }
+        }
+    }
+#endif
+    return cached;
+}
+
 static void term_spawn(cssc_gui_terminal* t, const char* cmd) {
+    /* A fresh command clears any stale debugger IP so the editor stops
+     * highlighting a line from a previous run. */
+    t->ip_line = 0; t->ip_file[0] = 0; t->ipm_st = 0; t->ipm_len = 0;
+    t->input_wanted = 0;
 #ifdef _WIN32
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
@@ -4448,6 +5097,10 @@ static void term_spawn(cssc_gui_terminal* t, const char* cmd) {
      * this env (CreateProcess env = NULL). */
     SetEnvironmentVariableA("PYTHONUNBUFFERED", "1");
     SetEnvironmentVariableA("PYTHONIOENCODING", "utf-8");
+    /* The CLI auto-disables colour on a pipe; force it on so the console renders
+     * the toolchain palette (magenta brand, orange `assembly`, …) — this term
+     * parses the ANSI SGR itself (term_apply_sgr). */
+    SetEnvironmentVariableA("CSSC_FORCE_COLOR", "1");
     PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
     char cmdline[4200];                       /* caller supplies the full line */
     snprintf(cmdline, sizeof(cmdline), "%s", cmd);
@@ -4480,11 +5133,14 @@ static void term_poll(cssc_gui_terminal* t) {
     if (!t->running || !t->pipe_read) return;
     char buf[4096];
     DWORD avail = 0;
-    while (PeekNamedPipe((HANDLE)t->pipe_read, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+    int drained = 0;                 /* bytes consumed this frame (budget cap) */
+    while (drained < TERM_POLL_BUDGET &&
+           PeekNamedPipe((HANDLE)t->pipe_read, NULL, 0, NULL, &avail, NULL) && avail > 0) {
         DWORD toread = avail < sizeof(buf) ? avail : (DWORD)sizeof(buf);
         DWORD got = 0;
         if (!ReadFile((HANDLE)t->pipe_read, buf, toread, &got, NULL) || got == 0) break;
         for (DWORD i = 0; i < got; i++) term_feed_byte(t, (unsigned char)buf[i]);
+        drained += (int)got;
     }
     if (WaitForSingleObject((HANDLE)t->proc, 0) == WAIT_OBJECT_0) {
         if (t->partial_len > 0) term_finalize_line(t);
@@ -4564,6 +5220,18 @@ static void term_submit(cssc_gui_terminal* t) {
     tok[tn] = 0;
     while (*p == ' ') p++;                 /* p now at the argument tail */
     if (tok[0] == 0) { t->input_len = 0; t->input_cur = 0; return; }
+    /* Command body passed to the CSSC launcher (defaults to the whole line).
+     * An explicit `cssc `/`csscd ` prefix is stripped so `csscd build "path
+     * with spaces"` routes through the quote-preserving cmd.exe branch below
+     * instead of the PowerShell passthrough (which mangles quoted args). */
+    const char* cmd_body = t->input;
+    if (!strcmp(tok, "cssc") || !strcmp(tok, "csscd")) {
+        cmd_body = p;                      /* the real command (subcmd + args) */
+        int tn2 = 0;
+        while (*p && *p != ' ' && tn2 < 63) tok[tn2++] = *p++;
+        tok[tn2] = 0;
+        while (*p == ' ') p++;
+    }
     if (!strcmp(tok, "clear") || !strcmp(tok, "cls")) {
         term_clear_lines(t);
     } else if (!strcmp(tok, "cpall") || !strcmp(tok, "cpallc")) {
@@ -4601,7 +5269,15 @@ static void term_submit(cssc_gui_terminal* t) {
 #endif
     } else if (term_is_cssc_cmd(tok)) {
         char cmd[2200];
-        snprintf(cmd, sizeof(cmd), "cmd.exe /d /c cssc %s", t->input);
+        const char* launcher = term_cssc_launcher();
+        /* Invoke the resolved launcher by ABSOLUTE, quoted path so a cwd
+         * `cssc.bat` can't shadow it and paths with spaces survive intact.
+         * The extra outer quotes keep cmd.exe from eating the launcher quotes
+         * (cmd /c "..." rule). Falls back to bare `cssc` if none was found. */
+        if (launcher && launcher[0])
+            snprintf(cmd, sizeof(cmd), "cmd.exe /d /c \"\"%s\" %s\"", launcher, cmd_body);
+        else
+            snprintf(cmd, sizeof(cmd), "cmd.exe /d /c cssc %s", cmd_body);
         term_spawn(t, cmd);
     } else {
         /* Shell passthrough via PowerShell so ls/cat/pwd/git/... all work. */
@@ -4733,8 +5409,44 @@ CSSC_GUI_EXPORT void cssc_gui_terminal_write(void* p, const char* text) {
     cssc_gui_terminal* t = (cssc_gui_terminal*)p;
     if (t) term_add_line(t, text ? text : "", t->fg);
 }
+/* Like write, but feeds the text through the SAME ANSI/UTF-8 filter as live
+ * subprocess output — so embedded colour escapes (e.g. a captured `cssc`
+ * command's themed output) render instead of showing raw \x1b[..m. Handles its
+ * own newlines; a trailing partial line is finalized. */
+CSSC_GUI_EXPORT void cssc_gui_terminal_writeansi(void* p, const char* text) {
+    cssc_gui_terminal* t = (cssc_gui_terminal*)p;
+    if (!t || !text) return;
+    for (const unsigned char* s = (const unsigned char*)text; *s; s++)
+        term_feed_byte(t, *s);
+    if (t->partial_len > 0) term_finalize_line(t);
+}
+/* F5 console debugger: the source line the traced program is currently on (0 =
+ * none / cleared), and the file it lives in. Parsed from the invisible IP
+ * markers `pctrace --console` streams; the IDE highlights this line and, when
+ * the file differs, switches the editor to it (cross-#load follow). */
+CSSC_GUI_EXPORT int64_t cssc_gui_terminal_ipline(void* p) {
+    cssc_gui_terminal* t = (cssc_gui_terminal*)p;
+    return t ? (int64_t)t->ip_line : 0;
+}
+/* MUST return a real CSSC string object (length-prefixed), NOT a raw char* —
+ * the caller does string == on it, which reads the object's length header; a
+ * bare char* is read as garbage length -> OOB compare -> crash. */
+CSSC_GUI_EXPORT void* cssc_gui_terminal_ipfile(void* p) {
+    cssc_gui_terminal* t = (cssc_gui_terminal*)p;
+    const char* s = (t && t->ip_file[0]) ? t->ip_file : "";
+    return cssc_string_lit(s, strlen(s));
+}
 CSSC_GUI_EXPORT void cssc_gui_terminal_clear(void* p) {
     cssc_gui_terminal* t = (cssc_gui_terminal*)p; if (t) term_clear_lines(t);
+}
+/* Lock/unlock typed input (the IDE sets it while an F5 debug trace runs). */
+CSSC_GUI_EXPORT void cssc_gui_terminal_setinputlock(void* p, int64_t on) {
+    cssc_gui_terminal* t = (cssc_gui_terminal*)p; if (t) t->input_locked = on ? 1 : 0;
+}
+/* Kill the running child (same hard-terminate as Ctrl+X), leaving the widget
+ * reusable — a free slot for the switcher's "Kill" menu. No-op when idle. */
+CSSC_GUI_EXPORT void cssc_gui_terminal_stop(void* p) {
+    cssc_gui_terminal* t = (cssc_gui_terminal*)p; if (t) term_interrupt(t);
 }
 
 CSSC_GUI_EXPORT int64_t cssc_gui_terminal_update(void* tp, void* sp) {
@@ -4769,6 +5481,19 @@ CSSC_GUI_EXPORT int64_t cssc_gui_terminal_update(void* tp, void* sp) {
 #endif
         int64_t c;
         while ((c = cssc_video_poll_char(s->vid)) != 0) {
+            if (t->input_locked && !t->input_wanted) {
+                /* A debug trace owns the panel: only Ctrl+X (stop) and Ctrl+C
+                 * (copy) pass; every other keystroke is swallowed so nothing is
+                 * typed into the console while + / - / # drive the trace. The
+                 * exception is input_wanted — the program is blocked in
+                 * cssc::input, so typing is allowed until the answer is sent. */
+                if (c == 24) term_interrupt(t);
+                else if (c == 3) {
+                    char* sel = term_selected_str(t);
+                    if (sel) { gui_clipboard_set(sel); free(sel); }
+                }
+                continue;
+            }
             if (c == 13 || c == 10) {
                 term_submit(t);
             } else if (c == 3) {                    /* Ctrl+C — copy selection */
@@ -4816,6 +5541,13 @@ CSSC_GUI_EXPORT int64_t cssc_gui_terminal_update(void* tp, void* sp) {
                 }
             }
         }
+    }
+    /* Wheel scrolls the scrollback whenever the mouse is OVER the terminal —
+     * independent of focus, so the console stays scrollable while a debug trace
+     * runs and the editor keeps its own wheel when hovered instead (whichever
+     * widget the mouse is over consumes the delta). */
+    if (s->mx >= t->x && s->mx < t->x + t->w &&
+        s->my >= t->y && s->my < t->y + t->h) {
         int64_t wh = cssc_video_wheel(s->vid);
         if (wh) {
             t->top -= (int)wh * 3;
@@ -4950,6 +5682,9 @@ typedef struct {
     cssc_gui_screen* screen;
     /* child process (pctrace) */
     void*  proc; void* pipe_read; void* stdin_write; int running;
+    void*  job;   /* job object owning the trace tree (cmd.exe + python) so STOP
+                   * kills the WHOLE tree, not just cmd.exe (no orphaned pctrace
+                   * writing to a closed pipe → the crash on stop-while-running) */
     char   partial[16384]; int partial_len;      /* JSON-line accumulator */
     /* allocation table */
     dbg_alloc* allocs; int nallocs, cap_allocs;
@@ -4958,6 +5693,11 @@ typedef struct {
     char   logpartial[4096]; int logpartial_len;
     /* instruction pointer */
     int  ip_line; char ip_scope[64]; int stepcount;
+    /* Source FILE the IP currently sits in. A `#load`ed module's steps carry
+     * their own path (the tracer's `file` field), so the overlay follows
+     * execution into the module and back — the IDE loads THIS file's source and
+     * highlights ip_line within it. Empty = the main program file. */
+    char ip_file[1024];
     int  crashed; int crash_line; char crash_msg[256];
     int  ended; int exit_code;
     /* UI */
@@ -4966,7 +5706,7 @@ typedef struct {
     int  focused;             /* clicked-into: draw big + own input; else small */
     int  tab;                 /* 0 = Allocations, 1 = Output */
     int  alloc_top;
-    int  ip_follow;           /* F1: 1 = follow IP, 0 = free cam */
+    int  ip_follow;           /* F2: 1 = follow IP, 0 = free cam */
     char probe[80]; int probe_len;
     char last_read[300];
     char title[520];
@@ -4980,6 +5720,10 @@ typedef struct {
      * real console output (the tiny card only carries status). Drained each
      * frame by `cssc_gui_debugger_takeoutput`. */
     char pending_out[16384]; int pending_out_len;
+    /* Startup progress: 1 while the tracer process is launching and no event has
+     * arrived yet — the card shows an animated spinner so it never reads as hung.
+     * Cleared the moment the first pctrace byte/event lands. */
+    int  waiting; int wait_anim;
 } cssc_gui_debugger;
 
 /* ---- minimal JSON field extraction (flat objects only) ------------------- */
@@ -5150,7 +5894,17 @@ static void dbg_upsert_alloc(cssc_gui_debugger* d, const char* name,
 /* ---- event dispatch ------------------------------------------------------ */
 static void dbg_parse_line(cssc_gui_debugger* d, const char* line) {
     char ev[24];
-    if (!dbg_json_str(line, "ev", ev, sizeof(ev))) return;
+    if (!dbg_json_str(line, "ev", ev, sizeof(ev))) {
+        /* Not an event line = raw stdout/stderr from the toolchain itself — most
+         * importantly a `cssc: fatal error: … Parser/Runtime Error …` that
+         * fires BEFORE any trace event (e.g. a syntax error). SHOW it, else a
+         * compile/parse failure reads as an unexplained "[program ended exit 1]"
+         * with no clue why. Skip blank lines and our own JSON braces. */
+        const char* s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s && *s != '{') dbg_log(d, line, DBG_COL_ERR);
+        return;
+    }
     if (strcmp(ev, "alloc") == 0 || strcmp(ev, "write") == 0) {
         char name[64], region[16], type[24], value[192];
         dbg_json_str(line, "name",   name,   sizeof(name));
@@ -5171,6 +5925,9 @@ static void dbg_parse_line(cssc_gui_debugger* d, const char* line) {
     } else if (strcmp(ev, "step") == 0) {
         d->ip_line = (int)dbg_json_u64(line, "line");
         dbg_json_str(line, "scope", d->ip_scope, sizeof(d->ip_scope));
+        /* Track the source file so the IDE can switch the shown source when
+         * execution crosses into (or out of) a `#load`ed module. */
+        dbg_json_str(line, "file", d->ip_file, sizeof(d->ip_file));
     } else if (strcmp(ev, "scope") == 0) {
         char sc[64]; dbg_json_str(line, "scope", sc, sizeof(sc));
         char sm[128];
@@ -5273,6 +6030,24 @@ static void dbg_spawn(cssc_gui_debugger* d, const char* cmd) {
                              NULL, NULL, &si, &pi);
     CloseHandle(wr); CloseHandle(in_rd);
     if (ok) {
+        /* Put the child in a kill-on-close job so STOP terminates the whole
+         * process tree (cmd.exe AND the python pctrace it launched). Without
+         * this, TerminateProcess only killed cmd.exe and left pctrace running,
+         * writing into a closed pipe. Best-effort: if the job can't be created
+         * the run still works (STOP falls back to terminating cmd.exe). */
+        HANDLE job = CreateJobObjectA(NULL, NULL);
+        if (job) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli;
+            ZeroMemory(&jeli, sizeof(jeli));
+            jeli.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                    &jeli, sizeof(jeli));
+            if (!AssignProcessToJobObject(job, pi.hProcess)) {
+                CloseHandle(job); job = NULL;
+            }
+        }
+        d->job = job;
         CloseHandle(pi.hThread);
         d->proc = pi.hProcess; d->pipe_read = rd; d->stdin_write = in_wr;
         d->running = 1; d->partial_len = 0;
@@ -5302,6 +6077,7 @@ static void dbg_drain(cssc_gui_debugger* d) {
         DWORD toread = avail < sizeof(buf) ? avail : (DWORD)sizeof(buf);
         DWORD got = 0;
         if (!ReadFile((HANDLE)d->pipe_read, buf, toread, &got, NULL) || got == 0) break;
+        if (got > 0) d->waiting = 0;   /* tracer is alive — stop the spinner */
         for (DWORD i = 0; i < got; i++) dbg_feed_byte(d, buf[i]);
         budget -= (int)got;
     }
@@ -5322,7 +6098,9 @@ static void dbg_poll(cssc_gui_debugger* d) {
         CloseHandle((HANDLE)d->proc);
         if (d->pipe_read) CloseHandle((HANDLE)d->pipe_read);
         if (d->stdin_write) CloseHandle((HANDLE)d->stdin_write);
-        d->proc = NULL; d->pipe_read = NULL; d->stdin_write = NULL; d->running = 0;
+        if (d->job) CloseHandle((HANDLE)d->job);
+        d->proc = NULL; d->pipe_read = NULL; d->stdin_write = NULL;
+        d->job = NULL; d->running = 0;
     }
 #else
     (void)d;
@@ -5344,19 +6122,24 @@ static void dbg_send_read(cssc_gui_debugger* d, const char* addr) {
 
 static void dbg_stop_proc(cssc_gui_debugger* d) {
 #ifdef _WIN32
+    /* Close the READ end first so a child blocked writing into a full stdout
+     * pipe (mid-flood) unblocks at once with a broken-pipe error — otherwise it
+     * never reads 'quit' and we'd stall the UI thread on the wait. */
+    if (d->pipe_read) { CloseHandle((HANDLE)d->pipe_read); d->pipe_read = NULL; }
     if (d->stdin_write) {
         DWORD wrote = 0;
         WriteFile((HANDLE)d->stdin_write, "quit\n", 5, &wrote, NULL);
-        FlushFileBuffers((HANDLE)d->stdin_write);
+        CloseHandle((HANDLE)d->stdin_write); d->stdin_write = NULL;
     }
+    /* Kill the WHOLE tree (cmd.exe + python pctrace) — closing the kill-on-close
+     * job does this atomically, so nothing is orphaned onto the dead pipe. */
+    if (d->job) { CloseHandle((HANDLE)d->job); d->job = NULL; }
     if (d->proc) {
-        WaitForSingleObject((HANDLE)d->proc, 200);
-        TerminateProcess((HANDLE)d->proc, 0);
-        CloseHandle((HANDLE)d->proc);
+        WaitForSingleObject((HANDLE)d->proc, 50);   /* brief, non-blocking-ish */
+        TerminateProcess((HANDLE)d->proc, 0);        /* belt-and-braces */
+        CloseHandle((HANDLE)d->proc); d->proc = NULL;
     }
-    if (d->pipe_read) CloseHandle((HANDLE)d->pipe_read);
-    if (d->stdin_write) CloseHandle((HANDLE)d->stdin_write);
-    d->proc = NULL; d->pipe_read = NULL; d->stdin_write = NULL; d->running = 0;
+    d->running = 0;
 #else
     (void)d;
 #endif
@@ -5371,11 +6154,12 @@ static void dbg_reset(cssc_gui_debugger* d) {
     d->nlog = 0; d->log_top = 0; d->logpartial_len = 0;
     d->nallocs = 0;
     d->partial_len = 0;
-    d->ip_line = 0; d->ip_scope[0] = 0; d->stepcount = 0;
+    d->ip_line = 0; d->ip_scope[0] = 0; d->stepcount = 0; d->ip_file[0] = 0;
     d->crashed = 0; d->crash_line = 0; d->crash_msg[0] = 0;
     d->ended = 0; d->exit_code = 0;
     d->tab = 0; d->alloc_top = 0; d->probe_len = 0; d->probe[0] = 0;
     d->last_read[0] = 0;
+    d->waiting = 0; d->wait_anim = 0;
 }
 
 /* Minimized card size — a compact top-right status card: "CSSC Diagnose" +
@@ -5427,16 +6211,19 @@ CSSC_GUI_EXPORT void* cssc_gui_debugger_new(void* screen) {
  * once via SearchPath (no console flash, unlike `system("cssc --version")`), so
  * the debugger's `pctrace` actually runs on a dev machine that only has csscd. */
 static const char* dbg_launcher(void) {
+    /* Resolve the real launcher by absolute path, skipping the cwd — a bare
+     * `cssc` would run a cwd `cssc.bat` (e.g. the installer in C:\CSSC) instead
+     * of pctrace, which reads as "the debugger builds then nothing happens". */
+    const char* real = term_cssc_launcher();
+    if (real && real[0]) return real;
+    /* Fall back to a dev csscd.exe, then bare cssc. */
     static int resolved = 0;
     static char launcher[8] = "cssc";
     if (!resolved) {
         resolved = 1;
-        char buf[MAX_PATH];
-        char* fp = NULL;
-        if (SearchPathA(NULL, "cssc", ".exe", (DWORD)sizeof(buf), buf, &fp) == 0) {
-            if (SearchPathA(NULL, "csscd", ".exe", (DWORD)sizeof(buf), buf, &fp) != 0)
-                snprintf(launcher, sizeof(launcher), "csscd");
-        }
+        char buf[MAX_PATH]; char* fp = NULL;
+        if (SearchPathA(NULL, "csscd", ".exe", (DWORD)sizeof(buf), buf, &fp) != 0)
+            snprintf(launcher, sizeof(launcher), "csscd");
     }
     return launcher;
 }
@@ -5463,10 +6250,17 @@ CSSC_GUI_EXPORT void cssc_gui_debugger_start(void* p, const char* cmd, const cha
         dbg_log(d, msg, DBG_COL_VAL);
     }
     /* `cmd` is a CSSC sub-command (e.g. `pctrace "file"`); resolve it through the
-     * installed launcher exactly like the terminal widget does. */
+     * installed launcher (absolute, quoted — cwd-shadow + space safe). */
     char full[4300];
-    snprintf(full, sizeof(full), "cmd.exe /d /c %s %s", dbg_launcher(), cmd ? cmd : "");
+    const char* L = dbg_launcher();
+    snprintf(full, sizeof(full), "cmd.exe /d /c \"\"%s\" %s\"", L, cmd ? cmd : "");
     dbg_spawn(d, full);
+    /* The tracer is a fresh Python process: startup + parse can take a second or
+     * two before the first event streams. Say so + start the spinner so the card
+     * never reads as hung. `dbg_waiting` is cleared when the first event lands. */
+    dbg_log(d, "starting tracer (pctrace) — waiting for first step ...", DBG_COL_VAL);
+    d->waiting = 1;
+    d->wait_anim = 0;
 }
 
 CSSC_GUI_EXPORT int64_t cssc_gui_debugger_update(void* p) {
@@ -5538,14 +6332,36 @@ CSSC_GUI_EXPORT void cssc_gui_debugger_click(void* p, int64_t mx, int64_t my, in
     d->focused = (mx >= x && mx < x + w && my >= y && my < y + h) ? 1 : 0;
 }
 
-/* Current instruction-pointer source line — the editor highlights it red while
- * IP-follow is on. 0 = no highlight (inactive or free-cam). */
+/* Current instruction-pointer source line — the editor highlights it red. The
+ * highlight is shown whenever a trace is active OR stopped-but-held, EVEN in
+ * free-cam (F2 off): toggling follow off must not blank the marker, only stop
+ * the view from auto-tracking it. 0 = no highlight (debugger fully inactive). */
 CSSC_GUI_EXPORT int64_t cssc_gui_debugger_ipline(void* p) {
     cssc_gui_debugger* d = (cssc_gui_debugger*)p;
     if (!d) return 0;
-    if (d->held) return (int64_t)d->ip_line;   /* stopped: keep the last IP lit */
-    if (!d->active || !d->ip_follow) return 0;
+    if (!d->active && !d->held) return 0;
     return (int64_t)d->ip_line;
+}
+/* 1 while the view should LOCK onto the IP (actively following): active, follow
+ * on, and not stopped-held. The IDE calls revealIp() each frame only while this
+ * is 1 — so F2-off (free-cam) and post-stop leave the user free to scroll while
+ * the red marker stays put. */
+CSSC_GUI_EXPORT int64_t cssc_gui_debugger_ipfollow(void* p) {
+    cssc_gui_debugger* d = (cssc_gui_debugger*)p;
+    if (!d) return 0;
+    return (d->active && d->ip_follow && !d->held) ? 1 : 0;
+}
+/* Absolute path of the source file the IP currently sits in — the main program
+ * normally, or a `#load`ed module's own path while execution is inside it. The
+ * IDE compares this against the file shown in the editor and, when it differs,
+ * loads THIS file's source before highlighting ip_line. Only auto-switches
+ * while ACTIVELY following (not free-cam, not after a stop) so the user's own
+ * file browsing is never yanked away. */
+CSSC_GUI_EXPORT const char* cssc_gui_debugger_ipfile(void* p) {
+    cssc_gui_debugger* d = (cssc_gui_debugger*)p;
+    if (!d) return "";
+    if (!d->active || !d->ip_follow || d->held) return "";
+    return d->ip_file;
 }
 /* STOP: halt the trace but KEEP the last IP line highlighted in the editor and
  * close the overlay. The highlight persists (via `held`) until the user clicks
@@ -5580,7 +6396,7 @@ static void dbg_handle_vk(cssc_gui_debugger* d, int vk) {
         dbg_stop_held(d);
         return;
     }
-    if (vk == 112) { d->ip_follow = d->ip_follow ? 0 : 1; return; }   /* F1 follow/free */
+    if (vk == 113) { d->ip_follow = d->ip_follow ? 0 : 1; return; }   /* F2 follow/free */
     if (vk == 9)  { d->tab = d->tab ? 0 : 1; return; }                /* Tab switch */
     if (vk == 8)  { if (d->probe_len > 0) d->probe[--d->probe_len] = 0; return; }
     if (vk == 13) {                                                   /* Enter -> probe */
@@ -5671,13 +6487,23 @@ CSSC_GUI_EXPORT void cssc_gui_debugger_draw(void* p) {
         cssc_video_draw_rect(vid, stx, sty, 44, 18, (int64_t)0xC0FF3B54);
         cssc_video_draw_text(vid, stx + 8, sty + 3, "STOP", (int64_t)0xFFFF9BB0, 1);
         cy2 += 22;
-        const char* sst = d->crashed ? "CRASHED" : (d->ended ? "ended"
-                          : (d->running ? "running" : "idle"));
         char m0[160];
-        snprintf(m0, sizeof(m0), "[%s]  IP line %d   click to expand",
-                 sst, d->ip_line);
-        dbg_text_clip(vid, px + 10, cy2, m0,
-                      d->crashed ? DBG_COL_ERR : DBG_COL_ADDR, 1, right);
+        if (d->waiting) {
+            /* Spinner while pctrace boots (fresh Python: parse + first event can
+             * take a second) so the card never reads as hung. */
+            static const char spin[4] = { '|', '/', '-', '\\' };
+            d->wait_anim++;
+            snprintf(m0, sizeof(m0), "%c  starting tracer ...   click to expand",
+                     spin[(d->wait_anim >> 2) & 3]);
+            dbg_text_clip(vid, px + 10, cy2, m0, DBG_COL_VAL, 1, right);
+        } else {
+            const char* sst = d->crashed ? "CRASHED" : (d->ended ? "ended"
+                              : (d->running ? "running" : "idle"));
+            snprintf(m0, sizeof(m0), "[%s]  IP line %d   click to expand",
+                     sst, d->ip_line);
+            dbg_text_clip(vid, px + 10, cy2, m0,
+                          d->crashed ? DBG_COL_ERR : DBG_COL_ADDR, 1, right);
+        }
         cy2 += 14;
         cssc_video_fillrect(vid, px + 8, cy2, pw - 16, 1, (int64_t)0x30FFFFFF);
         cy2 += 6;
@@ -5716,7 +6542,7 @@ CSSC_GUI_EXPORT void cssc_gui_debugger_draw(void* p) {
 
     char ipbuf[160];
     snprintf(ipbuf, sizeof(ipbuf), "IP line %d   %s   scope %s",
-             d->ip_line, d->ip_follow ? "[FOLLOW]" : "[FREE]",
+             d->ip_line, d->ip_follow ? "[FOLLOW F2]" : "[FREE F2]",
              d->ip_scope[0] ? d->ip_scope : "-");
     dbg_text_clip(vid, px + 12, cy, ipbuf, DBG_COL_HEAD, sc, right);
     cy += ch + 8;
@@ -6385,12 +7211,13 @@ CSSC_GUI_EXPORT int64_t cssc_gui_browser_update(void* bp, void* sp) {
         }
     }
     int64_t k;
+    int sel_moved = 0;
     while ((k = cssc_video_poll_key(s->vid)) != 0) {
-        if (k == 0x26 && b->sel > 0) b->sel--;
-        else if (k == 0x28 && b->sel < b->n - 1) b->sel++;
+        if (k == 0x26 && b->sel > 0) { b->sel--; sel_moved = 1; }
+        else if (k == 0x28 && b->sel < b->n - 1) { b->sel++; sel_moved = 1; }
     }
     int64_t wh = cssc_video_wheel(s->vid);
-    if (wh) { b->top -= (int)wh * 3; if (b->top < 0) b->top = 0; }
+    if (wh) { b->top -= (int)wh * 3; }              /* free wheel scroll */
     if (s->down && !s->prev_down) {
         int64_t mx = s->mx, my = s->my;
         int64_t byb = by + bh - 44;
@@ -6408,8 +7235,12 @@ CSSC_GUI_EXPORT int64_t cssc_gui_browser_update(void* bp, void* sp) {
             return 0;
         }
     }
-    if (b->sel < b->top) b->top = b->sel;
-    if (b->sel >= b->top + vis) b->top = b->sel - vis + 1;
+    if (sel_moved) {                               /* keep the cursor visible only after arrow-key nav */
+        if (b->sel < b->top) b->top = b->sel;
+        if (b->sel >= b->top + vis) b->top = b->sel - vis + 1;
+    }
+    int maxtop = b->n - vis; if (maxtop < 0) maxtop = 0;
+    if (b->top > maxtop) b->top = maxtop;
     if (b->top < 0) b->top = 0;
     return 0;
 }
@@ -6442,7 +7273,7 @@ CSSC_GUI_EXPORT void cssc_gui_browser_draw(void* bp) {
         if (idx == b->sel) cssc_video_fillrect(v, bx + 16, ry, lw, row_h, (int64_t)0x60C74DE0);
         void* icon = b->ico_loaded ? browser_pick_icon(b, idx) : NULL;
         if (icon) {
-            gui_blit_sprite(v, icon, bx + 24, ry + (row_h - glyph) / 2, b->scale);
+            gui_blit_sprite_fit(v, icon, bx + 24, ry + (row_h - glyph) / 2, 8 * b->scale);
         } else {
             int64_t isz = glyph / 2; if (isz < 4) isz = 4;
             int64_t icol = b->isdir[idx] ? (int64_t)0xFFE0B24B : list_icon_color(b->names[idx]);

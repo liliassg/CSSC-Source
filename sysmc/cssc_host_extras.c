@@ -43,6 +43,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+/* Shortest round-trip f64 -> string (Python-repr layout), shared with the host
+ * runtime so a keyed mutier float prints identically. Header-only, no libc. */
+#include "cssc_fmt_f64.h"
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
     #define CSSC_EX_EXPORT __declspec(dllexport)
@@ -412,24 +415,18 @@ CSSC_EX_EXPORT void cssc_video_fillrect(void* v, int64_t x, int64_t y,
  * ------------------------------------------------------------------------- */
 CSSC_EX_EXPORT void cssc_video_draw_rect(void* v, int64_t x, int64_t y,
                                            int64_t w, int64_t h, int64_t argb) {
+    /* The four edges are drawn as 1-px fill-rects (NOT per-pixel), byte-for-byte
+     * the interpreter's drawRect (cssl_gui_native.py `_fill` x4). This matters for
+     * a semi-transparent border (e.g. a focused TextBox's 0xC03FD0A0): the corner
+     * pixels get blended TWICE, and the blend must match fillRect's exactly -- a
+     * per-pixel path with a different blend diverges the framebuffer checksum.
+     * Edge order (top, bottom, left, right) is identical to the interpreter so the
+     * double-blended corners come out the same. */
     if (!v || w <= 0 || h <= 0) return;
-    int64_t vw = vid_w(v);
-    int64_t vh = vid_h(v);
-    int64_t x0 = x < 0 ? 0 : x;
-    int64_t y0 = y < 0 ? 0 : y;
-    int64_t x1 = x + w - 1; if (x1 >= vw) x1 = vw - 1;
-    int64_t y1 = y + h - 1; if (y1 >= vh) y1 = vh - 1;
-    if (x1 < x0 || y1 < y0) return;
-    for (int64_t px = x0; px <= x1; ++px) {
-        if (y >= 0 && y < vh) cssc_video_pixel(v, px, y, argb);
-        if (y + h - 1 >= 0 && y + h - 1 < vh)
-            cssc_video_pixel(v, px, y + h - 1, argb);
-    }
-    for (int64_t py = y0; py <= y1; ++py) {
-        if (x >= 0 && x < vw) cssc_video_pixel(v, x, py, argb);
-        if (x + w - 1 >= 0 && x + w - 1 < vw)
-            cssc_video_pixel(v, x + w - 1, py, argb);
-    }
+    cssc_video_fillrect(v, x, y, w, 1, argb);          /* top    */
+    cssc_video_fillrect(v, x, y + h - 1, w, 1, argb);  /* bottom */
+    cssc_video_fillrect(v, x, y, 1, h, argb);          /* left   */
+    cssc_video_fillrect(v, x + w - 1, y, 1, h, argb);  /* right  */
 }
 
 /* ---------------------------------------------------------------------------
@@ -618,6 +615,48 @@ CSSC_EX_EXPORT void cssc_video_draw_text(void* v, int64_t x, int64_t y,
     for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
         if (*p == '\n') { cx = x; y += line_h; continue; }
         ex_draw_glyph(v, cx, y, (int)*p, argb, scale);
+        cx += glyph_w;
+    }
+}
+
+/* Styled variant of the 8x8 text blitter for the editor's comment/docstring
+ * rendering. style bit 0 = BOLD (each set pixel thickened one px rightward),
+ * bit 1 = ITALIC (each glyph row sheared right by (7-gy)*scale/3, a lean the
+ * ROM font cannot express natively). Same monospace advance as draw_text so
+ * column math upstream is unaffected. */
+CSSC_EX_EXPORT void cssc_video_draw_text_styled(void* v, int64_t x, int64_t y,
+                                                  const char* text, int64_t argb,
+                                                  int64_t scale, int64_t style) {
+    if (!v || !text) return;
+    if (scale < 1) scale = 1;
+    int bold = (style & 1) != 0;
+    int ital = (style & 2) != 0;
+    int64_t glyph_w = 8 * scale;
+    int64_t line_h = 10 * scale;
+    int64_t cx = x;
+    for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
+        if (*p == '\n') { cx = x; y += line_h; continue; }
+        int ch = (int)*p;
+        if (ch >= 32 && ch <= 127) {
+            const uint8_t* g = CSSC_FONT8x8[ch - 32];
+            for (int gy = 0; gy < 8; ++gy) {
+                uint8_t row = g[gy];
+                int64_t xsh = ital ? (int64_t)((7 - gy) * scale) / 3 : 0;
+                for (int gx = 0; gx < 8; ++gx) {
+                    if (row & (0x01u << gx)) {
+                        for (int64_t sy = 0; sy < scale; ++sy) {
+                            for (int64_t sx = 0; sx < scale; ++sx) {
+                                cssc_video_pixel(v, cx + (int64_t)gx * scale + sx + xsh,
+                                                 y + (int64_t)gy * scale + sy, argb);
+                                if (bold)
+                                    cssc_video_pixel(v, cx + (int64_t)gx * scale + sx + xsh + 1,
+                                                     y + (int64_t)gy * scale + sy, argb);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         cx += glyph_w;
     }
 }
@@ -1536,8 +1575,12 @@ CSSC_EX_EXPORT void cssc_console_desync(void* cons, const char* tag) {
 #define CSSC_MUTIER_CAP   65536
 #define CSSC_MUTIER_HDR   32
 #define CSSC_MUTIER_HEAP  (8 * 1024 * 1024)    /* variable-length value region */
+#define CSSC_MUTIER_DIR_MAX 262144             /* reserved at heap start for the
+                                                * key->addr directory (keyed sugar) */
 /* entry tags: 0 free, 1 int, 2 float(f64 bits), 3 bool, 4 string(heap offset) */
 #define CSSC_MUTIER_TAG_INT   1
+#define CSSC_MUTIER_TAG_FLOAT 2
+#define CSSC_MUTIER_TAG_BOOL  3
 #define CSSC_MUTIER_TAG_STR   4
 
 typedef struct { uint32_t magic; uint32_t count; uint32_t cap; uint32_t pad;
@@ -1616,7 +1659,10 @@ static cssc_mutier_slot* cssc_mutier_get(int is_public, uint64_t pid) {
     cssc_mutier_hdr* hd = (cssc_mutier_hdr*)base;
     if (created_new || hd->magic != CSSC_MUTIER_MAGIC) {
         hd->magic = CSSC_MUTIER_MAGIC; hd->count = 0; hd->cap = CSSC_MUTIER_CAP; hd->pad = 0;
-        hd->heap_top = 0; hd->heap_cap = CSSC_MUTIER_HEAP;
+        /* heap_top starts past the reserved key-directory region so string
+         * values never overwrite the keyed directory — identical to the
+         * interpreter (_MutierTable.__init__). */
+        hd->heap_top = CSSC_MUTIER_DIR_MAX; hd->heap_cap = CSSC_MUTIER_HEAP;
     }
     cssc_mutier_slot* s = &g_mutier_slots[free_slot];
     s->is_public = is_public; s->pid = pid; s->base = base;
@@ -1663,7 +1709,10 @@ static cssc_mutier_slot* cssc_mutier_get(int is_public, uint64_t pid) {
     cssc_mutier_hdr* hd = (cssc_mutier_hdr*)base;
     if (created_new || hd->magic != CSSC_MUTIER_MAGIC) {
         hd->magic = CSSC_MUTIER_MAGIC; hd->count = 0; hd->cap = CSSC_MUTIER_CAP; hd->pad = 0;
-        hd->heap_top = 0; hd->heap_cap = CSSC_MUTIER_HEAP;
+        /* heap_top starts past the reserved key-directory region so string
+         * values never overwrite the keyed directory — identical to the
+         * interpreter (_MutierTable.__init__). */
+        hd->heap_top = CSSC_MUTIER_DIR_MAX; hd->heap_cap = CSSC_MUTIER_HEAP;
     }
     cssc_mutier_slot* s = &g_mutier_slots[free_slot];
     s->is_public = is_public; s->pid = pid; s->base = base; s->fd = fd;
@@ -1772,6 +1821,208 @@ CSSC_EX_EXPORT void* cssc_mutier_read_str(int64_t is_public, int64_t pid, int64_
     return cssc_string_lit((const char*)(p + 4), (size_t)l32);
 }
 
+/* ---- KEYED mutier sugar: a per-table key->address DIRECTORY reserved at the
+ * head of the value heap (the CSSC_MUTIER_DIR_MAX region). Byte-identical to the
+ * interpreter (_MutierTable._dir_load / _dir_save):
+ *     u32 count, then `count` records of [u32 klen][i64 addr][klen key bytes]
+ * A keyed op resolves the key to its stable address in this directory
+ * (allocating a fresh entry the first time), then reuses the address-based
+ * read/write path — so an interpreter and a compiled runtime sharing a
+ * table + key see the exact same cell. Caller holds the table lock. */
+static int64_t cssc_mutier_dir_addr_locked(cssc_mutier_slot* s,
+                                           const char* key, int64_t klen, int create) {
+    unsigned char* base = s->base;
+    unsigned char* dir = base + CSSC_MUTIER_HEAP_BASE;
+    if (klen < 0) klen = 0;
+    uint32_t cnt; memcpy(&cnt, dir, 4);
+    if (cnt > (uint32_t)CSSC_MUTIER_CAP) cnt = 0;   /* garbage guard */
+    size_t off = 4;
+    uint32_t i;
+    for (i = 0; i < cnt; i++) {
+        if (off + 12 > (size_t)CSSC_MUTIER_DIR_MAX) break;
+        uint32_t kl; memcpy(&kl, dir + off, 4);
+        int64_t addr; memcpy(&addr, dir + off + 4, 8);
+        off += 12;
+        if (off + kl > (size_t)CSSC_MUTIER_DIR_MAX) break;
+        if ((int64_t)kl == klen && (klen == 0 || memcmp(dir + off, key, (size_t)klen) == 0))
+            return addr;
+        off += kl;
+    }
+    if (!create) return -1;
+    /* Room for a new record [u32 klen][i64 addr][key bytes] at `off`? */
+    if (off + 12 + (size_t)klen > (size_t)CSSC_MUTIER_DIR_MAX) return -1;
+    cssc_mutier_hdr* hd = (cssc_mutier_hdr*)base;
+    if (hd->count >= (uint32_t)CSSC_MUTIER_CAP) return -1;
+    int64_t newaddr = (int64_t)hd->count;             /* fresh entry (int 0), like _alloc_locked(0) */
+    cssc_mutier_ent* e = (cssc_mutier_ent*)(base + CSSC_MUTIER_HDR) + hd->count;
+    e->tag = CSSC_MUTIER_TAG_INT; e->value = 0;
+    hd->count += 1;
+    uint32_t kl32 = (uint32_t)klen;
+    memcpy(dir + off, &kl32, 4);
+    memcpy(dir + off + 4, &newaddr, 8);
+    if (klen > 0) memcpy(dir + off + 12, key, (size_t)klen);
+    cnt += 1;
+    memcpy(dir, &cnt, 4);
+    return newaddr;
+}
+
+/* Resolve `key` to its address (optionally creating it). Returns the address, or
+ * -1 for a missing key when `create` is 0 / directory or table full. */
+CSSC_EX_EXPORT int64_t cssc_mutier_key_addr(int64_t is_public, int64_t pid,
+                                            const char* key, int64_t klen, int64_t create) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return -1;
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, (int)create);
+    cssc_mutier_unlock(s);
+    return addr;
+}
+
+/* Scalar keyed read — the raw i64 word at the key's cell (0 for a missing key or
+ * a freed entry). Mirrors cssc_mutier_read after a directory lookup. */
+CSSC_EX_EXPORT int64_t cssc_mutier_key_read(int64_t is_public, int64_t pid,
+                                            const char* key, int64_t klen) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return 0;
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, 0);
+    int64_t out = 0;
+    if (addr >= 0 && addr < CSSC_MUTIER_CAP) {
+        cssc_mutier_ent* e = (cssc_mutier_ent*)(s->base + CSSC_MUTIER_HDR) + addr;
+        out = e->tag ? e->value : 0;
+    }
+    cssc_mutier_unlock(s);
+    return out;
+}
+
+/* Scalar keyed write — create the key on first write (matching the interpreter's
+ * key_write), then store (value, tag) at its cell. */
+CSSC_EX_EXPORT void cssc_mutier_key_write(int64_t is_public, int64_t pid,
+                                          const char* key, int64_t klen,
+                                          int64_t value, int64_t tag) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return;
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, 1);
+    if (addr >= 0 && addr < CSSC_MUTIER_CAP) {
+        cssc_mutier_hdr* hd = (cssc_mutier_hdr*)s->base;
+        cssc_mutier_ent* e = (cssc_mutier_ent*)(s->base + CSSC_MUTIER_HDR) + addr;
+        e->tag = (tag == 0 ? CSSC_MUTIER_TAG_INT : tag); e->value = value;
+        if ((uint32_t)addr >= hd->count) hd->count = (uint32_t)addr + 1;
+    }
+    cssc_mutier_unlock(s);
+}
+
+/* String keyed write — create the key, spill the bytes to the value heap, tag
+ * the cell TAG_STR (so any runtime reads it back as a string). */
+CSSC_EX_EXPORT void cssc_mutier_key_write_str(int64_t is_public, int64_t pid,
+                                              const char* key, int64_t klen,
+                                              const char* data, int64_t len) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return;
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, 1);
+    if (addr >= 0 && addr < CSSC_MUTIER_CAP) {
+        int64_t off = cssc_mutier_heap_put(s->base, data, len);
+        if (off >= 0) {
+            cssc_mutier_hdr* hd = (cssc_mutier_hdr*)s->base;
+            cssc_mutier_ent* e = (cssc_mutier_ent*)(s->base + CSSC_MUTIER_HDR) + addr;
+            e->tag = CSSC_MUTIER_TAG_STR; e->value = off;
+            if ((uint32_t)addr >= hd->count) hd->count = (uint32_t)addr + 1;
+        }
+    }
+    cssc_mutier_unlock(s);
+}
+
+/* String keyed read — the bytes at the key's cell (empty string for a missing
+ * key or a non-string cell). Mirrors cssc_mutier_read_str after a lookup. */
+CSSC_EX_EXPORT void* cssc_mutier_key_read_str(int64_t is_public, int64_t pid,
+                                              const char* key, int64_t klen) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return cssc_string_lit("", 0);
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, 0);
+    void* r = cssc_string_lit("", 0);
+    if (addr >= 0 && addr < CSSC_MUTIER_CAP) {
+        cssc_mutier_ent* e = (cssc_mutier_ent*)(s->base + CSSC_MUTIER_HDR) + addr;
+        if (e->tag == CSSC_MUTIER_TAG_STR) {
+            unsigned char* p = s->base + CSSC_MUTIER_HEAP_BASE + (size_t)e->value;
+            uint32_t l32; memcpy(&l32, p, 4);
+            r = cssc_string_lit((const char*)(p + 4), (size_t)l32);
+        }
+    }
+    cssc_mutier_unlock(s);
+    return r;
+}
+
+/* Signed i64 -> decimal, byte-identical to the host runtime's fmt_i64 (plain
+ * base-10, leading '-' for negatives). Self-contained so a keyed read never
+ * depends on the demand-emitted cssc_int_to_str runtime symbol. */
+static int64_t cssc_mutier_fmt_i64(char* buf, int64_t v) {
+    int neg = 0; uint64_t u; char tmp[24]; int ti = 0, bi = 0;
+    if (v < 0) { neg = 1; u = (uint64_t)(-(v + 1)) + 1u; } else { u = (uint64_t)v; }
+    if (u == 0) tmp[ti++] = '0';
+    while (u) { tmp[ti++] = (char)('0' + (int)(u % 10u)); u /= 10u; }
+    if (neg) buf[bi++] = '-';
+    while (ti) buf[bi++] = tmp[--ti];
+    return bi;
+}
+
+/* Tag-agnostic keyed read: reconstruct the value to its CSSC textual form using
+ * the SAME layout the native print path uses (plain decimal int, shortest
+ * round-trip float, "true"/"false" bool), so `cssc::outln(%<id>key)` matches the
+ * interpreter's output regardless of the stored tag. Used when the consumer has
+ * no static type expectation (e.g. an outln argument). */
+CSSC_EX_EXPORT void* cssc_mutier_key_read_any(int64_t is_public, int64_t pid,
+                                              const char* key, int64_t klen) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return cssc_string_lit("0x0", 3);
+    cssc_mutier_lock(s);
+    int64_t addr = cssc_mutier_dir_addr_locked(s, key, klen, 0);
+    if (addr < 0 || addr >= CSSC_MUTIER_CAP) {
+        cssc_mutier_unlock(s);
+        return cssc_string_lit("0x0", 3);   /* MISSING key -> null (interp None) */
+    }
+    cssc_mutier_ent* e = (cssc_mutier_ent*)(s->base + CSSC_MUTIER_HDR) + addr;
+    int64_t tag = e->tag, value = e->value;
+    if (tag == CSSC_MUTIER_TAG_STR) {
+        unsigned char* p = s->base + CSSC_MUTIER_HEAP_BASE + (size_t)value;
+        uint32_t l32; memcpy(&l32, p, 4);
+        void* r = cssc_string_lit((const char*)(p + 4), (size_t)l32);
+        cssc_mutier_unlock(s);
+        return r;
+    }
+    cssc_mutier_unlock(s);
+    if (tag == CSSC_MUTIER_TAG_FLOAT) {
+        double d; memcpy(&d, &value, 8);
+        char b[48]; int64_t l = (int64_t)cssc_fmt_f64_shortest(b, d);
+        return cssc_string_lit(b, (size_t)l);
+    }
+    if (tag == CSSC_MUTIER_TAG_BOOL) return value ? cssc_string_lit("true", 4)
+                                                  : cssc_string_lit("false", 5);
+    /* TAG_INT and a freed cell (tag 0 — the key is still in the directory but the
+     * entry was #pdelete'd) both read as an integer: interp read() returns 0 for a
+     * freed entry, formatted "0" — distinct from a MISSING key's "0x0". */
+    char b[24]; int64_t l = cssc_mutier_fmt_i64(b, tag == CSSC_MUTIER_TAG_INT ? value : 0);
+    return cssc_string_lit(b, (size_t)l);
+}
+
+/* #pdelete[%<id>] — free the ENTIRE private table: reinitialize its shared
+ * memory so the entry count is 0, the value heap is reset past the reserved
+ * directory region, and the key directory is emptied — every former key/address
+ * then reads back null. Identical effect to the interpreter's _MutierTable.clear. */
+CSSC_EX_EXPORT void cssc_mutier_free_table(int64_t is_public, int64_t pid) {
+    cssc_mutier_slot* s = cssc_mutier_get((int)is_public, (uint64_t)pid);
+    if (!s) return;
+    cssc_mutier_lock(s);
+    cssc_mutier_hdr* hd = (cssc_mutier_hdr*)s->base;
+    hd->magic = CSSC_MUTIER_MAGIC; hd->count = 0; hd->cap = CSSC_MUTIER_CAP; hd->pad = 0;
+    hd->heap_top = CSSC_MUTIER_DIR_MAX; hd->heap_cap = CSSC_MUTIER_HEAP;
+    uint32_t zero = 0;                              /* empty the key directory */
+    memcpy(s->base + CSSC_MUTIER_HEAP_BASE, &zero, 4);
+    cssc_mutier_unlock(s);
+}
+
 /* cssc::run(file) — execute a .cssc file through the CSSC "run" interpreter as
  * a child process; return 1 on success (child exit 0), 0 otherwise. Compiled
  * programs have no embedded interpreter, so this shells out to the toolchain
@@ -1815,6 +2066,32 @@ CSSC_EX_EXPORT int64_t cssc_ipcall(int64_t addr) {
     return fn();
 }
 
+/* COMPUTED DISPATCH WITH ARGS — `name(args)` where `name` holds a function
+ * ADDRESS (a captured `func[1]` / dispatch address). Calls the #define'd
+ * function at `addr` using the native call ABI: a leading i64 __nargs payload
+ * (here the plain COPY-arg count, high bits 0) followed by the positional i64
+ * args. Dispatches on argc to a correctly-typed function pointer so each arg
+ * lands in the right ABI slot. RAW by design: a non-function address (or a
+ * count past the target's arity) is UB — the user's responsibility. */
+CSSC_EX_EXPORT int64_t cssc_pccall(int64_t addr, int64_t argc,
+                                   int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                   int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
+    if (!addr) return 0;
+    intptr_t p = (intptr_t)addr;
+    typedef int64_t i64;
+    switch (argc) {
+    case 0:  return ((i64(*)(i64))p)(argc);
+    case 1:  return ((i64(*)(i64,i64))p)(argc, a0);
+    case 2:  return ((i64(*)(i64,i64,i64))p)(argc, a0, a1);
+    case 3:  return ((i64(*)(i64,i64,i64,i64))p)(argc, a0, a1, a2);
+    case 4:  return ((i64(*)(i64,i64,i64,i64,i64))p)(argc, a0, a1, a2, a3);
+    case 5:  return ((i64(*)(i64,i64,i64,i64,i64,i64))p)(argc, a0, a1, a2, a3, a4);
+    case 6:  return ((i64(*)(i64,i64,i64,i64,i64,i64,i64))p)(argc, a0, a1, a2, a3, a4, a5);
+    case 7:  return ((i64(*)(i64,i64,i64,i64,i64,i64,i64,i64))p)(argc, a0, a1, a2, a3, a4, a5, a6);
+    default: return ((i64(*)(i64,i64,i64,i64,i64,i64,i64,i64,i64))p)(argc, a0, a1, a2, a3, a4, a5, a6, a7);
+    }
+}
+
 /* String case/trim transforms for the v6 native backend (the emitted IR runtime
  * has size/get_byte/starts_with but not these). Each returns a fresh cssc_str. */
 extern int64_t cssc_string_size(void* cssc_str);
@@ -1841,6 +2118,17 @@ CSSC_EX_EXPORT void cssc_color_out(const char* data, int64_t len,
     fputs("\033[0m", stdout);
     if (newline) putchar('\n');
     fflush(stdout);
+}
+
+/* cssc.peek :: peek(collection, index, amount) on a STRING — the element at
+ * `index + amount` as a 1-char string, or "" (null) if out of bounds. Mirrors
+ * the interpreter's CsscPeekModule._peek: coll[index+amount] or None. */
+CSSC_EX_EXPORT void* cssc_peek_str(void* s, int64_t index, int64_t amount) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    int64_t t = index + amount;
+    if (!d || t < 0 || t >= n) return cssc_string_lit("", 0);
+    return cssc_string_lit(&d[t], 1);
 }
 
 CSSC_EX_EXPORT void* cssc_string_upper(void* s) {
@@ -1903,6 +2191,119 @@ CSSC_EX_EXPORT void* cssc_string_replace(void* s, void* oldp, void* newp) {
         } else buf[oi++] = d[i++];
     }
     void* r = cssc_string_lit(buf, (size_t)oi);
+    free(buf);
+    return r;
+}
+
+/* Append `x`'s bytes onto `s`, returning a fresh str with the concatenation.
+ * The receiver's variable slot is rebound to this result by the lowering (the
+ * in-place `.append` mutation); `x` is only read, never consumed. */
+CSSC_EX_EXPORT void* cssc_string_append(void* s, void* x) {
+    const char* d = (const char*)cssc_string_data(s);   int64_t n  = cssc_string_size(s);
+    const char* e = (const char*)cssc_string_data(x);   int64_t xn = cssc_string_size(x);
+    if (n < 0) n = 0;
+    if (xn < 0) xn = 0;
+    int64_t total = n + xn;
+    char* buf = (char*)malloc((size_t)(total > 0 ? total : 1));
+    if (!buf) return cssc_string_lit(d ? d : "", (size_t)n);
+    if (n > 0 && d) memcpy(buf, d, (size_t)n);
+    if (xn > 0 && e) memcpy(buf + n, e, (size_t)xn);
+    void* r = cssc_string_lit(buf, (size_t)total);
+    free(buf);
+    return r;
+}
+
+/* RAW byte at index `i` (0..255), no digit conversion — unlike
+   cssc_string_get_byte, which returns a digit's numeric VALUE. Used by the
+   char-class predicates / padding where the ASCII code is what matters. */
+CSSC_EX_EXPORT int64_t cssc_string_raw_byte(void* s, int64_t i) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (!d || i < 0 || i >= n) return 0;
+    return (int64_t)(unsigned char)d[i];
+}
+/* First index of `needle` in `s`, or -1. Empty needle → 0. */
+CSSC_EX_EXPORT int64_t cssc_string_indexof(void* s, void* needle) {
+    const char* d = (const char*)cssc_string_data(s);   int64_t n  = cssc_string_size(s);
+    const char* nd = (const char*)cssc_string_data(needle); int64_t nn = cssc_string_size(needle);
+    if (nn <= 0) return 0;
+    if (!d || !nd || nn > n) return -1;
+    for (int64_t i = 0; i + nn <= n; i++) {
+        int64_t j = 0;
+        while (j < nn && d[i + j] == nd[j]) j++;
+        if (j == nn) return i;
+    }
+    return -1;
+}
+/* 1 if `needle` occurs in `s`, else 0. */
+CSSC_EX_EXPORT int64_t cssc_string_contains(void* s, void* needle) {
+    return cssc_string_indexof(s, needle) >= 0 ? 1 : 0;
+}
+/* substring [start, start+len) — clamped; negative len = "to end". */
+CSSC_EX_EXPORT void* cssc_string_substr(void* s, int64_t start, int64_t len) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (!d || n <= 0) return cssc_string_lit("", 0);
+    if (start < 0) start = 0;
+    if (start > n) start = n;
+    if (len < 0 || start + len > n) len = n - start;
+    if (len < 0) len = 0;
+    return cssc_string_lit(d + start, (size_t)len);
+}
+/* `s` repeated `count` times. */
+CSSC_EX_EXPORT void* cssc_string_repeat(void* s, int64_t count) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (count <= 0 || n <= 0 || !d) return cssc_string_lit("", 0);
+    int64_t total = n * count;
+    char* buf = (char*)malloc((size_t)total);
+    if (!buf) return cssc_string_lit(d, (size_t)n);
+    for (int64_t k = 0; k < count; k++) memcpy(buf + k * n, d, (size_t)n);
+    void* r = cssc_string_lit(buf, (size_t)total);
+    free(buf);
+    return r;
+}
+/* Left-pad `s` to `width` with byte `padc` (0 → space). */
+CSSC_EX_EXPORT void* cssc_string_pad_start(void* s, int64_t width, int64_t padc) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (n < 0) n = 0;
+    if (n >= width) return cssc_string_lit(d ? d : "", (size_t)n);
+    char pc = padc ? (char)padc : ' ';
+    char* buf = (char*)malloc((size_t)width);
+    if (!buf) return cssc_string_lit(d ? d : "", (size_t)n);
+    int64_t pad = width - n;
+    for (int64_t i = 0; i < pad; i++) buf[i] = pc;
+    if (d && n > 0) memcpy(buf + pad, d, (size_t)n);
+    void* r = cssc_string_lit(buf, (size_t)width);
+    free(buf);
+    return r;
+}
+/* Right-pad `s` to `width` with byte `padc` (0 → space). */
+CSSC_EX_EXPORT void* cssc_string_pad_end(void* s, int64_t width, int64_t padc) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (n < 0) n = 0;
+    if (n >= width) return cssc_string_lit(d ? d : "", (size_t)n);
+    char pc = padc ? (char)padc : ' ';
+    char* buf = (char*)malloc((size_t)width);
+    if (!buf) return cssc_string_lit(d ? d : "", (size_t)n);
+    if (d && n > 0) memcpy(buf, d, (size_t)n);
+    for (int64_t i = n; i < width; i++) buf[i] = pc;
+    void* r = cssc_string_lit(buf, (size_t)width);
+    free(buf);
+    return r;
+}
+
+/* Reverse the bytes of `s`, returning a fresh str. */
+CSSC_EX_EXPORT void* cssc_string_reverse(void* s) {
+    const char* d = (const char*)cssc_string_data(s);
+    int64_t n = cssc_string_size(s);
+    if (n <= 0 || !d) return cssc_string_lit("", 0);
+    char* buf = (char*)malloc((size_t)n);
+    if (!buf) return cssc_string_lit(d, (size_t)n);
+    for (int64_t i = 0; i < n; i++) buf[i] = d[n - 1 - i];
+    void* r = cssc_string_lit(buf, (size_t)n);
     free(buf);
     return r;
 }
