@@ -164,6 +164,7 @@
     #req[ciObjFind] ciObjFind;
     #req[ciLineAt] ciLineAt;
     #req[ciRaiseNamed] ciRaiseNamed;
+    #req[ciRaiseSector] ciRaiseSector;
     #req[ciRaiseMsg] ciRaiseMsg;
     #req[ciRaise] ciRaise;
     #req[ciObjNameIs] ciObjNameIs;
@@ -716,7 +717,9 @@
                     if (mstdo == 1) { mknown = 1; }
                     if (mmou == 1) { mknown = 1; }
                     if (mknown == 0) {
-                        ciRaiseNamed("Unknown module: ", ciSrc + mo, ml, 0);
+                        #stack[int, 64] mln = ciLineAt(mo);
+                        ciRaiseNamed("Unknown module: ", ciSrc + mo, ml, mln);
+                        #delete[mln];
                     }
                     #delete[mknown];
                     if (modid > 0) {
@@ -3276,7 +3279,7 @@
                     }
                     if (uisc == 0) {
                         #stack[int, 64] uln = ciLineAt(o);
-                        ciRaiseNamed("Unknown namespace: ", ciSrc + o, uqcc, uln);
+                        ciRaiseSector(ciSrc + o, uqcc, uln);
                         #delete[uln];
                     }
                     #delete[uisc];
@@ -4833,6 +4836,40 @@
     cssc::free(db);
     #delete[p];
     #delete[tot];
+    return 0;
+}
+
+#define(ciRaiseSector) {
+    #scanp(ciRaiseSector, int, 0) nameAddr;
+    #scanp(ciRaiseSector, int, 1) nameLen;
+    #scanp(ciRaiseSector, int, 2) line;
+    #req[ciAppLit] ciAppLit;
+    #req[ciRaise] ciRaise;
+    #stack[int, 64] db = cssc::alloc(nameLen + nameLen + 600);
+    #stack[int, 64] p1 = ciAppLit(db, 0, "Unknown sector: ");
+    #stack[int, 32] q = 0;
+    while (q < nameLen) {
+        cssc::poke8(db + p1 + q, cssc::peek8(nameAddr + q));
+        q = q + 1;
+    }
+    #delete[q];
+    #stack[int, 64] p2 = p1 + nameLen;
+    #stack[int, 64] p3 = ciAppLit(db, p2, " (declare, #include or #load it before `");
+    #stack[int, 32] q2 = 0;
+    while (q2 < nameLen) {
+        cssc::poke8(db + p3 + q2, cssc::peek8(nameAddr + q2));
+        q2 = q2 + 1;
+    }
+    #delete[q2];
+    #stack[int, 64] p4 = p3 + nameLen;
+    #stack[int, 64] p5 = ciAppLit(db, p4, "::` access)");
+    ciRaise(db, p5, line, 0);
+    cssc::free(db);
+    #delete[p1];
+    #delete[p2];
+    #delete[p3];
+    #delete[p4];
+    #delete[p5];
     return 0;
 }
 

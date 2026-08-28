@@ -37,6 +37,8 @@
 #stack[int, 64] txCirCap = 0;
 #stack[int, 64] txSsaNext = 0;     // next SSA value id
 #stack[int, 64] txSlotNext = 0;    // next stack-slot id
+#stack[int, 64] txSlotBits = 0;    // per-slot declared int/bool bit width (0 = none/implicit);
+                                   // set at an int/bool DECL, read by the ASSIGN bit-exact check
 #stack[int, 64] txLabelNext = 0;   // next branch-label id
 #stack[int, 64] txValBool = 0;     // per-SSA: 1 if the value is a bool (0/1)
 
@@ -139,6 +141,7 @@
     #req[txCirCap] txCirCap;
     #req[txSsaNext] txSsaNext;
     #req[txSlotNext] txSlotNext;
+    #req[txSlotBits] txSlotBits;
     #req[txLabelNext] txLabelNext;
     #req[txValBool] txValBool;
     #req[txValStr] txValStr;
@@ -186,7 +189,7 @@
     // object heap and alloc returned 0 -> a null write). 65536 is still ~10x what
     // a 1000-line program needs, and halves both the RAM and the per-compile
     // memfill cost (which is what makes an on-metal `build` feel slow).
-    txCirCap = 65536;
+    txCirCap = 262144;
     txCirOp = cssc::alloc(txCirCap * 8);
     txCirRes = cssc::alloc(txCirCap * 8);
     txCirImm = cssc::alloc(txCirCap * 8);
@@ -194,6 +197,7 @@
     txCirB = cssc::alloc(txCirCap * 8);
     txCirSOff = cssc::alloc(txCirCap * 8);
     txCirSLen = cssc::alloc(txCirCap * 8);
+    txSlotBits = cssc::alloc(txCirCap * 8);
     cssc::memfill32(txCirOp, 0, txCirCap * 2);
     cssc::memfill32(txCirRes, 0, txCirCap * 2);
     cssc::memfill32(txCirImm, 0, txCirCap * 2);
@@ -240,7 +244,7 @@
     txSlotStr = cssc::alloc(txCirCap * 8);
     cssc::memfill32(txSlotStr, 0, txCirCap * 2);
     // M4: function table + call-arg side-table
-    txFuncCap = 16384;
+    txFuncCap = 65536;
     txFuncNameOff = cssc::alloc(txFuncCap * 8);
     txFuncNameLen = cssc::alloc(txFuncCap * 8);
     txFuncAstNode = cssc::alloc(txFuncCap * 8);
@@ -253,10 +257,10 @@
     cssc::memfill32(txFuncParamByRef, 0, txFuncCap * 16);
     txFuncEntryOff = cssc::alloc(txFuncCap * 8);
     txFuncCount = 0;
-    txCallArgCap = 131072;
+    txCallArgCap = 1048576;
     txCallArg = cssc::alloc(txCallArgCap * 8);
     txCallArgCount = 0;
-    txGlobCap = 16384;
+    txGlobCap = 65536;
     txGlobNameOff = cssc::alloc(txGlobCap * 8);
     txGlobNameLen = cssc::alloc(txGlobCap * 8);
     txGlobStr = cssc::alloc(txGlobCap * 8);
@@ -591,8 +595,11 @@
     #req[txGlobNameOff] txGlobNameOff;
     #req[txGlobNameLen] txGlobNameLen;
     #req[txGlobCount] txGlobCount;
+    #req[txGlobCap] txGlobCap;
+    #req[txCapBad] txCapBadG;
     #stack[int, 64] i = txGlobCount;
-    txGlobCount = txGlobCount + 1;
+    if (i >= txGlobCap) { i = txGlobCap - 1; txCapBadG = 1; }   // OVERFLOW -> flag + clamp
+    if (i == txGlobCount) { txGlobCount = txGlobCount + 1; }
     cssc::poke64(txGlobNameOff + i * 8, 0);
     cssc::poke64(txGlobNameLen + i * 8, 0);
     return i;
@@ -638,8 +645,11 @@
     #req[txFuncArity] txFuncArity;
     #req[txFuncEntryOff] txFuncEntryOff;
     #req[txFuncCount] txFuncCount;
+    #req[txFuncCap] txFuncCap;
+    #req[txCapBad] txCapBadFn;
     #stack[int, 64] i = txFuncCount;
-    txFuncCount = txFuncCount + 1;
+    if (i >= txFuncCap) { i = txFuncCap - 1; txCapBadFn = 1; }   // OVERFLOW -> flag + clamp
+    if (i == txFuncCount) { txFuncCount = txFuncCount + 1; }
     #stack[int, 64] o = i * 8;
     cssc::poke64(txFuncNameOff + o, nameOff);
     cssc::poke64(txFuncNameLen + o, nameLen);
@@ -665,6 +675,7 @@
     #req[txCirCount] txCirCount;
     #req[txSsaNext] txSsaNext;
     #req[txSlotNext] txSlotNext;
+    #req[txSlotBits] txSlotBits;
     #req[txValBool] txValBool;
     #req[txValStr] txValStr;
     #req[txValOwned] txValOwned;
@@ -832,6 +843,7 @@
     #req[txCirCount] txCirCount;
     #req[txSsaNext] txSsaNext;
     #req[txSlotNext] txSlotNext;
+    #req[txSlotBits] txSlotBits;
     cssc::poke64(txFuncCirEnd + i * 8, txCirCount);
     cssc::poke64(txFuncSsaCount + i * 8, txSsaNext);
     cssc::poke64(txFuncSlotCount + i * 8, txSlotNext);
@@ -889,8 +901,11 @@
     #scanp(txCallArgAppend, int, 0) sid;
     #req[txCallArg] txCallArg;
     #req[txCallArgCount] txCallArgCount;
+    #req[txCallArgCap] txCallArgCapA;
+    #req[txCapBad] txCapBadCA;
     #stack[int, 64] i = txCallArgCount;
-    txCallArgCount = txCallArgCount + 1;
+    if (i >= txCallArgCapA) { i = txCallArgCapA - 1; txCapBadCA = 1; }   // OVERFLOW -> flag + clamp
+    if (i == txCallArgCount) { txCallArgCount = txCallArgCount + 1; }
     cssc::poke64(txCallArg + i * 8, sid);
     #delete[i];
     return txCallArgCount - 1;
@@ -907,6 +922,23 @@
     #req[txCirEmit] txCirEmit;
     txCirEmit(12, res, funcIdx, argStart, argCount, 0, 0) r;
     #delete[r];
+}
+
+// CALL_RTN (op 40): runtime rtsym call with N args from the side-table slice
+// [argStart, argStart+argCount) into SysV registers (rdi/rsi/rdx/rcx/r8/r9)
+// then the stack (>6). Returns a fresh result SSA (ignored for void methods).
+// Used for gui:: methods, which take up to 6 args (self + 5).
+#stack[int, 64] txCirCallRtN;
+#define(txCirCallRtN) {
+    #scanp(txCirCallRtN, int, 0) sym;
+    #scanp(txCirCallRtN, int, 1) argStart;
+    #scanp(txCirCallRtN, int, 2) argCount;
+    #req[txNewSsa] txNewSsa;
+    #req[txCirEmit] txCirEmit;
+    txNewSsa() id;
+    txCirEmit(40, id, sym, argStart, argCount, 0, 0) r;
+    #delete[r];
+    return id;
 }
 
 #stack[int, 64] txNewLabel;
@@ -943,8 +975,10 @@
 #stack[int, 64] txNewSlot;
 #define(txNewSlot) {
     #req[txSlotNext] txSlotNext;
+    #req[txSlotBits] txSlotBits;
     #stack[int, 64] id = txSlotNext;
     txSlotNext = txSlotNext + 1;
+    cssc::poke64(txSlotBits + id * 8, 0);   // slots reuse ids across functions -> clear stale bits
     return id;
 }
 
@@ -967,12 +1001,12 @@
     #req[txCirSLen] txCirSLen;
     #req[txCirCount] txCirCount;
     #req[txCirCap] txCirCap;
+    #req[txCapBad] txCapBadC;
     #stack[int, 64] r = txCirCount;
-    // clamp instead of running off the end of the 22 parallel columns: an
-    // over-cap program then emits WRONG code, but never corrupts the heap
-    // (same warn-not-crash rule txAstNew uses). Without this the only symptom
-    // was memory corruption far from the cause.
-    if (r >= txCirCap) { r = txCirCap - 1; }
+    // OVERFLOW -> flag + clamp: an over-cap program would otherwise emit WRONG
+    // code silently. The flag makes main.cssc abort the emit visibly instead;
+    // the clamp still guards the heap (never runs off the 22 parallel columns).
+    if (r >= txCirCap) { r = txCirCap - 1; txCapBadC = 1; }
     if (r == txCirCount) { txCirCount = txCirCount + 1; }
     #stack[int, 64] o = r * 8;
     cssc::poke64(txCirOp + o, op);

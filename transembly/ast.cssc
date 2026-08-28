@@ -77,12 +77,24 @@
 #stack[int, 64] txAstLen = 0;
 #stack[int, 64] txAstNext = 0;
 #stack[int, 64] txDeclTrap = 0;     // per-DECL node: 1 = a `string` literal overflows
+#stack[int, 64] txDeclBits = 0;     // per-DECL node: declared scalar bit width N (0 = implicit)
+#stack[int, 64] txDeclHeap = 0;     // per-DECL node: 1 = `#heap` decl (else #stack / #auto)
+#stack[int, 64] txPendHeap = 0;     // parse signal: heap-ness of the DECL currently being built
                                     // its declared bits -> emit a RUNTIME trap when the
                                     // decl executes (matches the interpreter, whose bit
                                     // limit is a runtime error, NOT a compile rejection --
                                     // so error-path over-long strings never block build).
 #stack[int, 64] txAstCount = 0;
 #stack[int, 64] txAstCap = 0;
+
+// ★ CAPACITY OVERFLOW flag. The compiler's growth tables (AST, CIR, functions,
+// globals, symbols, code, string data, fixups) are fixed-size and historically
+// CLAMPED silently on overflow ("warn-not-crash") -- which produced binaries
+// that look successful but are truncated/wrong. Every clamp now sets this flag;
+// main.cssc checks it and ABORTS the emit with a visible error instead, so an
+// over-cap program never yields a silently-broken container/object. A caller
+// (e.g. CCOS building a large kernel) then knows to split it into modules.
+#stack[int, 64] txCapBad = 0;
 
 #stack[int, 64] txAstInit;
 #define(txAstInit) {
@@ -95,9 +107,11 @@
     #req[txAstLen] txAstLen;
     #req[txAstNext] txAstNext;
     #req[txDeclTrap] txDeclTrap;
+    #req[txDeclBits] txDeclBits;
+    #req[txDeclHeap] txDeclHeap;
     #req[txAstCount] txAstCount;
     #req[txAstCap] txAstCap;
-    txAstCap = 65536;
+    txAstCap = 262144;
     txAstKind = cssc::alloc(txAstCap * 8);
     txAstA = cssc::alloc(txAstCap * 8);
     txAstB = cssc::alloc(txAstCap * 8);
@@ -108,6 +122,10 @@
     txAstNext = cssc::alloc(txAstCap * 8);
     txDeclTrap = cssc::alloc(txAstCap * 8);
     cssc::memfill32(txDeclTrap, 0, txAstCap * 2);
+    txDeclBits = cssc::alloc(txAstCap * 8);
+    cssc::memfill32(txDeclBits, 0, txAstCap * 2);
+    txDeclHeap = cssc::alloc(txAstCap * 8);
+    cssc::memfill32(txDeclHeap, 0, txAstCap * 2);
     cssc::memfill32(txAstKind, 0, txAstCap * 2);
     cssc::memfill32(txAstA, 0, txAstCap * 2);
     cssc::memfill32(txAstB, 0, txAstCap * 2);
@@ -134,8 +152,9 @@
     #req[txAstNext] txAstNext;
     #req[txAstCount] txAstCount;
     #req[txAstCap] txAstCap;
+    #req[txCapBad] txCapBadA;
     #stack[int, 64] id = txAstCount;
-    if (id >= txAstCap) { id = txAstCap - 1; }   // clamp (never OOB; warn-not-crash)
+    if (id >= txAstCap) { id = txAstCap - 1; txCapBadA = 1; }   // OVERFLOW -> flag + clamp (never OOB)
     if (id == txAstCount) { txAstCount = txAstCount + 1; }
     #stack[int, 64] o = id * 8;
     cssc::poke64(txAstKind + o, kind);

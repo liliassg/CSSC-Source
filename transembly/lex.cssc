@@ -62,13 +62,12 @@
                 txPos = txPos + 1;
             }
             if (isws == 0) {
-                #stack[int, 32] iscomment = 0;
+                #stack[int, 32] iscomment = 0;                  // 1 = `//` line, 2 = `/* */` block
                 if (c == 47) {
                     if (txPos + 1 < txSrcLen) {
                         #stack[int, 64] c2 = cssc::peek8(txSrc + txPos + 1);
-                        if (c2 == 47) {
-                            iscomment = 1;
-                        }
+                        if (c2 == 47) { iscomment = 1; }        // '//'
+                        if (c2 == 42) { iscomment = 2; }        // '/*'
                         #delete[c2];
                     }
                 }
@@ -84,6 +83,20 @@
                         }
                     }
                     #delete[cs];
+                }
+                if (iscomment == 2) {                           // skip through the closing '*/'
+                    txPos = txPos + 2;                          // past the opening '/*'
+                    #stack[int, 32] bs = 1;
+                    while (bs == 1) {
+                        if (txPos + 1 >= txSrcLen) { txPos = txSrcLen; bs = 0; }
+                        if (bs == 1) {
+                            if (cssc::peek8(txSrc + txPos) == 42) {
+                                if (cssc::peek8(txSrc + txPos + 1) == 47) { txPos = txPos + 2; bs = 0; }
+                                else { txPos = txPos + 1; }
+                            } else { txPos = txPos + 1; }
+                        }
+                    }
+                    #delete[bs];
                 }
                 if (iscomment == 0) {
                     skipping = 0;
@@ -101,6 +114,13 @@
     if (txPos < txSrcLen) {
         #stack[int, 64] c = cssc::peek8(txSrc + txPos);
         #stack[int, 32] done = 0;
+        // Default every token's source offset to its FIRST byte. Idents/strings
+        // override below (a string points INSIDE its quotes); numbers, operators
+        // and punctuation ('{' '}' ';' ',' ...) keep this -- without it a
+        // punctuation token inherited the PREVIOUS token's stale offset, so a
+        // block's closing '}' reported the last statement's position and a scope's
+        // end line fell short of the brace (breaking cursor-past-last-stmt lookup).
+        txTokOff = txPos;
         // NUMBER: decimal, or hex when prefixed with 0x / 0X
         if (c >= 48) {
             if (c <= 57) {
@@ -292,8 +312,15 @@
                     if (txPos >= txSrcLen) { rd = 0; }
                     if (rd == 1) {
                         #stack[int, 64] d = cssc::peek8(txSrc + txPos);
-                        if (d == 34) { rd = 0; }
-                        if (d != 34) { txPos = txPos + 1; }
+                        // a backslash escapes the next byte (so `\"` does NOT end
+                        // the string, `\\` keeps both); the escape VALUES are
+                        // decoded later by txStrEsc. Skip the pair here so the
+                        // raw span spans the whole literal.
+                        if (d == 92) { txPos = txPos + 2; }
+                        if (d != 92) {
+                            if (d == 34) { rd = 0; }
+                            if (d != 34) { txPos = txPos + 1; }
+                        }
                         #delete[d];
                     }
                 }
@@ -503,6 +530,9 @@
             txLexRaw();
             if (txCur == 0) { go = 0; }
             if (go == 1) {
+                // this token can't fit -> it would be SILENTLY DROPPED (the old
+                // behaviour, which truncated large programs). Flag the overflow.
+                if (txTokCount >= txTokCap) { #req[txCapBad] txCapBadTk; txCapBadTk = 1; }
                 if (txTokCount < txTokCap) {
                     cssc::poke8(txTokCode + txTokCount, txCur);
                     cssc::poke64(txTokNumA + txTokCount * 8, txTokNum);
@@ -567,7 +597,7 @@
     #req[txTokLen] txTokLen;
     // 18 B/token across 5 columns. 262144 was 4.7 MiB of pure init-memfill on
     // every compile; 131072 tokens still covers a ~5000-line source.
-    txTokCap = 131072;
+    txTokCap = 2097152;   // ~2M tokens (was 131072 -> silently truncated a >~0.5 MB program)
     txTokCode = cssc::alloc(txTokCap);          // 1 byte / token
     txTokNumA = cssc::alloc(txTokCap * 8);      // 8 bytes / token
     txTokFlag = cssc::alloc(txTokCap);          // 1 byte / token

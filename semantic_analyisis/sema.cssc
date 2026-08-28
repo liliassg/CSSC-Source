@@ -86,6 +86,11 @@
 #stack[int, 64] txCompDirBuf = 0;
 #stack[int, 64] txCompDirLen = 0;
 #stack[int, 64] txCompLoadDefs;
+// last `#load[path] alias` before the cursor whose alias matched (path span in
+// txSrc), set by txLoadPathAt; valid only when it returns 1 (alias still loaded).
+#stack[int, 64] txLoadPathO = 0;
+#stack[int, 64] txLoadPathL = 0;
+#stack[int, 64] txLoadPathAt;
 #stack[int, 64] txSemaVisit;
 #stack[int, 64] txSemaVisitChain;
 #stack[int, 64] txSemaBuild;
@@ -97,11 +102,14 @@
 #stack[int, 64] txExtLen = 0;
 #stack[int, 64] txExtCap = 0;
 #stack[int, 64] txHasProject = 0;
+#stack[int, 64] txDirDeclBuf = 0;    // '\n'-joined names declared by container/
+#stack[int, 64] txDirDeclLen = 0;    // peripheral directives the sema parser skips
 #stack[int, 64] txExtInit;
 #stack[int, 64] txExtAdd;
 #stack[int, 64] txExtNamed;
 #stack[int, 64] txLitAt;
 #stack[int, 64] txScanDefs;
+#stack[int, 64] txScanModMembers;
 #stack[int, 64] txScanProject;
 // 1 while emitting a signature label as HOVER text (suppress the "active:" line).
 #stack[int, 64] txSigNoActive = 0;
@@ -715,8 +723,15 @@
 #stack[int, 64] txLeakAddDel;
 #stack[int, 64] txLeakCollectDeletes;
 #stack[int, 64] txLeakIsCallable;
+#stack[int, 64] txSrcHasModule;
 #stack[int, 64] txLeakScan;
 #stack[int, 64] txDanglingScan;
+#stack[int, 64] txUnknownVarWalk;
+#stack[int, 64] txForInitNamed;
+#stack[int, 64] txKnownName;
+#stack[int, 64] txCollectDirDecls;
+#stack[int, 64] txDirDeclNamed;
+#stack[int, 64] txDeclBufAdd;
 
 // Access-operator lints (need the symbol table + scope-owner-kind + resolver).
 //   NS_ACCESS_ON_OBJECT  `Obj::m` / `inst::m()` — `::` used on an object.
@@ -734,6 +749,7 @@
 #stack[int, 64] txIsStmtEndOk;
 #stack[int, 64] txIsStmtOpOk;
 #stack[int, 64] txMissingSemiScan;
+#stack[int, 64] txBlankBlockComments;
 
 // register a delete target: the full name AND (for `Obj->member`) the leaf
 // member name after the last `->`, so an object-member DECL (stored as the bare
@@ -827,18 +843,49 @@
     return r;
 }
 
-// 1 if `name` (off,len) is handed back by some `return name` / `return &name`.
-// A returned slot's ownership passes to the caller, so it is NOT a leak.
+// 1 if expression node `nd`, once any leading `&` (MIRROR) is stripped, is a bare
+// IDENT whose name span == (off,len). The unit test both the direct `return name`
+// and each element of a `return {..}` set are checked against.
+#stack[int, 64] txRetIdentIs;
+#define(txRetIdentIs) {
+    #scanp(txRetIdentIs, int, 0) off;
+    #scanp(txRetIdentIs, int, 1) len;
+    #scanp(txRetIdentIs, int, 2) nd;
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 32] r = 0;
+    if (nd != 0) {
+        #stack[int, 64] idn = nd;
+        if (cssc::peek64(txAstKind + nd * 8) == 32) { idn = cssc::peek64(txAstA + nd * 8); }  // MIRROR &x -> inner
+        if (idn != 0) {
+            if (cssc::peek64(txAstKind + idn * 8) == 5) {         // IDENT
+                txDdSpanEq(off, len, cssc::peek64(txAstOff + idn * 8), cssc::peek64(txAstLen + idn * 8)) eq;
+                if (eq == 1) { r = 1; }
+                #delete[eq];
+            }
+        }
+        #delete[idn];
+    }
+    return r;
+}
+
+// 1 if `name` (off,len) is handed back by some `return name` / `return &name` /
+// `return {.. name ..}` (a set/return-tuple). A returned slot's ownership passes
+// to the caller, so it is NOT a leak. The `{..}` set parses to an ARRAY_LIT(22) /
+// MAP_LIT(24) whose elements chain through Next (matching the Python reference,
+// which treats any name in a return set as escaped).
 #stack[int, 64] txNameReturned;
 #define(txNameReturned) {
     #scanp(txNameReturned, int, 0) off;
     #scanp(txNameReturned, int, 1) len;
     #req[txAstKind] txAstKind;
     #req[txAstA] txAstA;
-    #req[txAstOff] txAstOff;
-    #req[txAstLen] txAstLen;
+    #req[txAstNext] txAstNext;
     #req[txAstCount] txAstCount;
-    #req[txDdSpanEq] txDdSpanEq;
+    #req[txRetIdentIs] txRetIdentIs;
     #stack[int, 32] r = 0;
     #stack[int, 64] i = 1;
     #stack[int, 32] go = 1;
@@ -848,20 +895,75 @@
             if (cssc::peek64(txAstKind + i * 8) == 20) {          // RETURN
                 #stack[int, 64] a = cssc::peek64(txAstA + i * 8);
                 if (a != 0) {
-                    #stack[int, 64] idn = a;
-                    if (cssc::peek64(txAstKind + a * 8) == 32) { idn = cssc::peek64(txAstA + a * 8); }  // MIRROR &x -> inner
-                    if (idn != 0) {
-                        if (cssc::peek64(txAstKind + idn * 8) == 5) {     // IDENT
-                            txDdSpanEq(off, len, cssc::peek64(txAstOff + idn * 8), cssc::peek64(txAstLen + idn * 8)) eq;
-                            if (eq == 1) { r = 1; }
-                            #delete[eq];
+                    txRetIdentIs(off, len, a) d1;                 // return name; / return &name;
+                    if (d1 == 1) { r = 1; }
+                    #delete[d1];
+                    #stack[int, 64] ak = cssc::peek64(txAstKind + a * 8);
+                    if (ak == 22) { ak = 100; }                   // ARRAY_LIT  -> walk elements
+                    if (ak == 24) { ak = 100; }                   // MAP_LIT    -> walk elements
+                    if (ak == 100) {                              // return {.. name ..};
+                        #stack[int, 64] e = cssc::peek64(txAstA + a * 8);
+                        #stack[int, 32] eg = 1;
+                        while (eg == 1) {
+                            if (e == 0) { eg = 0; }
+                            if (eg == 1) {
+                                txRetIdentIs(off, len, e) de;
+                                if (de == 1) { r = 1; }
+                                #delete[de];
+                                e = cssc::peek64(txAstNext + e * 8);
+                            }
                         }
+                        #delete[e];
+                        #delete[eg];
                     }
-                    #delete[idn];
+                    #delete[ak];
                 }
                 #delete[a];
             }
             i = i + 1;
+        }
+    }
+    #delete[i];
+    #delete[go];
+    return r;
+}
+
+// 1 if the source declares itself a module via a top-level `#MODULE;` directive.
+// A module's GLOBALS (variables AND #include/#load imports) are owned by whoever
+// #loaded it and are freed by that importer's #unload — so this file must not be
+// nagged to free them (and the cleanup must not insert those frees). Scans the
+// raw bytes (the parser skips unknown directives, leaving no AST node). The word
+// boundary check keeps `#MODULES...` from matching.
+#define(txSrcHasModule) {
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txSpanEqLit] txSpanEqLit;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] r = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txSrcLen) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek8(txSrc + i) == 35) {                 // '#'
+                if (i + 7 <= txSrcLen) {
+                    txSpanEqLit(i + 1, 6, "MODULE") m;
+                    if (m == 1) {
+                        #stack[int, 32] bound = 1;              // must not be part of a longer word
+                        if (i + 7 < txSrcLen) {
+                            #stack[int, 64] c = cssc::peek8(txSrc + i + 7);
+                            if (c >= 65) { if (c <= 90) { bound = 0; } }
+                            if (c >= 97) { if (c <= 122) { bound = 0; } }
+                            if (c >= 48) { if (c <= 57) { bound = 0; } }
+                            if (c == 95) { bound = 0; }
+                            #delete[c];
+                        }
+                        if (bound == 1) { r = 1; go = 0; }
+                        #delete[bound];
+                    }
+                    #delete[m];
+                }
+            }
+            if (go == 1) { i = i + 1; }
         }
     }
     #delete[i];
@@ -882,16 +984,21 @@
     #req[txDdKeyCol] txDdKeyCol;
     #req[txSemaScopeOwnerOff] txSemaScopeOwnerOff;
     #req[txSemaScopeOwnerLen] txSemaScopeOwnerLen;
+    #req[txSemaScopeOwnerKind] txSemaScopeOwnerKind;
     #req[txSemaSymNode] txSemaSymNode;
     #req[txAstKind] txAstKind;
     #req[txAstA] txAstA;
     #req[txAstOff] txAstOff;
     #req[txAstLen] txAstLen;
+    #req[txAstNum] txAstNum;
     #req[txAstCount] txAstCount;
     #req[txScopeAt] txScopeAt;
     #req[txOwnResolve] txOwnResolve;
+    #req[txOwnResolveAt] txOwnResolveAt;
     #req[txFuncIsRefRet] txFuncIsRefRet;
     #req[txNameReturned] txNameReturned;
+    #req[txSrcHasModule] txSrcHasModule;
+    txSrcHasModule() isMod;       // `#MODULE;` -> don't nag about global cleanup
     // SCOPE-AWARE deleted-set: for every #delete/#free node, resolve its target
     // to the specific in-scope symbol (txOwnResolve walks scope->parent) and mark
     // that symbol freed. This replaces the name-agnostic txDdFind self-check that
@@ -916,13 +1023,40 @@
                 #stack[int, 64] dlen = cssc::peek64(txAstLen + di * 8);
                 txSemaLineOf(doff) dline;
                 txScopeAt(dline) dscope;
-                txOwnResolve(doff, dlen, dscope) gid;
+                txOwnResolveAt(doff, dlen, dscope, doff) gid;
                 if (gid >= 0) { cssc::poke64(freed + gid * 8, 1); }
                 #delete[doff];
                 #delete[dlen];
                 #delete[dline];
                 #delete[dscope];
                 #delete[gid];
+            }
+            // A standalone `mirror x` (or `mirror *x`) in REFERENCE form (Num==0)
+            // hands its operand OUT — the caller references it, so the local is
+            // intentionally not #delete'd and must NOT be flagged as a leak. The
+            // `&`-copy form (Num==1) keeps the local owned, so it stays leak-checked.
+            // `return` is handled separately by txNameReturned. Mirrors the escape
+            // marking in txOwnershipEmit so sema_diag and sema_own agree.
+            if (dk == 32) {
+                if (cssc::peek64(txAstNum + di * 8) == 0) {
+                    #stack[int, 64] mval = cssc::peek64(txAstA + di * 8);
+                    if (mval != 0) {
+                        if (cssc::peek64(txAstKind + mval * 8) == 5) {   // bare identifier operand
+                            #stack[int, 64] moff = cssc::peek64(txAstOff + mval * 8);
+                            #stack[int, 64] mlen = cssc::peek64(txAstLen + mval * 8);
+                            txSemaLineOf(moff) mln;
+                            txScopeAt(mln) msc;
+                            txOwnResolveAt(moff, mlen, msc, moff) mgid;
+                            if (mgid >= 0) { cssc::poke64(freed + mgid * 8, 1); }
+                            #delete[mgid];
+                            #delete[msc];
+                            #delete[mln];
+                            #delete[moff];
+                            #delete[mlen];
+                        }
+                    }
+                    #delete[mval];
+                }
             }
             #delete[dk];
             #delete[isdel];
@@ -948,14 +1082,20 @@
                     txLeakIsCallable(off, len, scope) callable;
                     #stack[int, 64] del = 0 - 1;
                     if (cssc::peek64(freed + i * 8) == 1) { del = 0; }   // scope-aware: this symbol was #delete/#free'd
-                    // an object member is freed when its owning object is
-                    // (`#delete[Obj->m]` is stored by the parser as just `Obj`).
+                    // a SECTOR member is freed when its owning sector is (`#free[Sec]`
+                    // runs the sector's free block). OBJECT members are NOT freed by
+                    // deleting the object: `#delete[Obj->m]` frees the specific member
+                    // (parser stores the member name), and `#delete[Obj]` leaves the
+                    // members leaking -- matching the runtime + Python reference. So
+                    // owner-free applies to sectors (ownerKind 4) only.
                     #stack[int, 64] ownerLen = cssc::peek64(txSemaScopeOwnerLen + scope * 8);
                     #stack[int, 64] ownerDel = 0 - 1;
-                    if (ownerLen > 0) {
-                        txDdFind(cssc::peek64(txSemaScopeOwnerOff + scope * 8), ownerLen) od;
-                        ownerDel = od;
-                        #delete[od];
+                    if (cssc::peek64(txSemaScopeOwnerKind + scope * 8) == 4) {
+                        if (ownerLen > 0) {
+                            txDdFind(cssc::peek64(txSemaScopeOwnerOff + scope * 8), ownerLen) od;
+                            ownerDel = od;
+                            #delete[od];
+                        }
                     }
                     // A result-capture of a ref-returning user #define is a
                     // borrow, not a leak (matches the ownership map).
@@ -1007,6 +1147,9 @@
                     }
                 }
                 if (dtm == 9) {                            // MODULE_LEAK: unfreed #include/#load/#depend (any scope)
+                    #stack[int, 32] modSkip = 0;           // in a #MODULE file the importer's #unload frees globals
+                    if (isMod == 1) { if (scope == 0) { modSkip = 1; } }
+                    if (modSkip == 0) {
                     if (cssc::peek64(freed + i * 8) == 0) {  // scope-aware: not #free'd / #unload'd
                         #stack[int, 64] moff = cssc::peek64(txSemaSymOff + o);
                         txSemaLineOf(moff) mline;
@@ -1020,6 +1163,8 @@
                         #delete[mcol];
                         #delete[moff];
                     }
+                    }
+                    #delete[modSkip];
                 }
                 #delete[dtm];
             }
@@ -1088,6 +1233,162 @@
                     }
                     #delete[a];
                 }
+            }
+            i = i + 1;
+        }
+    }
+    #delete[i];
+    #delete[go];
+}
+
+// ===========================================================================
+//  DANGLING_STORE — a live reference to `x` is stored into a container `c`
+//  (`c.push_back(x)` bare = ref, or `c.push_back(*x)`), then `x` is `#delete`d
+//  while `c` is NEVER freed (it escapes / outlives the delete). In the cell
+//  model a stored reference survives scope exit, so the ONLY way it dangles is
+//  an explicit `#delete[x]` — after which `c` holds a reference reading 0x0.
+//  `c.push_back(&x)` (COPY, kind 27) is safe and never flagged; a container
+//  that is itself `#delete`d anywhere is assumed managed and suppressed (zero
+//  FP against the registry pattern `g.push_back({*a, *b})`, whose referents
+//  are params, and against `dump.push_back(&abs)` copies). WARNING severity 1.
+//  New code, not in the parity SEMA_CODES set -> parity-neutral.
+// ===========================================================================
+#stack[int, 64] txDangStoreRefName;
+// referent span carried by a store method's first arg, or -1 len if none.
+// bare IDENT(5) => the name itself; `*x` parses as BINARY(6,op=3) with a null
+// left and an IDENT right => the right operand's name; anything else => none.
+#define(txDangStoreRefName) {
+    #scanp(txDangStoreRefName, int, 0) arg;
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    #req[txAstNum] txAstNum;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #stack[int, 64] r = 0 - 1;
+    if (arg != 0) {
+        #stack[int, 64] ak = cssc::peek64(txAstKind + arg * 8);
+        if (ak == 5) { r = arg; }
+        if (ak == 6) {
+            if (cssc::peek64(txAstNum + arg * 8) == 3) {
+                if (cssc::peek64(txAstA + arg * 8) == 0) {
+                    #stack[int, 64] rb = cssc::peek64(txAstB + arg * 8);
+                    if (rb != 0) {
+                        if (cssc::peek64(txAstKind + rb * 8) == 5) { r = rb; }
+                    }
+                    #delete[rb];
+                }
+            }
+        }
+        #delete[ak];
+    }
+    return r;
+}
+
+#stack[int, 64] txDanglingStore;
+#define(txDanglingStore) {
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstCount] txAstCount;
+    #req[txMethodInLit] txMethodInLit;
+    #req[txDdSpanEq] txDdSpanEq;
+    #req[txSemaLineOf] txSemaLineOf;
+    #req[txSemaColOf] txSemaColOf;
+    #req[txDangStoreRefName] txDangStoreRefName;
+    #req[txSrc] txSrc;
+    #stack[int, 64] i = 1;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txAstCount) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek64(txAstKind + i * 8) == 23) {          // METHOD_CALL
+                #stack[int, 64] mo = cssc::peek64(txAstOff + i * 8);
+                #stack[int, 64] ml = cssc::peek64(txAstLen + i * 8);
+                txMethodInLit(mo, ml, "push_back\npush_front\ninsert\nappend\nset\nemplace_back\nemplace_front\npush\npushafter") isStore;
+                if (isStore == 1) {
+                    #stack[int, 64] recv = cssc::peek64(txAstB + i * 8);
+                    #stack[int, 64] arg = cssc::peek64(txAstA + i * 8);
+                    #stack[int, 32] ok = 0;
+                    if (recv != 0) { if (cssc::peek64(txAstKind + recv * 8) == 5) { ok = 1; } }
+                    if (ok == 1) {
+                        txDangStoreRefName(arg) refn;
+                        if (refn >= 0) {
+                            #stack[int, 64] contOff = cssc::peek64(txAstOff + recv * 8);
+                            #stack[int, 64] contLen = cssc::peek64(txAstLen + recv * 8);
+                            #stack[int, 64] refOff = cssc::peek64(txAstOff + refn * 8);
+                            #stack[int, 64] refLen = cssc::peek64(txAstLen + refn * 8);
+                            txSemaLineOf(mo) storeLine;
+                            // scan every DELETE: is the referent freed AFTER the
+                            // store, and is the container itself ever freed?
+                            #stack[int, 64] refDelOff = 0 - 1;
+                            #stack[int, 64] refDelLine = 0;
+                            #stack[int, 32] contFreed = 0;
+                            #stack[int, 64] j = 1;
+                            #stack[int, 32] jg = 1;
+                            while (jg == 1) {
+                                if (j >= txAstCount) { jg = 0; }
+                                if (jg == 1) {
+                                    if (cssc::peek64(txAstKind + j * 8) == 21) {   // DELETE
+                                        #stack[int, 64] dOff = cssc::peek64(txAstOff + j * 8);
+                                        #stack[int, 64] dLen = cssc::peek64(txAstLen + j * 8);
+                                        txDdSpanEq(dOff, dLen, contOff, contLen) ceq;
+                                        if (ceq == 1) { contFreed = 1; }
+                                        #delete[ceq];
+                                        txDdSpanEq(dOff, dLen, refOff, refLen) req0;
+                                        if (req0 == 1) {
+                                            txSemaLineOf(dOff) dl;
+                                            if (dl > storeLine) { refDelOff = dOff; refDelLine = dl; }
+                                            #delete[dl];
+                                        }
+                                        #delete[req0];
+                                        #delete[dOff];
+                                        #delete[dLen];
+                                    }
+                                    j = j + 1;
+                                }
+                            }
+                            #delete[j];
+                            #delete[jg];
+                            if (contFreed == 0) {
+                                if (refDelOff >= 0) {
+                                    txSemaColOf(refDelOff) col;
+                                    cssc::out(refDelLine);
+                                    cssc::out(":");
+                                    cssc::out(col);
+                                    cssc::out(":3:DANGLING_STORE:deletes ");
+                                    cssc::printRaw(txSrc + refOff, refLen);
+                                    cssc::out(" while a live reference to it is held in ");
+                                    cssc::printRaw(txSrc + contOff, contLen);
+                                    cssc::out(" (never freed) — the stored reference dangles to 0x0; store a copy with &");
+                                    cssc::printRaw(txSrc + refOff, refLen);
+                                    cssc::out(" or free ");
+                                    cssc::printRaw(txSrc + contOff, contLen);
+                                    cssc::out(" first");
+                                    cssc::outln();
+                                    #delete[col];
+                                }
+                            }
+                            #delete[contOff];
+                            #delete[contLen];
+                            #delete[refOff];
+                            #delete[refLen];
+                            #delete[storeLine];
+                            #delete[refDelOff];
+                            #delete[refDelLine];
+                            #delete[contFreed];
+                        }
+                        #delete[refn];
+                    }
+                    #delete[recv];
+                    #delete[arg];
+                    #delete[ok];
+                }
+                #delete[isStore];
+                #delete[mo];
+                #delete[ml];
             }
             i = i + 1;
         }
@@ -1655,6 +1956,49 @@
     return r;
 }
 
+// 1 if the name span (qOff,qLen) is a SELECT cursor — a symbol whose declaring
+// node is a SELECT (kind 30), i.e. `select (it) ?cursor { ... }`. A cursor is
+// NOT the container: its VALUE is the current element AND it carries the special
+// `cursor.pos()` index form (interpreter cssl_cssc.py ~9984). It is registered
+// (kind 7) with declType inherited from the container so `cursor.<elemMethod>`
+// completes -- but that same inheritance makes the container's method surface
+// wrong for method-EXISTENCE checking (pos() is neither a vector nor a string
+// method). So method-checking skips cursor receivers ("if unsure, show nothing").
+#stack[int, 64] txNameIsCursor;
+#define(txNameIsCursor) {
+    #scanp(txNameIsCursor, int, 0) qOff;
+    #scanp(txNameIsCursor, int, 1) qLen;
+    #req[txSemaSymOff] txSemaSymOff;
+    #req[txSemaSymLen] txSemaSymLen;
+    #req[txSemaSymNode] txSemaSymNode;
+    #req[txSemaSymCount] txSemaSymCount;
+    #req[txAstKind] txAstKind;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 32] r = 0;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txSemaSymCount) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] o = i * 8;
+            txDdSpanEq(qOff, qLen, cssc::peek64(txSemaSymOff + o), cssc::peek64(txSemaSymLen + o)) me;
+            if (me == 1) {
+                #stack[int, 64] nd = cssc::peek64(txSemaSymNode + o);
+                if (nd != 0) {
+                    if (cssc::peek64(txAstKind + nd * 8) == 30) { r = 1; go = 0; }
+                }
+                #delete[nd];
+            }
+            #delete[me];
+            #delete[o];
+            if (go == 1) { i = i + 1; }
+        }
+    }
+    #delete[i];
+    #delete[go];
+    return r;
+}
+
 // NO_SUCH_METHOD — a `.method()` whose receiver is a variable of a KNOWN
 // built-in type (string/vector/map/bind) but `method` is in none of that
 // type's real methods. Allowlists = the interpreter's method-dispatch keys
@@ -1671,6 +2015,7 @@
     #req[txAstCount] txAstCount;
     #req[txSlotDeclType] txSlotDeclType;
     #req[txMethodInLit] txMethodInLit;
+    #req[txNameIsCursor] txNameIsCursor;
     #req[txSemaLineOf] txSemaLineOf;
     #req[txSemaColOf] txSemaColOf;
     #req[txSrc] txSrc;
@@ -1685,6 +2030,7 @@
                     if (cssc::peek64(txAstKind + b * 8) == 5) {   // IDENT receiver
                         #stack[int, 64] ro = cssc::peek64(txAstOff + b * 8);
                         #stack[int, 64] rl = cssc::peek64(txAstLen + b * 8);
+                        txNameIsCursor(ro, rl) rcur;
                         txSlotDeclType(ro, rl) dt;
                         #stack[int, 64] mo = cssc::peek64(txAstOff + i * 8);
                         #stack[int, 64] ml = cssc::peek64(txAstLen + i * 8);
@@ -1692,7 +2038,7 @@
                         #stack[int, 64] tnOff = 0;
                         #stack[int, 64] tnLen = 0;
                         if (dt == 1) {
-                            txMethodInLit(mo, ml, "length\nsize\nbegin\nend\nfront\nback\ndata\ncapacity\nupper\nlower\ntrim\nsplit\nreplace\ncontains\nstarts_with\nstartsWith\nends_with\nendsWith\nindex_of\nindexOf\nindex\ncharAt\nsubstr\nsubstring\nreverse\nrepeat\npadStart\npadEnd\nisEmpty\nisDigit\nisAlpha\ntoInt\ntoFloat\nexists\ncapitalize\ncasefold\ncenter\ncount\nencode\nendswith\nexpandtabs\nfind\nformat\nformat_map\nisalnum\nisalpha\nisascii\nisdecimal\nisdigit\nisidentifier\nislower\nisnumeric\nisprintable\nisspace\nistitle\nisupper\njoin\nljust\nlstrip\nmaketrans\npartition\nremoveprefix\nremovesuffix\nrfind\nrindex\nrjust\nrpartition\nrsplit\nrstrip\nsplitlines\nstartswith\nstrip\nswapcase\ntitle\ntranslate\nzfill") ins;
+                            txMethodInLit(mo, ml, "append\nlength\nsize\nbegin\nend\nfront\nback\ndata\ncapacity\nupper\nlower\ntrim\nsplit\nreplace\ncontains\nstarts_with\nstartsWith\nends_with\nendsWith\nindex_of\nindexOf\nindex\ncharAt\nsubstr\nsubstring\nreverse\nrepeat\npadStart\npadEnd\nisEmpty\nisDigit\nisAlpha\ntoInt\ntoFloat\nexists\ncapitalize\ncasefold\ncenter\ncount\nencode\nendswith\nexpandtabs\nfind\nformat\nformat_map\nisalnum\nisalpha\nisascii\nisdecimal\nisdigit\nisidentifier\nislower\nisnumeric\nisprintable\nisspace\nistitle\nisupper\njoin\nljust\nlstrip\nmaketrans\npartition\nremoveprefix\nremovesuffix\nrfind\nrindex\nrjust\nrpartition\nrsplit\nrstrip\nsplitlines\nstartswith\nstrip\nswapcase\ntitle\ntranslate\nzfill") ins;
                             if (ins == 0) { bad = 1; }
                             #delete[ins];
                         }
@@ -1711,6 +2057,10 @@
                             if (inb == 0) { bad = 1; }
                             #delete[inb];
                         }
+                        if (rcur == 1) { bad = 0; }          // select cursor -> never method-checked
+                        txMethodInLit(mo, ml, "declared") mdec;   // universal on every type
+                        if (mdec == 1) { bad = 0; }
+                        #delete[mdec];
                         if (bad == 1) {
                             txSemaLineOf(mo) ln;
                             txSemaColOf(mo) cl;
@@ -1725,6 +2075,7 @@
                             #delete[ln];
                             #delete[cl];
                         }
+                        #delete[rcur];
                         #delete[bad];
                         #delete[tnOff];
                         #delete[tnLen];
@@ -1767,6 +2118,44 @@
                 #delete[eq];
             }
             #delete[sl];
+            if (go == 1) { i = i + 1; }
+        }
+    }
+    #delete[i];
+    #delete[go];
+    return r;
+}
+
+// Like txSymNamed, but SKIPS the symbol declared by AST node `excl`. Used by the
+// `#req[X] Y` target check: `#req` registers its own alias Y as a symbol, so a
+// plain name lookup of the target X finds that alias when X==Y and wrongly
+// concludes X exists (the vanishing-squiggle bug). Excluding this #req's own
+// node makes the check ask "does X exist SOMEWHERE ELSE?".
+#stack[int, 64] txSymNamedExcl;
+#define(txSymNamedExcl) {
+    #scanp(txSymNamedExcl, int, 0) off;
+    #scanp(txSymNamedExcl, int, 1) len;
+    #scanp(txSymNamedExcl, int, 2) excl;
+    #req[txSemaSymOff] txSemaSymOff;
+    #req[txSemaSymLen] txSemaSymLen;
+    #req[txSemaSymNode] txSemaSymNode;
+    #req[txSemaSymCount] txSemaSymCount;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 64] r = 0;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txSemaSymCount) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek64(txSemaSymNode + i * 8) != excl) {
+                #stack[int, 64] sl = cssc::peek64(txSemaSymLen + i * 8);
+                if (sl == len) {
+                    txDdSpanEq(off, len, cssc::peek64(txSemaSymOff + i * 8), sl) eq;
+                    if (eq == 1) { r = 1; go = 0; }
+                    #delete[eq];
+                }
+                #delete[sl];
+            }
             if (go == 1) { i = i + 1; }
         }
     }
@@ -1871,6 +2260,684 @@
                     #delete[co];
                     #delete[cl];
                 }
+                i = i + 1;
+            }
+        }
+        #delete[i];
+        #delete[go];
+    }
+    #delete[active];
+    #delete[hl];
+}
+
+// Append the source span (off,len) to txDirDeclBuf as a '\n'-terminated name.
+#define(txDeclBufAdd) {
+    #scanp(txDeclBufAdd, int, 0) off;
+    #scanp(txDeclBufAdd, int, 1) len;
+    #req[txSrc] txSrc;
+    #req[txDirDeclBuf] txDirDeclBuf;
+    #req[txDirDeclLen] txDirDeclLen;
+    #stack[int, 64] k = 0;
+    while (k < len) {
+        cssc::poke8(txDirDeclBuf + txDirDeclLen, cssc::peek8(txSrc + off + k));
+        txDirDeclLen = txDirDeclLen + 1;
+        k = k + 1;
+    }
+    cssc::poke8(txDirDeclBuf + txDirDeclLen, 10);
+    txDirDeclLen = txDirDeclLen + 1;
+    #delete[k];
+}
+
+// Scan the source once for `#<dir>[ … ] <name>` declarations and collect each
+// <name> into txDirDeclBuf ('\n'-joined). The sema parser only knows a fixed set
+// of directives (stack/heap/auto/req/…) and SKIPS all others — so container and
+// peripheral declarators (`#array[T,N] a;`, `#vector[T] v;`, `#map`, `#bind`,
+// `#console`, `#matrix`, `#video`, `#pin`, …) leave NO symbol. This raw scan
+// recovers the declared names so the unknown-variable check never false-flags
+// them. Directive-arg brackets `[…]` never nest (container types use `<…>`), so
+// scanning to the first `]` is sufficient. A `#delete[x];` / `#free[x];` has `;`
+// right after `]` (no trailing ident) and contributes nothing.
+#define(txCollectDirDecls) {
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txDirDeclBuf] txDirDeclBuf;
+    #req[txDirDeclLen] txDirDeclLen;
+    #req[txDeclBufAdd] txDeclBufAdd;
+    #req[txSpanEqLit] txSpanEqLit;
+    if (txDirDeclBuf == 0) { txDirDeclBuf = cssc::alloc(1048576); }
+    txDirDeclLen = 0;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txSrcLen) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek8(txSrc + i) == 35) {                 // '#'
+                #stack[int, 64] j = i + 1;
+                #stack[int, 32] dg = 1;                          // skip the directive name
+                while (dg == 1) {
+                    if (j >= txSrcLen) { dg = 0; }
+                    if (dg == 1) {
+                        #stack[int, 64] c = cssc::peek8(txSrc + j);
+                        #stack[int, 32] idc = 0;
+                        if (c >= 65) { if (c <= 90) { idc = 1; } }
+                        if (c >= 97) { if (c <= 122) { idc = 1; } }
+                        if (c >= 48) { if (c <= 57) { idc = 1; } }
+                        if (c == 95) { idc = 1; }
+                        if (idc == 1) { j = j + 1; } else { dg = 0; }
+                        #delete[c];
+                        #delete[idc];
+                    }
+                }
+                #delete[dg];
+                // `#req[X] Y` — Y is an IMPORT alias, already added to the
+                // symbol table by the collector, NOT a fresh declaration. Do
+                // NOT record it here: otherwise the `#req[X]` target existence
+                // check finds Y and a same-name `#req[nonexisting] nonexisting;`
+                // wrongly satisfies itself (the vanishing-squiggle bug).
+                #stack[int, 32] isReqDir = 0;
+                if (j - (i + 1) == 3) {
+                    if (cssc::peek8(txSrc + i + 1) == 114) {          // 'r'
+                        if (cssc::peek8(txSrc + i + 2) == 101) {      // 'e'
+                            if (cssc::peek8(txSrc + i + 3) == 113) { isReqDir = 1; }  // 'q'
+                        }
+                    }
+                }
+                #stack[int, 32] wg = 1;                          // skip ws to '['
+                while (wg == 1) {
+                    if (j >= txSrcLen) { wg = 0; }
+                    if (wg == 1) {
+                        #stack[int, 64] c = cssc::peek8(txSrc + j);
+                        if (c == 32) { j = j + 1; } else { if (c == 9) { j = j + 1; } else { wg = 0; } }
+                        #delete[c];
+                    }
+                }
+                #delete[wg];
+                if (j < txSrcLen) {
+                    #stack[int, 64] opener = cssc::peek8(txSrc + j);
+                    #stack[int, 32] hasArgs = 0;
+                    if (opener == 91) { hasArgs = 1; }           // '['  #stack/#heap/#array/…
+                    if (opener == 40) { hasArgs = 1; }           // '('  #scanp/#qvar/#cdefine/…
+                    if (hasArgs == 1) {
+                        if (opener == 91) {                      // '[' — no nesting, scan to ']'
+                            #stack[int, 32] bg = 1;
+                            while (bg == 1) {
+                                if (j >= txSrcLen) { bg = 0; }
+                                if (bg == 1) {
+                                    if (cssc::peek8(txSrc + j) == 93) { j = j + 1; bg = 0; } else { j = j + 1; }
+                                }
+                            }
+                            #delete[bg];
+                        }
+                        if (opener == 40) {                      // '(' — depth-match to ')'
+                            #stack[int, 64] depth = 0;
+                            #stack[int, 32] bg = 1;
+                            while (bg == 1) {
+                                if (j >= txSrcLen) { bg = 0; }
+                                if (bg == 1) {
+                                    #stack[int, 64] pc = cssc::peek8(txSrc + j);
+                                    if (pc == 40) { depth = depth + 1; }
+                                    if (pc == 41) { depth = depth - 1; if (depth == 0) { j = j + 1; bg = 0; } }
+                                    if (bg == 1) { j = j + 1; }
+                                    #delete[pc];
+                                }
+                            }
+                            #delete[bg];
+                        }
+                        #stack[int, 32] wg2 = 1;                 // skip ws after ']'
+                        while (wg2 == 1) {
+                            if (j >= txSrcLen) { wg2 = 0; }
+                            if (wg2 == 1) {
+                                #stack[int, 64] c = cssc::peek8(txSrc + j);
+                                if (c == 32) { j = j + 1; } else { if (c == 9) { j = j + 1; } else { wg2 = 0; } }
+                                #delete[c];
+                            }
+                        }
+                        #delete[wg2];
+                        #stack[int, 64] ns = j;                  // trailing identifier = the name
+                        #stack[int, 32] ng = 1;
+                        while (ng == 1) {
+                            if (j >= txSrcLen) { ng = 0; }
+                            if (ng == 1) {
+                                #stack[int, 64] c = cssc::peek8(txSrc + j);
+                                #stack[int, 32] idc = 0;
+                                if (c >= 65) { if (c <= 90) { idc = 1; } }
+                                if (c >= 97) { if (c <= 122) { idc = 1; } }
+                                if (c >= 48) { if (c <= 57) { idc = 1; } }
+                                if (c == 95) { idc = 1; }
+                                if (idc == 1) { j = j + 1; } else { ng = 0; }
+                                #delete[c];
+                                #delete[idc];
+                            }
+                        }
+                        #delete[ng];
+                        #stack[int, 64] nl = j - ns;
+                        if (nl > 0) { if (isReqDir == 0) { txDeclBufAdd(ns, nl); } }
+                        #delete[nl];
+                        #delete[ns];
+                    }
+                    #delete[opener];
+                    #delete[hasArgs];
+                }
+                #delete[isReqDir];
+                #delete[j];
+            }
+            if (go == 1) { i = i + 1; }
+        }
+    }
+    #delete[i];
+    #delete[go];
+
+    // Pass 2 — `?cursor` bindings (select / #catch / method cursors) and the
+    // params of `#cdefine(fn, p1, p2, …)`. Both are declaration forms the sema
+    // parser does not surface as symbols.
+    #stack[int, 64] p = 0;
+    #stack[int, 32] pg = 1;
+    while (pg == 1) {
+        if (p >= txSrcLen) { pg = 0; }
+        if (pg == 1) {
+            #stack[int, 64] ch = cssc::peek8(txSrc + p);
+            if (ch == 63) {                                     // '?' cursor
+                #stack[int, 64] cs = p + 1;
+                #stack[int, 64] ce = cs;
+                #stack[int, 32] cg = 1;
+                while (cg == 1) {
+                    if (ce >= txSrcLen) { cg = 0; }
+                    if (cg == 1) {
+                        #stack[int, 64] cc = cssc::peek8(txSrc + ce);
+                        #stack[int, 32] idc = 0;
+                        if (cc >= 65) { if (cc <= 90) { idc = 1; } }
+                        if (cc >= 97) { if (cc <= 122) { idc = 1; } }
+                        if (cc >= 48) { if (cc <= 57) { idc = 1; } }
+                        if (cc == 95) { idc = 1; }
+                        if (idc == 1) { ce = ce + 1; } else { cg = 0; }
+                        #delete[cc];
+                        #delete[idc];
+                    }
+                }
+                #delete[cg];
+                if (ce > cs) { txDeclBufAdd(cs, ce - cs); }
+                #delete[cs];
+                #delete[ce];
+            }
+            if (ch == 35) {                                     // '#cdefine(fn, p1, p2, ...)'
+                txSpanEqLit(p + 1, 7, "cdefine") isc;
+                if (isc == 1) {
+                    #stack[int, 64] q = p + 8;
+                    #stack[int, 32] fg = 1;                     // skip to '('
+                    while (fg == 1) {
+                        if (q >= txSrcLen) { fg = 0; }
+                        if (fg == 1) { if (cssc::peek8(txSrc + q) == 40) { fg = 0; } else { q = q + 1; } }
+                    }
+                    #delete[fg];
+                    q = q + 1;
+                    #stack[int, 32] ag = 1;                     // collect idents until ')'
+                    while (ag == 1) {
+                        if (q >= txSrcLen) { ag = 0; }
+                        if (ag == 1) {
+                            #stack[int, 64] cc = cssc::peek8(txSrc + q);
+                            if (cc == 41) { ag = 0; }           // ')'
+                            #stack[int, 32] ids = 0;
+                            if (cc >= 65) { if (cc <= 90) { ids = 1; } }
+                            if (cc >= 97) { if (cc <= 122) { ids = 1; } }
+                            if (cc == 95) { ids = 1; }
+                            if (ag == 1) {
+                                if (ids == 1) {
+                                    #stack[int, 64] ns2 = q;
+                                    #stack[int, 32] ig = 1;
+                                    while (ig == 1) {
+                                        if (q >= txSrcLen) { ig = 0; }
+                                        if (ig == 1) {
+                                            #stack[int, 64] c2 = cssc::peek8(txSrc + q);
+                                            #stack[int, 32] i2 = 0;
+                                            if (c2 >= 65) { if (c2 <= 90) { i2 = 1; } }
+                                            if (c2 >= 97) { if (c2 <= 122) { i2 = 1; } }
+                                            if (c2 >= 48) { if (c2 <= 57) { i2 = 1; } }
+                                            if (c2 == 95) { i2 = 1; }
+                                            if (i2 == 1) { q = q + 1; } else { ig = 0; }
+                                            #delete[c2];
+                                            #delete[i2];
+                                        }
+                                    }
+                                    #delete[ig];
+                                    txDeclBufAdd(ns2, q - ns2);
+                                    #delete[ns2];
+                                } else { q = q + 1; }
+                            }
+                            #delete[ids];
+                            #delete[cc];
+                        }
+                    }
+                    #delete[ag];
+                    #delete[q];
+                }
+                #delete[isc];
+            }
+            #delete[ch];
+            if (pg == 1) { p = p + 1; }
+        }
+    }
+    #delete[p];
+    #delete[pg];
+
+    // Pass 3 — object/sector ctor params + sector injections: the identifier that
+    // follows a ':' inside a `<…>` header (`object W<int: width, int: height>`,
+    // `sector S<outer: local>`). A `:` only appears inside `<…>` for these forms;
+    // container type args (`map<int,string>`, `array<auto>`) carry no ':'.
+    #stack[int, 64] a = 0;
+    #stack[int, 32] aggo = 1;
+    while (aggo == 1) {
+        if (a >= txSrcLen) { aggo = 0; }
+        if (aggo == 1) {
+            if (cssc::peek8(txSrc + a) == 60) {                 // '<'
+                #stack[int, 64] b = a + 1;
+                #stack[int, 32] bg2 = 1;
+                while (bg2 == 1) {
+                    if (b >= txSrcLen) { bg2 = 0; }
+                    if (bg2 == 1) {
+                        #stack[int, 64] cc = cssc::peek8(txSrc + b);
+                        #stack[int, 64] afterGt = 0;            // where a trailing capture ident may start
+                        if (cc == 62) { bg2 = 0; afterGt = b + 1; }  // '>' end
+                        if (cc == 123) { bg2 = 0; }             // '{' safety bound
+                        if (cc == 59) { bg2 = 0; }              // ';' safety bound
+                        if (cc == 10) { bg2 = 0; }              // newline safety bound
+                        if (afterGt > 0) {                      // `Type<...> capture;` — collect capture
+                            #stack[int, 64] g = afterGt;
+                            #stack[int, 32] gw = 1;
+                            while (gw == 1) {
+                                if (g >= txSrcLen) { gw = 0; }
+                                if (gw == 1) {
+                                    #stack[int, 64] wc = cssc::peek8(txSrc + g);
+                                    if (wc == 32) { g = g + 1; } else { if (wc == 9) { g = g + 1; } else { gw = 0; } }
+                                    #delete[wc];
+                                }
+                            }
+                            #delete[gw];
+                            #stack[int, 64] gs = g;
+                            #stack[int, 32] gg = 1;
+                            while (gg == 1) {
+                                if (g >= txSrcLen) { gg = 0; }
+                                if (gg == 1) {
+                                    #stack[int, 64] gc = cssc::peek8(txSrc + g);
+                                    #stack[int, 32] gi = 0;
+                                    if (gc >= 65) { if (gc <= 90) { gi = 1; } }
+                                    if (gc >= 97) { if (gc <= 122) { gi = 1; } }
+                                    if (gc >= 48) { if (gc <= 57) { gi = 1; } }
+                                    if (gc == 95) { gi = 1; }
+                                    if (gi == 1) { g = g + 1; } else { gg = 0; }
+                                    #delete[gc];
+                                    #delete[gi];
+                                }
+                            }
+                            #delete[gg];
+                            if (g > gs) { txDeclBufAdd(gs, g - gs); }
+                            #delete[gs];
+                            #delete[g];
+                        }
+                        #delete[afterGt];
+                        if (bg2 == 1) {
+                            if (cc == 58) {                     // ':' -> next ident is a param
+                                #stack[int, 64] d = b + 1;
+                                #stack[int, 32] wg3 = 1;        // skip ws + a leading &/* ref marker
+                                while (wg3 == 1) {
+                                    if (d >= txSrcLen) { wg3 = 0; }
+                                    if (wg3 == 1) {
+                                        #stack[int, 64] wc = cssc::peek8(txSrc + d);
+                                        if (wc == 32) { d = d + 1; } else { if (wc == 9) { d = d + 1; } else { if (wc == 38) { d = d + 1; } else { if (wc == 42) { d = d + 1; } else { wg3 = 0; } } } }
+                                        #delete[wc];
+                                    }
+                                }
+                                #delete[wg3];
+                                #stack[int, 64] ds = d;
+                                #stack[int, 32] dg = 1;
+                                while (dg == 1) {
+                                    if (d >= txSrcLen) { dg = 0; }
+                                    if (dg == 1) {
+                                        #stack[int, 64] dc = cssc::peek8(txSrc + d);
+                                        #stack[int, 32] di = 0;
+                                        if (dc >= 65) { if (dc <= 90) { di = 1; } }
+                                        if (dc >= 97) { if (dc <= 122) { di = 1; } }
+                                        if (dc >= 48) { if (dc <= 57) { di = 1; } }
+                                        if (dc == 95) { di = 1; }
+                                        if (di == 1) { d = d + 1; } else { dg = 0; }
+                                        #delete[dc];
+                                        #delete[di];
+                                    }
+                                }
+                                #delete[dg];
+                                if (d > ds) { txDeclBufAdd(ds, d - ds); }
+                                b = d;
+                                #delete[ds];
+                            } else { b = b + 1; }
+                        }
+                        #delete[cc];
+                    }
+                }
+                #delete[bg2];
+                #delete[b];
+            }
+            if (aggo == 1) { a = a + 1; }
+        }
+    }
+    #delete[a];
+    #delete[aggo];
+
+    // Pass 4 — result captures `<call>() name;`: the identifier between a ')'
+    // and a ';' (`nope::thing() z;`, `foo(5) r;`). The sema parses these as
+    // RESULT_CAPTURE normally, but inside a directive the parser cannot model
+    // (a #cdefine body) they are lost; this recovers the captured name.
+    #stack[int, 64] rc = 0;
+    #stack[int, 32] rcg = 1;
+    while (rcg == 1) {
+        if (rc >= txSrcLen) { rcg = 0; }
+        if (rcg == 1) {
+            if (cssc::peek8(txSrc + rc) == 41) {                // ')'
+                #stack[int, 64] g = rc + 1;
+                #stack[int, 32] gw = 1;
+                while (gw == 1) {
+                    if (g >= txSrcLen) { gw = 0; }
+                    if (gw == 1) {
+                        #stack[int, 64] wc = cssc::peek8(txSrc + g);
+                        if (wc == 32) { g = g + 1; } else { if (wc == 9) { g = g + 1; } else { gw = 0; } }
+                        #delete[wc];
+                    }
+                }
+                #delete[gw];
+                #stack[int, 64] gs = g;
+                #stack[int, 32] gg = 1;
+                while (gg == 1) {
+                    if (g >= txSrcLen) { gg = 0; }
+                    if (gg == 1) {
+                        #stack[int, 64] gc = cssc::peek8(txSrc + g);
+                        #stack[int, 32] gi = 0;
+                        if (gc >= 65) { if (gc <= 90) { gi = 1; } }
+                        if (gc >= 97) { if (gc <= 122) { gi = 1; } }
+                        if (gc >= 48) { if (gc <= 57) { gi = 1; } }
+                        if (gc == 95) { gi = 1; }
+                        if (gi == 1) { g = g + 1; } else { gg = 0; }
+                        #delete[gc];
+                        #delete[gi];
+                    }
+                }
+                #delete[gg];
+                if (g > gs) {                                   // ident present — must be `… name ;`
+                    #stack[int, 64] h = g;
+                    #stack[int, 32] hw = 1;
+                    while (hw == 1) {
+                        if (h >= txSrcLen) { hw = 0; }
+                        if (hw == 1) {
+                            #stack[int, 64] hc = cssc::peek8(txSrc + h);
+                            if (hc == 32) { h = h + 1; } else { if (hc == 9) { h = h + 1; } else { hw = 0; } }
+                            #delete[hc];
+                        }
+                    }
+                    #delete[hw];
+                    if (h < txSrcLen) {
+                        if (cssc::peek8(txSrc + h) == 59) { txDeclBufAdd(gs, g - gs); }  // ';'
+                    }
+                }
+                #delete[gs];
+                #delete[g];
+            }
+            rc = rc + 1;
+        }
+    }
+    #delete[rc];
+    #delete[rcg];
+}
+
+// 1 if the span (off,len) matches a name collected by txCollectDirDecls.
+#define(txDirDeclNamed) {
+    #scanp(txDirDeclNamed, int, 0) off;
+    #scanp(txDirDeclNamed, int, 1) len;
+    #req[txSrc] txSrc;
+    #req[txDirDeclBuf] txDirDeclBuf;
+    #req[txDirDeclLen] txDirDeclLen;
+    #stack[int, 32] r = 0;
+    #stack[int, 64] i = 0;
+    while (i < txDirDeclLen) {
+        #stack[int, 64] s = i;
+        #stack[int, 32] sg = 1;
+        while (sg == 1) {
+            if (i >= txDirDeclLen) { sg = 0; }
+            if (sg == 1) { if (cssc::peek8(txDirDeclBuf + i) == 10) { sg = 0; } else { i = i + 1; } }
+        }
+        #delete[sg];
+        #stack[int, 64] seglen = i - s;
+        if (seglen == len) {
+            #stack[int, 32] eq = 1;
+            #stack[int, 64] k = 0;
+            #stack[int, 32] mg = 1;
+            while (mg == 1) {
+                if (k >= len) { mg = 0; }
+                if (mg == 1) {
+                    if (cssc::peek8(txSrc + off + k) != cssc::peek8(txDirDeclBuf + s + k)) { eq = 0; mg = 0; }
+                    if (mg == 1) { k = k + 1; }
+                }
+            }
+            #delete[k];
+            #delete[mg];
+            if (eq == 1) { r = 1; }
+            #delete[eq];
+        }
+        #delete[seglen];
+        #delete[s];
+        i = i + 1;
+    }
+    #delete[i];
+    return r;
+}
+
+// 1 if `name` is declared by a `for (TYPE name = …; …)` init. For-init DECLs
+// live in the FOR node's A slot and are NOT walked by the symbol collector
+// (which only descends the loop BODY), so an unknown-variable check would else
+// wrongly flag every loop counter. Scope-agnostic on purpose (over-permissive =
+// zero-FP).
+#define(txForInitNamed) {
+    #scanp(txForInitNamed, int, 0) off;
+    #scanp(txForInitNamed, int, 1) len;
+    #req[txAstKind] txAstKind;
+    #req[txAstA] txAstA;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstCount] txAstCount;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 32] r = 0;
+    #stack[int, 64] i = 1;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txAstCount) { go = 0; }
+        if (go == 1) {
+            if (cssc::peek64(txAstKind + i * 8) == 11) {          // FOR
+                #stack[int, 64] init = cssc::peek64(txAstA + i * 8);
+                if (init != 0) {
+                    if (cssc::peek64(txAstKind + init * 8) == 7) {  // DECL init
+                        txDdSpanEq(off, len, cssc::peek64(txAstOff + init * 8),
+                                   cssc::peek64(txAstLen + init * 8)) eq;
+                        if (eq == 1) { r = 1; go = 0; }
+                        #delete[eq];
+                    }
+                }
+                #delete[init];
+            }
+            if (go == 1) { i = i + 1; }
+        }
+    }
+    #delete[i];
+    #delete[go];
+    return r;
+}
+
+// 1 if the bare name (off,len) resolves to ANYTHING nameable — any collected
+// symbol (slot/param/#req/cursor/#define/object/sector/module alias), a for-init
+// counter, an external project definition, or a builtin/type keyword. Anything
+// that returns 0 here is genuinely undeclared. Deliberately over-permissive so a
+// real name never false-positives.
+#define(txKnownName) {
+    #scanp(txKnownName, int, 0) off;
+    #scanp(txKnownName, int, 1) len;
+    #req[txSymNamed] txSymNamed;
+    #req[txExtNamed] txExtNamed;
+    #req[txForInitNamed] txForInitNamed;
+    #req[txDirDeclNamed] txDirDeclNamed;
+    #req[txMethodInLit] txMethodInLit;
+    #stack[int, 32] r = 0;
+    txSymNamed(off, len) s;  if (s != 0) { r = 1; } #delete[s];
+    if (r == 0) { txForInitNamed(off, len) fi; if (fi != 0) { r = 1; } #delete[fi]; }
+    if (r == 0) { txDirDeclNamed(off, len) dd; if (dd != 0) { r = 1; } #delete[dd]; }
+    if (r == 0) { txExtNamed(off, len) en; if (en != 0) { r = 1; } #delete[en]; }
+    if (r == 0) {
+        txMethodInLit(off, len, "cssc\nint\nfloat\nstring\nbool\nvoid\nauto\nvar\nvector\narray\nbind\nmap\nchar\nbyte\nobject\nsector\ntrue\nfalse\nnull") kw;
+        if (kw != 0) { r = 1; }
+        #delete[kw];
+    }
+    return r;
+}
+
+// Like txKnownName, but for a `#req[X] Y` TARGET: excludes the alias symbol that
+// THIS #req node (`excl`) declares, so `#req[nonexisting] nonexisting;` no longer
+// satisfies its own existence check via the alias it creates.
+#stack[int, 64] txReqTargetKnown;
+#define(txReqTargetKnown) {
+    #scanp(txReqTargetKnown, int, 0) off;
+    #scanp(txReqTargetKnown, int, 1) len;
+    #scanp(txReqTargetKnown, int, 2) excl;
+    #req[txSymNamedExcl] txSymNamedExcl;
+    #req[txExtNamed] txExtNamed;
+    #req[txForInitNamed] txForInitNamed;
+    #req[txDirDeclNamed] txDirDeclNamed;
+    #req[txMethodInLit] txMethodInLit;
+    #stack[int, 32] r = 0;
+    txSymNamedExcl(off, len, excl) s;  if (s != 0) { r = 1; } #delete[s];
+    if (r == 0) { txForInitNamed(off, len) fi; if (fi != 0) { r = 1; } #delete[fi]; }
+    if (r == 0) { txDirDeclNamed(off, len) dd; if (dd != 0) { r = 1; } #delete[dd]; }
+    if (r == 0) { txExtNamed(off, len) en; if (en != 0) { r = 1; } #delete[en]; }
+    if (r == 0) {
+        txMethodInLit(off, len, "cssc\nint\nfloat\nstring\nbool\nvoid\nauto\nvar\nvector\narray\nbind\nmap\nchar\nbyte\nobject\nsector\ntrue\nfalse\nnull") kw;
+        if (kw != 0) { r = 1; }
+        #delete[kw];
+    }
+    return r;
+}
+
+// UNKNOWN_VARIABLE — a bare identifier REFERENCE (IDENT node, kind 5) that
+// resolves to no declaration anywhere. Member/method/label names are SPANS on
+// their ARROW/METHOD_CALL parent (never kind-5 nodes), so only genuine variable
+// reads reach here; qualified `A::B` spans carry a ':' and are skipped (they
+// resolve through the sector/module path). Same gate as UNKNOWN_FUNCTION: only
+// with whole-project context (argv[2]) and no `#load` — otherwise a name might
+// resolve cross-file and we stay silent.
+#define(txUnknownVarWalk) {
+    #req[txAstKind] txAstKind;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstCount] txAstCount;
+    #req[txKnownName] txKnownName;
+    #req[txReqTargetKnown] txReqTargetKnown;
+    #req[txAccessFindCC] txAccessFindCC;
+    #req[txHasLoad] txHasLoad;
+    #req[txHasProject] txHasProject;
+    #req[txCollectDirDecls] txCollectDirDecls;
+    #req[txSemaLineOf] txSemaLineOf;
+    #req[txSemaColOf] txSemaColOf;
+    #req[txSrc] txSrc;
+    txHasLoad() hl;
+    #stack[int, 32] active = 0;
+    if (hl == 0) { if (txHasProject == 1) { active = 1; } }
+    if (active == 1) {
+        txCollectDirDecls();       // recover container/peripheral directive decls
+        #stack[int, 64] i = 1;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (i >= txAstCount) { go = 0; }
+            if (go == 1) {
+                if (cssc::peek64(txAstKind + i * 8) == 5) {         // IDENT reference
+                    #stack[int, 64] vo = cssc::peek64(txAstOff + i * 8);
+                    #stack[int, 64] vl = cssc::peek64(txAstLen + i * 8);
+                    // A genuine variable read is never immediately preceded by
+                    // '.' — that is member access (`x.member`), whose member is a
+                    // span, not a variable. Skip such idents (guards the rare
+                    // legacy `obj!secure.access` parse from a false flag).
+                    #stack[int, 32] afterDot = 0;
+                    if (vo > 0) { if (cssc::peek8(txSrc + vo - 1) == 46) { afterDot = 1; } }
+                    if (vl > 0) {
+                        if (afterDot == 0) {
+                            txAccessFindCC(vo, vl) cc;
+                            if (cc < 0) {                           // bare (no ':')
+                                txKnownName(vo, vl) kn;
+                                if (kn == 0) {
+                                    txSemaLineOf(vo) ln;
+                                    txSemaColOf(vo) cl;
+                                    cssc::out(ln); cssc::out(":"); cssc::out(cl);
+                                    cssc::out(":1:UNKNOWN_VARIABLE:variable ");
+                                    cssc::printRaw(txSrc + vo, vl);
+                                    cssc::out(" is not declared");
+                                    cssc::outln();
+                                    #delete[ln];
+                                    #delete[cl];
+                                }
+                                #delete[kn];
+                            }
+                            #delete[cc];
+                        }
+                    }
+                    #delete[afterDot];
+                    #delete[vo];
+                    #delete[vl];
+                }
+                #stack[int, 64] nk = cssc::peek64(txAstKind + i * 8);
+                if (nk == 21) {                                 // #delete[X] target
+                    #stack[int, 64] xo = cssc::peek64(txAstOff + i * 8);
+                    #stack[int, 64] xl = cssc::peek64(txAstLen + i * 8);
+                    if (xl > 0) {
+                        txAccessFindCC(xo, xl) cc;
+                        if (cc < 0) {
+                            txKnownName(xo, xl) kn;
+                            if (kn == 0) {
+                                txSemaLineOf(xo) ln;
+                                txSemaColOf(xo) cl;
+                                cssc::out(ln); cssc::out(":"); cssc::out(cl);
+                                cssc::out(":1:DELETE_UNKNOWN:cannot #delete ");
+                                cssc::printRaw(txSrc + xo, xl);
+                                cssc::out(" — it is not declared");
+                                cssc::outln();
+                                #delete[ln];
+                                #delete[cl];
+                            }
+                            #delete[kn];
+                        }
+                        #delete[cc];
+                    }
+                    #delete[xo];
+                    #delete[xl];
+                }
+                if (nk == 19) {                                 // #req[X] Y — source X must exist
+                    #stack[int, 64] xo = cssc::peek64(txAstOff + i * 8);
+                    #stack[int, 64] xl = cssc::peek64(txAstLen + i * 8);
+                    if (xl > 0) {
+                        txAccessFindCC(xo, xl) cc;
+                        if (cc < 0) {
+                            // Exclude THIS #req's own alias symbol (node i) so a
+                            // same-name `#req[x] x;` doesn't satisfy itself.
+                            txReqTargetKnown(xo, xl, i) kn;
+                            if (kn == 0) {
+                                txSemaLineOf(xo) ln;
+                                txSemaColOf(xo) cl;
+                                cssc::out(ln); cssc::out(":"); cssc::out(cl);
+                                cssc::out(":1:UNKNOWN_VARIABLE:variable ");
+                                cssc::printRaw(txSrc + xo, xl);
+                                cssc::out(" is not declared");
+                                cssc::outln();
+                                #delete[ln];
+                                #delete[cl];
+                            }
+                            #delete[kn];
+                        }
+                        #delete[cc];
+                    }
+                    #delete[xo];
+                    #delete[xl];
+                }
+                #delete[nk];
                 i = i + 1;
             }
         }
@@ -2081,6 +3148,172 @@
     #delete[go];
 }
 
+// Harvest the TOP-LEVEL member surface of a loaded (#load) module buffer into
+// the external-names table: every top-level `#define(NAME)` / `#cdefine(NAME)`
+// (callables), `sector NAME` / `object NAME` (types), AND `#stack/#heap/#auto`
+// NAME (vars/consts). Brace depth is tracked (skipping string literals and
+// // and /* */ comments so their braces never miscount) so ONLY depth-0 members
+// are harvested -- a #define's locals / nested defines are the loaded module's
+// private scope, never `alias::` members. Matches the runtime's CsscLoadedModule,
+// which binds the loaded file's GLOBAL-scope members as the module's namespace.
+// (Only DIRECT members are harvested -- a nested `#load` inside the loaded file
+// is not followed, so no cycle/self-load recursion is possible.)
+#define(txScanModMembers) {
+    #scanp(txScanModMembers, int, 0) base;
+    #scanp(txScanModMembers, int, 1) srcLen;
+    #req[txExtAdd] txExtAdd;
+    #req[txLitAt] txLitAt;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] depth = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= srcLen) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] c = cssc::peek8(base + i);
+            #stack[int, 32] handled = 0;
+            if (c == 34) { handled = 1; }                       // '"'
+            if (c == 39) { handled = 1; }                       // '\''
+            if (handled == 1) {                                 // skip string literal
+                #stack[int, 64] qq = c;
+                i = i + 1;
+                #stack[int, 32] sg = 1;
+                while (sg == 1) {
+                    if (i >= srcLen) { sg = 0; }
+                    if (sg == 1) {
+                        #stack[int, 64] sc = cssc::peek8(base + i);
+                        if (sc == 92) { i = i + 2; } else { if (sc == qq) { sg = 0; i = i + 1; } else { i = i + 1; } }
+                        #delete[sc];
+                    }
+                }
+                #delete[sg];
+                #delete[qq];
+            }
+            if (handled == 0) {
+                if (c == 47) {                                  // '/'
+                    #stack[int, 64] c2 = 0;
+                    if (i + 1 < srcLen) { c2 = cssc::peek8(base + i + 1); }
+                    if (c2 == 47) {                             // '//' line comment
+                        handled = 1;
+                        i = i + 2;
+                        #stack[int, 32] lg = 1;
+                        while (lg == 1) {
+                            if (i >= srcLen) { lg = 0; }
+                            if (lg == 1) { if (cssc::peek8(base + i) == 10) { lg = 0; } else { i = i + 1; } }
+                        }
+                        #delete[lg];
+                    }
+                    if (c2 == 42) {                             // '/*' block comment
+                        handled = 1;
+                        i = i + 2;
+                        #stack[int, 32] bg = 1;
+                        while (bg == 1) {
+                            if (i + 1 >= srcLen) { bg = 0; i = srcLen; }
+                            if (bg == 1) {
+                                if (cssc::peek8(base + i) == 42) { if (cssc::peek8(base + i + 1) == 47) { bg = 0; i = i + 2; } else { i = i + 1; } } else { i = i + 1; }
+                            }
+                        }
+                        #delete[bg];
+                    }
+                    #delete[c2];
+                }
+            }
+            if (handled == 0) {
+                if (c == 123) { depth = depth + 1; i = i + 1; handled = 1; }   // '{'
+                if (c == 125) { depth = depth - 1; i = i + 1; handled = 1; }   // '}'
+            }
+            if (handled == 0) {
+                if (depth == 0) {
+                    #stack[int, 64] ns = 0 - 1;                 // identifier start to harvest
+                    #stack[int, 64] varSkip = 0 - 1;            // '[' pos for a #stack/#heap/#auto var
+                    if (c == 35) {                              // '#'
+                        txLitAt(base, i, srcLen, "#define(") d1; if (d1 == 1) { ns = i + 8; } #delete[d1];
+                        if (ns < 0) { txLitAt(base, i, srcLen, "#cdefine(") d2; if (d2 == 1) { ns = i + 9; } #delete[d2]; }
+                        if (ns < 0) { txLitAt(base, i, srcLen, "#stack[") v1; if (v1 == 1) { varSkip = i + 6; } #delete[v1]; }
+                        if (ns < 0) { if (varSkip < 0) { txLitAt(base, i, srcLen, "#heap[") v2; if (v2 == 1) { varSkip = i + 5; } #delete[v2]; } }
+                        if (ns < 0) { if (varSkip < 0) { txLitAt(base, i, srcLen, "#auto[") v3; if (v3 == 1) { varSkip = i + 5; } #delete[v3]; } }
+                    }
+                    if (ns < 0) { if (varSkip < 0) {            // sector / object at a word boundary
+                        #stack[int, 32] wb = 1;
+                        if (i > 0) {
+                            #stack[int, 64] pc = cssc::peek8(base + i - 1);
+                            if (pc >= 65) { if (pc <= 90) { wb = 0; } }
+                            if (pc >= 97) { if (pc <= 122) { wb = 0; } }
+                            if (pc >= 48) { if (pc <= 57) { wb = 0; } }
+                            if (pc == 95) { wb = 0; }
+                            #delete[pc];
+                        }
+                        if (wb == 1) {
+                            #stack[int, 64] kwlen = 0;
+                            txLitAt(base, i, srcLen, "sector ") s1; if (s1 == 1) { kwlen = 7; } #delete[s1];
+                            if (kwlen == 0) { txLitAt(base, i, srcLen, "object ") o1; if (o1 == 1) { kwlen = 7; } #delete[o1]; }
+                            if (kwlen > 0) {
+                                #stack[int, 64] p = i + kwlen;
+                                #stack[int, 32] fw = 1;
+                                while (fw == 1) {
+                                    if (p >= srcLen) { fw = 0; }
+                                    if (fw == 1) { #stack[int, 64] wc = cssc::peek8(base + p); if (wc == 32) { p = p + 1; } else { if (wc == 9) { p = p + 1; } else { fw = 0; } } #delete[wc]; }
+                                }
+                                #delete[fw];
+                                ns = p;
+                                #delete[p];
+                            }
+                            #delete[kwlen];
+                        }
+                        #delete[wb];
+                    } }
+                    if (varSkip >= 0) {                         // var: skip to ']' then whitespace -> NAME
+                        #stack[int, 64] p = varSkip;
+                        #stack[int, 32] bg = 1;
+                        while (bg == 1) {
+                            if (p >= srcLen) { bg = 0; }
+                            if (bg == 1) { if (cssc::peek8(base + p) == 93) { bg = 0; } else { p = p + 1; } }
+                        }
+                        #delete[bg];
+                        p = p + 1;
+                        #stack[int, 32] fw = 1;
+                        while (fw == 1) {
+                            if (p >= srcLen) { fw = 0; }
+                            if (fw == 1) { #stack[int, 64] wc = cssc::peek8(base + p); if (wc == 32) { p = p + 1; } else { if (wc == 9) { p = p + 1; } else { fw = 0; } } #delete[wc]; }
+                        }
+                        #delete[fw];
+                        ns = p;
+                        #delete[p];
+                    }
+                    #delete[varSkip];
+                    if (ns >= 0) {                              // extract the identifier and add it
+                        #stack[int, 64] e = ns;
+                        #stack[int, 32] rg = 1;
+                        while (rg == 1) {
+                            if (e >= srcLen) { rg = 0; }
+                            if (rg == 1) {
+                                #stack[int, 64] ic = cssc::peek8(base + e);
+                                #stack[int, 32] iw = 0;
+                                if (ic >= 65) { if (ic <= 90) { iw = 1; } }
+                                if (ic >= 97) { if (ic <= 122) { iw = 1; } }
+                                if (ic >= 48) { if (ic <= 57) { iw = 1; } }
+                                if (ic == 95) { iw = 1; }
+                                if (iw == 1) { e = e + 1; } else { rg = 0; }
+                                #delete[ic];
+                                #delete[iw];
+                            }
+                        }
+                        #delete[rg];
+                        if (e > ns) { txExtAdd(base, ns, e - ns); }
+                        #delete[e];
+                    }
+                    #delete[ns];
+                }
+                i = i + 1;
+            }
+            #delete[handled];
+            #delete[c];
+        }
+    }
+    #delete[go];
+    #delete[i];
+    #delete[depth];
+}
+
 // List the project dir (dOff,dLen = path bytes), read each *.cssc sibling, and
 // scan its definitions into the external-names table. Sets txHasProject.
 #define(txScanProject) {
@@ -2146,6 +3379,93 @@
     txHasProject = 1;
 }
 
+// Blank the CONTENT of every `/* … */` block comment in txSrc to spaces
+// (newlines/CR preserved so line:col stay exact). The lexer already skips block
+// comments, so no AST node points into one — but the TEXT lints (MISSING_SEMICOLON,
+// SELECT_CURSOR_NO_QMARK) and the raw declaration scans read txSrc directly and
+// would otherwise treat block-comment text as code. Line comments (`//`) are left
+// to the scans that already handle them; a `/*` inside a `//` or a string is not a
+// block open (both are skipped here first).
+#define(txBlankBlockComments) {
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= txSrcLen) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] c = cssc::peek8(txSrc + i);
+            if (c == 34) {                                  // "…" string — skip verbatim
+                i = i + 1;
+                #stack[int, 32] sg = 1;
+                while (sg == 1) {
+                    if (i >= txSrcLen) { sg = 0; }
+                    if (sg == 1) {
+                        #stack[int, 64] sc = cssc::peek8(txSrc + i);
+                        if (sc == 92) { i = i + 2; }
+                        else { if (sc == 34) { i = i + 1; sg = 0; } else { i = i + 1; } }
+                        #delete[sc];
+                    }
+                }
+                #delete[sg];
+            } else {
+                #stack[int, 32] handled = 0;
+                if (c == 47) {                              // '/'
+                    if (i + 1 < txSrcLen) {
+                        #stack[int, 64] c2 = cssc::peek8(txSrc + i + 1);
+                        if (c2 == 47) {                     // '//' line comment — skip to EOL, no blank
+                            handled = 1;
+                            i = i + 2;
+                            #stack[int, 32] lg = 1;
+                            while (lg == 1) {
+                                if (i >= txSrcLen) { lg = 0; }
+                                if (lg == 1) { if (cssc::peek8(txSrc + i) == 10) { lg = 0; } else { i = i + 1; } }
+                            }
+                            #delete[lg];
+                        }
+                        if (c2 == 42) {                     // '/*' block comment — BLANK content
+                            handled = 1;
+                            cssc::poke8(txSrc + i, 32);
+                            cssc::poke8(txSrc + i + 1, 32);
+                            i = i + 2;
+                            #stack[int, 32] bg = 1;
+                            while (bg == 1) {
+                                if (i >= txSrcLen) { bg = 0; }
+                                if (bg == 1) {
+                                    #stack[int, 64] bc = cssc::peek8(txSrc + i);
+                                    #stack[int, 32] closed = 0;
+                                    if (bc == 42) {
+                                        if (i + 1 < txSrcLen) {
+                                            if (cssc::peek8(txSrc + i + 1) == 47) {   // '*/'
+                                                cssc::poke8(txSrc + i, 32);
+                                                cssc::poke8(txSrc + i + 1, 32);
+                                                i = i + 2; bg = 0; closed = 1;
+                                            }
+                                        }
+                                    }
+                                    if (closed == 0) {
+                                        if (bc != 10) { if (bc != 13) { cssc::poke8(txSrc + i, 32); } }
+                                        i = i + 1;
+                                    }
+                                    #delete[closed];
+                                    #delete[bc];
+                                }
+                            }
+                            #delete[bg];
+                        }
+                        #delete[c2];
+                    }
+                }
+                if (handled == 0) { i = i + 1; }
+                #delete[handled];
+            }
+            #delete[c];
+        }
+    }
+    #delete[i];
+    #delete[go];
+}
+
 #define(txSemaBuild) {
     #scanp(txSemaBuild, int, 0) prog;
     #req[txAstA] txAstA;
@@ -2158,15 +3478,19 @@
     #req[txLeakCollectDeletes] txLeakCollectDeletes;
     #req[txLeakScan] txLeakScan;
     #req[txDanglingScan] txDanglingScan;
+    #req[txDanglingStore] txDanglingStore;
     #req[txAccessWalk] txAccessWalk;
     #req[txMissingSemiScan] txMissingSemiScan;
     #req[txSelectCursorScan] txSelectCursorScan;
     #req[txMethodCheckWalk] txMethodCheckWalk;
     #req[txUnknownFuncWalk] txUnknownFuncWalk;
+    #req[txUnknownVarWalk] txUnknownVarWalk;
+    #req[txBlankBlockComments] txBlankBlockComments;
     #stack[int, 64] top = cssc::peek64(txAstA + prog * 8);
     #req[txAstCap] txAstCap;
     #req[txSelCursSeen] txSelCursSeen;
     if (txSelCursSeen == 0) { txSelCursSeen = cssc::alloc(txAstCap * 8); cssc::memfill32(txSelCursSeen, 0, txAstCap * 2); }
+    txBlankBlockComments();       // neutralize /* … */ so text lints don't see code
     txMissingSemiScan();          // MISSING_SEMICOLON (text lint)
     txSelectCursorScan();         // SELECT_CURSOR_NO_QMARK (text lint)
     txSemaVisitChain(top);        // SELECT_WITHOUT_JUMP
@@ -2179,10 +3503,12 @@
     txMethodCheckWalk();          // NO_SUCH_METHOD (typed-receiver method check)
     txUnknownFuncWalk();          // UNKNOWN_FUNCTION (gated on txHasProject: only
                                   // fires with whole-project cross-file context)
+    txUnknownVarWalk();           // UNKNOWN_VARIABLE (same gate)
     txDdReset();
     txLeakCollectDeletes();       // "ever deleted" set
     txLeakScan();                 // LIFETIME_LEAK
     txDanglingScan();             // DANGLING_RETURN
+    txDanglingStore();            // DANGLING_STORE (ref held past referent #delete)
     #delete[top];
 }
 
@@ -2201,7 +3527,16 @@
 #stack[int, 64] txScanIdentBack;
 #stack[int, 64] txScanIdentFwd;
 #stack[int, 64] txHoverAt;
+#stack[int, 64] txHoverInit;
+#stack[int, 64] txEmitSentinel;
+#stack[int, 64] txResolveInit;
+#stack[int, 64] txResolveTerm;
+#stack[int, 64] txSymByName;
 #stack[int, 64] txHoverDoc;
+#stack[int, 64] txDocBefore;
+#stack[int, 64] txDocBodyB;
+#stack[int, 64] txHoverEmitDoc;
+#stack[int, 64] txLoadedMemberHover;
 #stack[int, 64] txSignatureAt;
 #stack[int, 64] txSpanPrefix;
 #stack[int, 64] txScopeByOwner;
@@ -2213,6 +3548,7 @@
 #stack[int, 64] txCompMapMethods;
 #stack[int, 64] txCompBindMethods;
 #stack[int, 64] txScopeAt;
+#stack[int, 64] txReqScopeAt;
 #stack[int, 64] txMatchRank;
 #stack[int, 64] txLitPrefixCS;
 #stack[int, 64] txCompKwType;
@@ -2346,6 +3682,380 @@
     txDocTry(off, len, "contains", "contains(x) - true if present");
 }
 
+// ===========================================================================
+//  Initializer resolution for hover — `init: <value>`.
+//  A slot's declared initializer is folded to a display value:
+//    * no initializer  -> the TYPE's null sentinel ("" / 0 / 0.0 / {}).
+//    * a literal / a chain of literals + variables -> the folded value.
+//    * a part that can't be known statically (a call, cssc::random, …) -> a
+//      turquoise `?`; in a string that also drops the closing quote.
+//  Variable references resolve through their own declaration (bounded depth),
+//  which also covers `#req` aliases (an alias's decl carries the source type).
+// ===========================================================================
+#stack[int, 64] txInitS = 0;         // out: init expr start (set by txSymInitSpan)
+#stack[int, 64] txInitE = 0;         // out: init expr end
+#stack[int, 64] txTypeOff = 0;       // out: declared type-text span (set by the hover)
+#stack[int, 64] txTypeLen = 0;       // e.g. "bool"/"char" when declType is outside 0..5
+#stack[int, 64] txSymInitSpan;
+
+// Set txInitS/txInitE to the initializer expression span of slot `sym`
+// (the text between '=' and ';'/newline). Returns 1 if the slot has an
+// initializer, 0 otherwise.
+#define(txSymInitSpan) {
+    #scanp(txSymInitSpan, int, 0) sym;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txSemaSymOff] txSemaSymOff;
+    #req[txSemaSymLen] txSemaSymLen;
+    #req[txInitS] txInitS;
+    #req[txInitE] txInitE;
+    #stack[int, 64] no = cssc::peek64(txSemaSymOff + sym * 8);
+    #stack[int, 64] nl = cssc::peek64(txSemaSymLen + sym * 8);
+    #stack[int, 64] j = no + nl;
+    #stack[int, 64] eq = 0 - 1;
+    #stack[int, 32] g = 1;
+    while (g == 1) {
+        if (j >= txSrcLen) { g = 0; }
+        if (g == 1) {
+            #stack[int, 64] c = cssc::peek8(txSrc + j);
+            if (c == 59) { g = 0; }          // ';'
+            if (c == 10) { g = 0; }          // newline
+            if (c == 61) { eq = j; g = 0; }  // '='
+            #delete[c];
+            if (g == 1) { j = j + 1; }
+        }
+    }
+    #delete[g];
+    #delete[j];
+    #delete[no];
+    #delete[nl];
+    #stack[int, 32] has = 0;
+    if (eq >= 0) {
+        has = 1;
+        #stack[int, 64] s = eq + 1;
+        #stack[int, 64] e = s;
+        #stack[int, 32] fg = 1;
+        while (fg == 1) {
+            if (e >= txSrcLen) { fg = 0; }
+            if (fg == 1) {
+                #stack[int, 64] c = cssc::peek8(txSrc + e);
+                if (c == 59) { fg = 0; }
+                if (c == 10) { fg = 0; }
+                #delete[c];
+                if (fg == 1) { e = e + 1; }
+            }
+        }
+        #delete[fg];
+        txInitS = s;
+        txInitE = e;
+        #delete[s];
+        #delete[e];
+    }
+    #delete[eq];
+    return has;
+}
+
+#define(txEmitSentinel) {
+    #scanp(txEmitSentinel, int, 0) dt;
+    if (dt == 0) { cssc::out("0"); }
+    if (dt == 1) { cssc::out("\"\""); }
+    if (dt == 2) { cssc::out("0.0"); }
+    if (dt >= 3) { cssc::out("{}"); }
+}
+
+// Symbol index of a SLOT / PARAM / #req-alias named [off,len], or -1.
+#define(txSymByName) {
+    #scanp(txSymByName, int, 0) off;
+    #scanp(txSymByName, int, 1) len;
+    #req[txSemaSymOff] txSemaSymOff;
+    #req[txSemaSymLen] txSemaSymLen;
+    #req[txSemaSymKind] txSemaSymKind;
+    #req[txSemaSymCount] txSemaSymCount;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 64] r = 0 - 1;
+    #stack[int, 64] i = 0;
+    #stack[int, 32] g = 1;
+    while (g == 1) {
+        if (i >= txSemaSymCount) { g = 0; }
+        if (g == 1) {
+            #stack[int, 64] kk = cssc::peek64(txSemaSymKind + i * 8);
+            #stack[int, 32] ok = 0;
+            if (kk == 1) { ok = 1; }
+            if (kk == 5) { ok = 1; }
+            if (kk == 7) { ok = 1; }
+            if (ok == 1) {
+                txDdSpanEq(off, len, cssc::peek64(txSemaSymOff + i * 8),
+                           cssc::peek64(txSemaSymLen + i * 8)) eq;
+                if (eq == 1) { r = i; g = 0; }
+                #delete[eq];
+            }
+            #delete[kk];
+            #delete[ok];
+            if (g == 1) { i = i + 1; }
+        }
+    }
+    #delete[i];
+    #delete[g];
+    return r;
+}
+
+// Resolve init text [off,end) for a slot of `declType`, emitting a display
+// value. Returns 1 = fully resolved, 0 = a `?` was emitted. `strCtx` (1) folds
+// as string concatenation (quoted); otherwise scalar. `depth` bounds var-ref
+// recursion. `?` is emitted as a bare '?' the hover renderer paints turquoise.
+#define(txResolveInit) {
+    #scanp(txResolveInit, int, 0) off;
+    #scanp(txResolveInit, int, 1) end;
+    #scanp(txResolveInit, int, 2) declType;
+    #scanp(txResolveInit, int, 3) depth;
+    #scanp(txResolveInit, int, 4) noQuote;
+    #req[txSrc] txSrc;
+    #req[txSymByName] txSymByName;
+    #req[txSymInitSpan] txSymInitSpan;
+    #req[txResolveInit] txResolveInit;
+    #req[txSemaSymDeclType] txSemaSymDeclType;
+    #req[txInitS] txInitS;
+    #req[txInitE] txInitE;
+    // trim
+    #stack[int, 64] s = off;
+    #stack[int, 32] t1 = 1;
+    while (t1 == 1) {
+        if (s >= end) { t1 = 0; }
+        if (t1 == 1) { #stack[int, 64] c = cssc::peek8(txSrc + s);
+            if (c == 32) { s = s + 1; } else { if (c == 9) { s = s + 1; } else { t1 = 0; } } #delete[c]; }
+    }
+    #delete[t1];
+    #stack[int, 64] e = end;
+    #stack[int, 32] t2 = 1;
+    while (t2 == 1) {
+        if (e <= s) { t2 = 0; }
+        if (t2 == 1) { #stack[int, 64] c = cssc::peek8(txSrc + e - 1);
+            if (c == 32) { e = e - 1; } else { if (c == 9) { e = e - 1; } else { t2 = 0; } } #delete[c]; }
+    }
+    #delete[t2];
+    #stack[int, 32] isStr = 0;
+    if (declType == 1) { isStr = 1; }
+    if (s < e) { if (cssc::peek8(txSrc + s) == 34) { isStr = 1; } }
+    #stack[int, 32] bad = 0;
+    // A NON-string init with a top-level arithmetic operator (`+`, `*`, `/`)
+    // is not a foldable literal (`2 + 3` must not become the concatenation
+    // "23") — show `?`. A single literal / variable still resolves below.
+    #stack[int, 32] scalarBad = 0;
+    if (isStr == 0) {
+        #stack[int, 64] q = s;
+        #stack[int, 64] dq = 0;
+        #stack[int, 32] iqq = 0;
+        while (q < e) {
+            #stack[int, 64] c = cssc::peek8(txSrc + q);
+            if (iqq == 1) { if (c == 34) { iqq = 0; } }
+            else {
+                if (c == 34) { iqq = 1; }
+                if (c == 40) { dq = dq + 1; }
+                if (c == 41) { dq = dq - 1; }
+                if (dq == 0) {
+                    if (c == 43) { scalarBad = 1; }
+                    if (c == 42) { scalarBad = 1; }
+                    if (c == 47) { scalarBad = 1; }
+                }
+            }
+            #delete[c];
+            q = q + 1;
+        }
+        #delete[q];
+        #delete[dq];
+        #delete[iqq];
+    }
+    if (scalarBad == 1) { cssc::out("?"); bad = 1; }
+    if (isStr == 1) { if (noQuote == 0) { cssc::out("\""); } }
+    #stack[int, 64] ts = s;
+    #stack[int, 32] wg = 1;
+    if (scalarBad == 1) { wg = 0; }
+    while (wg == 1) {
+        // scan to next top-level '+'
+        #stack[int, 64] p = ts;
+        #stack[int, 64] te = e;
+        #stack[int, 64] dp = 0;
+        #stack[int, 32] iq = 0;
+        #stack[int, 32] fg = 1;
+        while (fg == 1) {
+            if (p >= e) { te = e; fg = 0; }
+            if (fg == 1) {
+                #stack[int, 64] c = cssc::peek8(txSrc + p);
+                if (iq == 1) { if (c == 34) { iq = 0; } }
+                else {
+                    if (c == 34) { iq = 1; }
+                    if (c == 40) { dp = dp + 1; }
+                    if (c == 41) { dp = dp - 1; }
+                    if (c == 91) { dp = dp + 1; }
+                    if (c == 93) { dp = dp - 1; }
+                    if (c == 43) { if (dp == 0) { te = p; fg = 0; } }
+                }
+                #delete[c];
+                if (fg == 1) { p = p + 1; }
+            }
+        }
+        #delete[fg];
+        #delete[iq];
+        #delete[dp];
+        // trim the term [ts, te)
+        #stack[int, 64] a = ts;
+        #stack[int, 32] ta = 1;
+        while (ta == 1) { if (a >= te) { ta = 0; }
+            if (ta == 1) { #stack[int, 64] c = cssc::peek8(txSrc + a);
+                if (c == 32) { a = a + 1; } else { if (c == 9) { a = a + 1; } else { ta = 0; } } #delete[c]; } }
+        #delete[ta];
+        #stack[int, 64] b = te;
+        #stack[int, 32] tb = 1;
+        while (tb == 1) { if (b <= a) { tb = 0; }
+            if (tb == 1) { #stack[int, 64] c = cssc::peek8(txSrc + b - 1);
+                if (c == 32) { b = b - 1; } else { if (c == 9) { b = b - 1; } else { tb = 0; } } #delete[c]; } }
+        #delete[tb];
+        if (b > a) {
+            #stack[int, 64] fc = cssc::peek8(txSrc + a);
+            if (fc == 34) {                                  // "..." literal
+                #stack[int, 64] q = a + 1;
+                #stack[int, 32] sg = 1;
+                while (sg == 1) {
+                    if (q >= b) { sg = 0; }
+                    if (sg == 1) {
+                        #stack[int, 64] c = cssc::peek8(txSrc + q);
+                        if (c == 34) { sg = 0; } else { cssc::printRaw(txSrc + q, 1); q = q + 1; }
+                        #delete[c];
+                    }
+                }
+                #delete[sg];
+                #delete[q];
+            } else {
+                #stack[int, 32] dig = 0;
+                if (fc >= 48) { if (fc <= 57) { dig = 1; } }
+                if (fc == 45) { dig = 1; }                   // '-'
+                #stack[int, 32] alp = 0;
+                if (fc >= 65) { if (fc <= 90) { alp = 1; } }
+                if (fc >= 97) { if (fc <= 122) { alp = 1; } }
+                if (fc == 95) { alp = 1; }
+                // does the term contain '(' or ':' -> a call / qualified -> dynamic
+                #stack[int, 32] isCall = 0;
+                #stack[int, 64] sc = a;
+                while (sc < b) {
+                    #stack[int, 64] c = cssc::peek8(txSrc + sc);
+                    if (c == 40) { isCall = 1; }
+                    if (c == 58) { isCall = 1; }
+                    #delete[c];
+                    sc = sc + 1;
+                }
+                #delete[sc];
+                if (dig == 1) {                              // numeric / bool-ish literal
+                    if (isCall == 0) { cssc::printRaw(txSrc + a, b - a); }
+                    else { cssc::out(" ?"); bad = 1; }
+                } else {
+                    if (alp == 1) {
+                        if (isCall == 1) { cssc::out(" ?"); bad = 1; }
+                        else {
+                            // bool / null keyword?
+                            #stack[int, 32] kw = 0;
+                            if (b - a == 4) { if (cssc::peek8(txSrc + a) == 116) { kw = 1; } }  // true
+                            if (b - a == 5) { if (cssc::peek8(txSrc + a) == 102) { kw = 1; } }  // false
+                            if (b - a == 4) { if (cssc::peek8(txSrc + a) == 110) { kw = 1; } }  // null
+                            if (kw == 1) { cssc::printRaw(txSrc + a, b - a); }
+                            else {
+                                // variable reference -> resolve through its decl
+                                #stack[int, 64] rsym = 0 - 1;
+                                if (depth < 4) { txSymByName(a, b - a) rs; rsym = rs; #delete[rs]; }
+                                #stack[int, 32] done = 0;
+                                if (rsym >= 0) {
+                                    txSymInitSpan(rsym) hasI;
+                                    #stack[int, 64] rdt = cssc::peek64(txSemaSymDeclType + rsym * 8);
+                                    if (hasI == 1) {
+                                        // recurse WITHOUT the surrounding quotes
+                                        #stack[int, 64] ris = txInitS;
+                                        #stack[int, 64] rie = txInitE;
+                                        txResolveInit(ris, rie, rdt, depth + 1, 1) rr;
+                                        if (rr == 0) { bad = 1; }
+                                        done = 1;
+                                        #delete[ris];
+                                        #delete[rie];
+                                        #delete[rr];
+                                    } else {
+                                        // no init -> its sentinel content (unquoted here)
+                                        if (rdt == 1) { done = 1; }   // "" -> empty in a concat
+                                        if (rdt == 0) { cssc::out("0"); done = 1; }
+                                        if (rdt == 2) { cssc::out("0.0"); done = 1; }
+                                    }
+                                    #delete[hasI];
+                                    #delete[rdt];
+                                }
+                                #delete[rsym];
+                                if (done == 0) { cssc::out(" ?"); bad = 1; }
+                                #delete[done];
+                            }
+                            #delete[kw];
+                        }
+                    } else { cssc::out(" ?"); bad = 1; }
+                }
+                #delete[dig];
+                #delete[alp];
+                #delete[isCall];
+            }
+            #delete[fc];
+        }
+        #delete[a];
+        #delete[b];
+        if (te >= e) { wg = 0; }
+        if (wg == 1) { ts = te + 1; }
+        #delete[p];
+        #delete[te];
+    }
+    #delete[wg];
+    #delete[ts];
+    if (isStr == 1) { if (bad == 0) { if (noQuote == 0) { cssc::out("\""); } } }
+    #stack[int, 32] ret = 1;
+    if (bad == 1) { ret = 0; }
+    #delete[bad];
+    #delete[scalarBad];
+    #delete[isStr];
+    #delete[s];
+    #delete[e];
+    return ret;
+}
+
+// Emit the `init: …` line for slot `sym` (declType `dt`).
+#define(txHoverInit) {
+    #scanp(txHoverInit, int, 0) sym;
+    #scanp(txHoverInit, int, 1) dt;
+    #req[txSymInitSpan] txSymInitSpan;
+    #req[txEmitSentinel] txEmitSentinel;
+    #req[txResolveInit] txResolveInit;
+    #req[txSpanEqLit] txSpanEqLit;
+    #req[txTypeOff] txTypeOff;
+    #req[txTypeLen] txTypeLen;
+    #req[txInitS] txInitS;
+    #req[txInitE] txInitE;
+    cssc::out("init: ");
+    txSymInitSpan(sym) has;
+    if (has == 0) {
+        // bool's null sentinel is `false`; its type has no declType number so it
+        // is recognised via the type-text span set by the hover's type block.
+        #stack[int, 32] isBool = 0;
+        if (txTypeLen == 4) {
+            txSpanEqLit(txTypeOff, txTypeLen, "bool") bb;
+            if (bb == 1) { isBool = 1; }
+            #delete[bb];
+        }
+        if (isBool == 1) { cssc::out("false"); }
+        else { txEmitSentinel(dt); }
+        #delete[isBool];
+    } else {
+        #stack[int, 64] is = txInitS;
+        #stack[int, 64] ie = txInitE;
+        txResolveInit(is, ie, dt, 0, 0) r;
+        #delete[is];
+        #delete[ie];
+        #delete[r];
+    }
+    cssc::outln();
+    #delete[has];
+}
+
 #define(txHoverAt) {
     #scanp(txHoverAt, int, 0) off;
     #req[txSrc] txSrc;
@@ -2359,10 +4069,24 @@
     #req[txSemaSymScope] txSemaSymScope;
     #req[txSemaSymDeclType] txSemaSymDeclType;
     #req[txSemaSymCount] txSemaSymCount;
+    #req[txSemaSymNode] txSemaSymNode;
+    #req[txHoverInit] txHoverInit;
+    #req[txSymByName] txSymByName;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txTypeOff] txTypeOff;
+    #req[txTypeLen] txTypeLen;
     #req[txSemaLineOf] txSemaLineOf;
     #req[txScopeAt] txScopeAt;
     #req[txDdSpanEq] txDdSpanEq;
-    #req[txHoverDoc] txHoverDoc;
+    #req[txHoverEmitDoc] txHoverEmitDoc;
+    #req[txSrcLen] txSrcLen;
+    #req[txLoadPathAt] txLoadPathAt;
+    #req[txLoadPathO] txLoadPathO;
+    #req[txLoadPathL] txLoadPathL;
+    #req[txLoadedMemberHover] txLoadedMemberHover;
+    #req[txCompDirBuf] txCompDirBuf;
+    #req[txCompDirLen] txCompDirLen;
     #req[txSpanEqLit] txSpanEqLit;
     #req[txSigCssc] txSigCssc;
     #req[txSigNoActive] txSigNoActive;
@@ -2444,6 +4168,42 @@
                 }
             }
         }
+        // qualified `alias::member` where alias is a #load'd module -> the member's
+        // kind + //d docs, read from the loaded file's surface (no cross-file diags).
+        if (hdone == 0) {
+            if (ws >= 2) {
+                if (cssc::peek8(txSrc + ws - 1) == 58) {
+                    if (cssc::peek8(txSrc + ws - 2) == 58) {
+                        txScanIdentBack(ws - 2) lqs;
+                        #stack[int, 64] lqlen = (ws - 2) - lqs;
+                        if (lqlen > 0) {
+                            txLoadPathAt(lqs, lqlen, ws) ld;
+                            if (ld == 1) {
+                                #stack[int, 64] pathBuf = cssc::alloc(4096);
+                                #stack[int, 64] pp = 0;
+                                while (pp < txCompDirLen) { cssc::poke8(pathBuf + pp, cssc::peek8(txCompDirBuf + pp)); pp = pp + 1; }
+                                if (txCompDirLen > 0) { cssc::poke8(pathBuf + pp, 47); pp = pp + 1; }
+                                #stack[int, 64] pk = 0;
+                                while (pk < txLoadPathL) { cssc::poke8(pathBuf + pp + pk, cssc::peek8(txSrc + txLoadPathO + pk)); pk = pk + 1; }
+                                #delete[pk];
+                                #stack[int, 64] fullLen = pp + txLoadPathL;
+                                #stack[int, 64] fileBuf = cssc::alloc(1200000);
+                                cssc::osReadFile(pathBuf, fullLen, fileBuf, 1200000) rn;
+                                if (rn > 0) { txLoadedMemberHover(ws, wlen, fileBuf, rn) fh; if (fh == 1) { hdone = 1; } #delete[fh]; }
+                                #delete[rn];
+                                #delete[fileBuf];
+                                #delete[fullLen];
+                                #delete[pp];
+                                #delete[pathBuf];
+                            }
+                            #delete[ld];
+                        }
+                        #delete[lqlen];
+                        #delete[lqs];
+                    }
+                }
+            }
+        }
         // `<var>.method` where var is a known container -> the method's doc
         if (hdone == 0) {
             if (ws >= 1) {
@@ -2502,9 +4262,14 @@
             if (k == 4) { cssc::out("sector "); }
             if (k == 5) { cssc::out("param "); }
             if (k == 6) { cssc::out("label "); }
-            if (k == 7) { cssc::out("import "); }
+            // k==7 (`#req` alias) resolves to the imported variable — show it as
+            // a slot with the inherited type, not a bare "import".
+            #stack[int, 32] slotLike = 0;
+            if (k == 1) { slotLike = 1; }
+            if (k == 7) { slotLike = 1; }
+            if (k == 7) { cssc::out("req "); }
             cssc::printRaw(txSrc + cssc::peek64(txSemaSymOff + so), cssc::peek64(txSemaSymLen + so));
-            if (k == 1) {                                   // slot: type + declared capacity
+            if (slotLike == 1) {                            // slot / alias: type + capacity
                 #stack[int, 64] dt = cssc::peek64(txSemaSymDeclType + so);
                 cssc::out(" : ");
                 if (dt == 0) { cssc::out("int"); }
@@ -2513,6 +4278,47 @@
                 if (dt == 3) { cssc::out("vector"); }
                 if (dt == 4) { cssc::out("map"); }
                 if (dt == 5) { cssc::out("bind"); }
+                // A declType outside 0..5 (bool / char / byte / auto / an object
+                // or sector type) has no numeric mapping — show the LITERAL type
+                // text from `[TYPE, …]` and stash its span for the sentinel.
+                txTypeOff = 0;
+                txTypeLen = 0;
+                #stack[int, 32] knownT = 0;
+                if (dt >= 0) { if (dt <= 5) { knownT = 1; } }
+                if (knownT == 0) {
+                    #stack[int, 64] tb = cssc::peek64(txSemaSymOff + so);
+                    #stack[int, 32] fb = 1;
+                    while (fb == 1) {
+                        if (tb <= 0) { fb = 0; }
+                        if (fb == 1) {
+                            #stack[int, 64] cc = cssc::peek8(txSrc + tb - 1);
+                            if (cc == 91) { fb = 0; }          // '['
+                            if (cc == 10) { fb = 0; tb = 0; }
+                            #delete[cc];
+                            if (fb == 1) { tb = tb - 1; }
+                        }
+                    }
+                    #delete[fb];
+                    if (tb > 0) {
+                        #stack[int, 64] te = tb;
+                        #stack[int, 32] fe = 1;
+                        while (fe == 1) {
+                            #stack[int, 64] cc = cssc::peek8(txSrc + te);
+                            if (cc == 44) { fe = 0; }          // ','
+                            if (cc == 93) { fe = 0; }          // ']'
+                            if (cc == 10) { fe = 0; }
+                            #delete[cc];
+                            if (fe == 1) { te = te + 1; }
+                        }
+                        #delete[fe];
+                        txTypeOff = tb;
+                        txTypeLen = te - tb;
+                        cssc::printRaw(txSrc + tb, te - tb);
+                        #delete[te];
+                    }
+                    #delete[tb];
+                }
+                #delete[knownT];
                 // declared capacity: re-scan `[type, BITS]` before the name (the
                 // real size the user wrote, not a fixed runtime width).
                 #stack[int, 64] nOff = cssc::peek64(txSemaSymOff + so);
@@ -2570,7 +4376,27 @@
                 #delete[dt];
             }
             cssc::outln();
-            txHoverDoc(cssc::peek64(txSemaSymOff + so));   // //d docstring lines
+            if (slotLike == 1) {                            // init: <resolved value>
+                #stack[int, 64] hdt = cssc::peek64(txSemaSymDeclType + sym * 8);
+                if (k == 7) {
+                    // resolve the alias to its SOURCE variable and show ITS init
+                    #stack[int, 64] rnode = cssc::peek64(txSemaSymNode + sym * 8);
+                    #stack[int, 64] xo = cssc::peek64(txAstOff + rnode * 8);
+                    #stack[int, 64] xl = cssc::peek64(txAstLen + rnode * 8);
+                    txSymByName(xo, xl) srcSym;
+                    if (srcSym >= 0) { txHoverInit(srcSym, hdt); }
+                    else { txHoverInit(sym, hdt); }
+                    #delete[srcSym];
+                    #delete[xo];
+                    #delete[xl];
+                    #delete[rnode];
+                } else {
+                    txHoverInit(sym, hdt);
+                }
+                #delete[hdt];
+            }
+            #delete[slotLike];
+            txHoverEmitDoc(cssc::peek64(txSemaSymOff + so));   // //d docs (preceding + in-body)
             #delete[k];
             #delete[so];
         }
@@ -2679,6 +4505,310 @@
     #delete[brace];
 }
 
+// Emit the `//d` doc lines IMMEDIATELY PRECEDING the declaration at `declOff` in
+// buffer `base` (the CSSC convention `//d text` above a member). Consecutive `//d`
+// lines form one doc block. Buffer-parameterised so it serves both the current
+// file (txSrc) and a harvested #load'd module buffer.
+#define(txDocBefore) {
+    #scanp(txDocBefore, int, 0) base;
+    #scanp(txDocBefore, int, 1) srcLen;
+    #scanp(txDocBefore, int, 2) declOff;
+    #stack[int, 64] lineStart = declOff;
+    #stack[int, 32] g = 1;
+    while (g == 1) {
+        if (lineStart <= 0) { g = 0; }
+        if (g == 1) { if (cssc::peek8(base + lineStart - 1) == 10) { g = 0; } else { lineStart = lineStart - 1; } }
+    }
+    #delete[g];
+    #stack[int, 64] top = lineStart;
+    #stack[int, 32] wg = 1;
+    #stack[int, 32] scanned = 0;
+    while (wg == 1) {
+        if (top <= 0) { wg = 0; }
+        if (scanned > 200) { wg = 0; }
+        if (wg == 1) {
+            #stack[int, 64] pe = top - 1;
+            #stack[int, 64] ps = pe;
+            #stack[int, 32] sg = 1;
+            while (sg == 1) {
+                if (ps <= 0) { sg = 0; }
+                if (sg == 1) { if (cssc::peek8(base + ps - 1) == 10) { sg = 0; } else { ps = ps - 1; } }
+            }
+            #delete[sg];
+            #stack[int, 64] t = ps;
+            #stack[int, 32] tg = 1;
+            while (tg == 1) {
+                if (t >= pe) { tg = 0; }
+                if (tg == 1) { #stack[int, 64] c = cssc::peek8(base + t); if (c == 32) { t = t + 1; } else { if (c == 9) { t = t + 1; } else { tg = 0; } } #delete[c]; }
+            }
+            #delete[tg];
+            #stack[int, 32] isDoc = 0;
+            if (t + 2 < pe) {
+                if (cssc::peek8(base + t) == 47) { if (cssc::peek8(base + t + 1) == 47) { if (cssc::peek8(base + t + 2) == 100) { isDoc = 1; } } }
+            }
+            if (isDoc == 1) { top = ps; } else { wg = 0; }
+            #delete[isDoc];
+            #delete[t];
+            #delete[pe];
+            #delete[ps];
+            scanned = scanned + 1;
+        }
+    }
+    #delete[wg];
+    #delete[scanned];
+    if (top < lineStart) {
+        #stack[int, 64] pp = top;
+        #stack[int, 32] eg = 1;
+        while (eg == 1) {
+            if (pp >= lineStart) { eg = 0; }
+            if (eg == 1) {
+                #stack[int, 64] le = pp;
+                #stack[int, 32] lg = 1;
+                while (lg == 1) { if (le >= srcLen) { lg = 0; } if (lg == 1) { if (cssc::peek8(base + le) == 10) { lg = 0; } else { le = le + 1; } } }
+                #delete[lg];
+                #stack[int, 64] t2 = pp;
+                #stack[int, 32] tg2 = 1;
+                while (tg2 == 1) { if (t2 >= le) { tg2 = 0; } if (tg2 == 1) { #stack[int, 64] c = cssc::peek8(base + t2); if (c == 32) { t2 = t2 + 1; } else { if (c == 9) { t2 = t2 + 1; } else { tg2 = 0; } } #delete[c]; } }
+                #delete[tg2];
+                #stack[int, 32] isDoc2 = 0;
+                if (t2 + 2 < le) { if (cssc::peek8(base + t2) == 47) { if (cssc::peek8(base + t2 + 1) == 47) { if (cssc::peek8(base + t2 + 2) == 100) { isDoc2 = 1; } } } }
+                if (isDoc2 == 1) {
+                    #stack[int, 64] ds = t2 + 3;
+                    if (ds < le) { if (cssc::peek8(base + ds) == 32) { ds = ds + 1; } }
+                    cssc::printRaw(base + ds, le - ds);
+                    cssc::outln();
+                    #delete[ds];
+                }
+                #delete[isDoc2];
+                #delete[t2];
+                pp = le + 1;
+                #delete[le];
+            }
+        }
+        #delete[eg];
+        #delete[pp];
+    }
+    #delete[top];
+    #delete[lineStart];
+}
+
+// Emit the `//d` doc lines at the TOP OF THE BODY that opens at/after `declOff` in
+// buffer `base` (the existing in-body convention). Buffer-parameterised twin of the
+// original txHoverDoc.
+#define(txDocBodyB) {
+    #scanp(txDocBodyB, int, 0) base;
+    #scanp(txDocBodyB, int, 1) srcLen;
+    #scanp(txDocBodyB, int, 2) declOff;
+    #stack[int, 64] i = declOff;
+    #stack[int, 64] lim = declOff + 4000;
+    if (lim > srcLen) { lim = srcLen; }
+    #stack[int, 64] brace = 0 - 1;
+    #stack[int, 32] g = 1;
+    while (g == 1) {
+        if (i >= lim) { g = 0; }
+        if (g == 1) {
+            #stack[int, 64] c = cssc::peek8(base + i);
+            if (c == 123) { brace = i; g = 0; }
+            if (c == 59) { g = 0; }
+            #delete[c];
+            if (g == 1) { i = i + 1; }
+        }
+    }
+    #delete[g];
+    #delete[i];
+    #delete[lim];
+    if (brace >= 0) {
+        #stack[int, 64] pp = brace + 1;
+        #stack[int, 32] started = 0;
+        #stack[int, 32] scanned = 0;
+        #stack[int, 32] go = 1;
+        while (go == 1) {
+            if (pp >= srcLen) { go = 0; }
+            if (scanned > 200) { go = 0; }
+            if (go == 1) {
+                #stack[int, 64] le = pp;
+                #stack[int, 32] g2 = 1;
+                while (g2 == 1) { if (le >= srcLen) { g2 = 0; } if (g2 == 1) { if (cssc::peek8(base + le) == 10) { g2 = 0; } else { le = le + 1; } } }
+                #delete[g2];
+                #stack[int, 64] t = pp;
+                #stack[int, 32] g3 = 1;
+                while (g3 == 1) {
+                    if (t >= le) { g3 = 0; }
+                    if (g3 == 1) { #stack[int, 64] c = cssc::peek8(base + t); if (c == 32) { t = t + 1; } if (c == 9) { t = t + 1; } if (c != 32) { if (c != 9) { g3 = 0; } } #delete[c]; }
+                }
+                #delete[g3];
+                #stack[int, 32] isDoc = 0;
+                if (t + 2 < le) { if (cssc::peek8(base + t) == 47) { if (cssc::peek8(base + t + 1) == 47) { if (cssc::peek8(base + t + 2) == 100) { isDoc = 1; } } } }
+                if (isDoc == 1) {
+                    #stack[int, 64] ds = t + 3;
+                    if (ds < le) { if (cssc::peek8(base + ds) == 32) { ds = ds + 1; } }
+                    cssc::printRaw(base + ds, le - ds);
+                    cssc::outln();
+                    started = 1;
+                    #delete[ds];
+                }
+                if (isDoc == 0) {
+                    if (t >= le) { if (started == 1) { go = 0; } }
+                    if (t < le) { go = 0; }
+                }
+                #delete[isDoc];
+                #delete[t];
+                pp = le + 1;
+                #delete[le];
+                scanned = scanned + 1;
+            }
+        }
+        #delete[go];
+        #delete[pp];
+        #delete[started];
+        #delete[scanned];
+    }
+    #delete[brace];
+}
+
+// Emit a current-file symbol's `//d` docs (preceding lines + in-body) for the
+// declaration at `declOff`. A thin, low-register-pressure wrapper: called from the
+// large txHoverAt scope, it keeps the txSrc/txSrcLen buffer args in a fresh frame
+// (inlining both calls into txHoverAt tripped a native-codegen arg-passing quirk).
+#define(txHoverEmitDoc) {
+    #scanp(txHoverEmitDoc, int, 0) declOff;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txDocBefore] txDocBefore;
+    #req[txDocBodyB] txDocBodyB;
+    #stack[int, 64] b = txSrc;
+    #stack[int, 64] n = txSrcLen;
+    txDocBefore(b, n, declOff);
+    txDocBodyB(b, n, declOff);
+    #delete[b];
+    #delete[n];
+}
+
+// Hover for a `#load`'d module member: search the harvested module buffer `base`
+// (depth-0 members only) for a top-level member whose name == txSrc[memOff..memLen],
+// then emit "<kind> <name>" and its `//d` docs (preceding + in-body). Returns 1 if
+// the member was found (caller marks the hover handled). No cross-file diagnostics
+// -- only the member's surface is read.
+#define(txLoadedMemberHover) {
+    #scanp(txLoadedMemberHover, int, 0) memOff;
+    #scanp(txLoadedMemberHover, int, 1) memLen;
+    #scanp(txLoadedMemberHover, int, 2) base;
+    #scanp(txLoadedMemberHover, int, 3) srcLen;
+    #req[txSrc] txSrc;
+    #req[txLitAt] txLitAt;
+    #req[txDocBefore] txDocBefore;
+    #req[txDocBodyB] txDocBodyB;
+    #stack[int, 32] found = 0;
+    #stack[int, 64] i = 0;
+    #stack[int, 64] depth = 0;
+    #stack[int, 32] go = 1;
+    while (go == 1) {
+        if (i >= srcLen) { go = 0; }
+        if (found == 1) { go = 0; }
+        if (go == 1) {
+            #stack[int, 64] c = cssc::peek8(base + i);
+            #stack[int, 32] handled = 0;
+            if (c == 34) { handled = 1; }
+            if (c == 39) { handled = 1; }
+            if (handled == 1) {
+                #stack[int, 64] qq = c; i = i + 1;
+                #stack[int, 32] sg = 1;
+                while (sg == 1) { if (i >= srcLen) { sg = 0; } if (sg == 1) { #stack[int, 64] sc = cssc::peek8(base + i); if (sc == 92) { i = i + 2; } else { if (sc == qq) { sg = 0; i = i + 1; } else { i = i + 1; } } #delete[sc]; } }
+                #delete[sg]; #delete[qq];
+            }
+            if (handled == 0) {
+                if (c == 47) {
+                    #stack[int, 64] c2 = 0;
+                    if (i + 1 < srcLen) { c2 = cssc::peek8(base + i + 1); }
+                    if (c2 == 47) { handled = 1; i = i + 2; #stack[int, 32] lg = 1; while (lg == 1) { if (i >= srcLen) { lg = 0; } if (lg == 1) { if (cssc::peek8(base + i) == 10) { lg = 0; } else { i = i + 1; } } } #delete[lg]; }
+                    if (c2 == 42) { handled = 1; i = i + 2; #stack[int, 32] bg = 1; while (bg == 1) { if (i + 1 >= srcLen) { bg = 0; i = srcLen; } if (bg == 1) { if (cssc::peek8(base + i) == 42) { if (cssc::peek8(base + i + 1) == 47) { bg = 0; i = i + 2; } else { i = i + 1; } } else { i = i + 1; } } } #delete[bg]; }
+                    #delete[c2];
+                }
+            }
+            if (handled == 0) {
+                if (c == 123) { depth = depth + 1; i = i + 1; handled = 1; }
+                if (c == 125) { depth = depth - 1; i = i + 1; handled = 1; }
+            }
+            if (handled == 0) {
+                if (depth == 0) {
+                    #stack[int, 64] ns = 0 - 1;
+                    #stack[int, 64] varSkip = 0 - 1;
+                    #stack[int, 64] kind = 0;
+                    if (c == 35) {
+                        txLitAt(base, i, srcLen, "#define(") d1; if (d1 == 1) { ns = i + 8; kind = 2; } #delete[d1];
+                        if (ns < 0) { txLitAt(base, i, srcLen, "#cdefine(") d2; if (d2 == 1) { ns = i + 9; kind = 2; } #delete[d2]; }
+                        if (ns < 0) { txLitAt(base, i, srcLen, "#stack[") v1; if (v1 == 1) { varSkip = i + 6; kind = 1; } #delete[v1]; }
+                        if (ns < 0) { if (varSkip < 0) { txLitAt(base, i, srcLen, "#heap[") v2; if (v2 == 1) { varSkip = i + 5; kind = 1; } #delete[v2]; } }
+                        if (ns < 0) { if (varSkip < 0) { txLitAt(base, i, srcLen, "#auto[") v3; if (v3 == 1) { varSkip = i + 5; kind = 1; } #delete[v3]; } }
+                    }
+                    if (ns < 0) { if (varSkip < 0) {
+                        #stack[int, 32] wb = 1;
+                        if (i > 0) { #stack[int, 64] pc = cssc::peek8(base + i - 1); if (pc >= 65) { if (pc <= 90) { wb = 0; } } if (pc >= 97) { if (pc <= 122) { wb = 0; } } if (pc >= 48) { if (pc <= 57) { wb = 0; } } if (pc == 95) { wb = 0; } #delete[pc]; }
+                        if (wb == 1) {
+                            #stack[int, 64] kwlen = 0;
+                            txLitAt(base, i, srcLen, "sector ") s1; if (s1 == 1) { kwlen = 7; kind = 4; } #delete[s1];
+                            if (kwlen == 0) { txLitAt(base, i, srcLen, "object ") o1; if (o1 == 1) { kwlen = 7; kind = 3; } #delete[o1]; }
+                            if (kwlen > 0) { #stack[int, 64] pw = i + kwlen; #stack[int, 32] fw = 1; while (fw == 1) { if (pw >= srcLen) { fw = 0; } if (fw == 1) { #stack[int, 64] wc = cssc::peek8(base + pw); if (wc == 32) { pw = pw + 1; } else { if (wc == 9) { pw = pw + 1; } else { fw = 0; } } #delete[wc]; } } #delete[fw]; ns = pw; #delete[pw]; }
+                            #delete[kwlen];
+                        }
+                        #delete[wb];
+                    } }
+                    if (varSkip >= 0) {
+                        #stack[int, 64] pw = varSkip;
+                        #stack[int, 32] bg = 1;
+                        while (bg == 1) { if (pw >= srcLen) { bg = 0; } if (bg == 1) { if (cssc::peek8(base + pw) == 93) { bg = 0; } else { pw = pw + 1; } } }
+                        #delete[bg];
+                        pw = pw + 1;
+                        #stack[int, 32] fw = 1;
+                        while (fw == 1) { if (pw >= srcLen) { fw = 0; } if (fw == 1) { #stack[int, 64] wc = cssc::peek8(base + pw); if (wc == 32) { pw = pw + 1; } else { if (wc == 9) { pw = pw + 1; } else { fw = 0; } } #delete[wc]; } }
+                        #delete[fw];
+                        ns = pw;
+                        #delete[pw];
+                    }
+                    #delete[varSkip];
+                    if (ns >= 0) {
+                        #stack[int, 64] e = ns;
+                        #stack[int, 32] rg = 1;
+                        while (rg == 1) { if (e >= srcLen) { rg = 0; } if (rg == 1) { #stack[int, 64] ic = cssc::peek8(base + e); #stack[int, 32] iw = 0; if (ic >= 65) { if (ic <= 90) { iw = 1; } } if (ic >= 97) { if (ic <= 122) { iw = 1; } } if (ic >= 48) { if (ic <= 57) { iw = 1; } } if (ic == 95) { iw = 1; } if (iw == 1) { e = e + 1; } else { rg = 0; } #delete[ic]; #delete[iw]; } }
+                        #delete[rg];
+                        #stack[int, 64] nlen = e - ns;
+                        if (nlen == memLen) {
+                            #stack[int, 32] eq = 1;
+                            #stack[int, 64] k = 0;
+                            #stack[int, 32] mg = 1;
+                            while (mg == 1) { if (k >= memLen) { mg = 0; } if (mg == 1) { if (cssc::peek8(base + ns + k) != cssc::peek8(txSrc + memOff + k)) { eq = 0; mg = 0; } if (mg == 1) { k = k + 1; } } }
+                            #delete[k]; #delete[mg];
+                            if (eq == 1) {
+                                if (kind == 2) { cssc::out("function "); }
+                                if (kind == 1) { cssc::out("slot "); }
+                                if (kind == 3) { cssc::out("object "); }
+                                if (kind == 4) { cssc::out("sector "); }
+                                cssc::printRaw(base + ns, nlen);
+                                cssc::outln();
+                                txDocBefore(base, srcLen, ns);
+                                txDocBodyB(base, srcLen, ns);
+                                found = 1;
+                            }
+                            #delete[eq];
+                        }
+                        #delete[nlen];
+                        #delete[e];
+                    }
+                    #delete[ns];
+                    #delete[kind];
+                }
+                i = i + 1;
+            }
+            #delete[handled];
+            #delete[c];
+        }
+    }
+    #delete[go];
+    #delete[i];
+    #delete[depth];
+    return found;
+}
+
 // Core signature help: at cursor offset `off` inside a call `fn(a, b|...)`,
 // print `fn(<t> name, <t> name, ...)` then `active:<n>` (the argument index the
 // cursor is in). Params come from the callee's #scanp nodes (index + str/int
@@ -2781,6 +4911,16 @@
     txSigTry(fstart, fLen, active, "band", "cssc::band(int a, int b) - bitwise AND of a and b");
     txSigTry(fstart, fLen, active, "bor", "cssc::bor(int a, int b) - bitwise OR of a and b");
     txSigTry(fstart, fLen, active, "bxor", "cssc::bxor(int a, int b) - bitwise XOR of a and b");
+    txSigTry(fstart, fLen, active, "add", "cssc::add(a, b) - a + b (int op int -> int; a float -> float)");
+    txSigTry(fstart, fLen, active, "sub", "cssc::sub(a, b) - a - b (int op int -> int; a float -> float)");
+    txSigTry(fstart, fLen, active, "mul", "cssc::mul(a, b) - a * b (int op int -> int; a float -> float)");
+    txSigTry(fstart, fLen, active, "div", "cssc::div(a, b) - int/int -> int (C-style trunc), else float division");
+    txSigTry(fstart, fLen, active, "mod", "cssc::mod(a, b) - int%int -> int, else float remainder");
+    txSigTry(fstart, fLen, active, "xor", "cssc::xor(int a, int b) - bitwise XOR of a and b");
+    txSigTry(fstart, fLen, active, "xnor", "cssc::xnor(int a, int b) - bitwise XNOR ~(a ^ b)");
+    txSigTry(fstart, fLen, active, "nand", "cssc::nand(int a, int b) - bitwise NAND ~(a & b)");
+    txSigTry(fstart, fLen, active, "nor", "cssc::nor(int a, int b) - bitwise NOR ~(a | b)");
+    txSigTry(fstart, fLen, active, "bnot", "cssc::bnot(int a) - bitwise NOT ~a");
     txSigTry(fstart, fLen, active, "fAdd", "cssc::fAdd(int a, int b) - add two bit-encoded doubles");
     txSigTry(fstart, fLen, active, "fSub", "cssc::fSub(int a, int b) - subtract two bit-encoded doubles");
     txSigTry(fstart, fLen, active, "fMul", "cssc::fMul(int a, int b) - multiply two bit-encoded doubles");
@@ -3426,6 +5566,7 @@
     #req[txSemaSymDeclType] txSemaSymDeclType;
     #req[txDdSpanEq] txDdSpanEq;
     #stack[int, 64] dt = 0 - 1;
+    #stack[int, 32] conflict = 0;               // same name declared at 2+ DIFFERENT types
     #stack[int, 64] i = 0;
     #stack[int, 32] go = 1;
     while (go == 1) {
@@ -3440,7 +5581,12 @@
             if (ok == 7) { slotish = 1; }
             if (slotish == 1) {
                 txDdSpanEq(qOff, qLen, cssc::peek64(txSemaSymOff + o), cssc::peek64(txSemaSymLen + o)) me;
-                if (me == 1) { dt = cssc::peek64(txSemaSymDeclType + o); }
+                if (me == 1) {
+                    #stack[int, 64] mdt = cssc::peek64(txSemaSymDeclType + o);
+                    if (dt == 0 - 1) { dt = mdt; }
+                    else { if (mdt != dt) { conflict = 1; } }
+                    #delete[mdt];
+                }
                 #delete[me];
             }
             #delete[ok];
@@ -3451,6 +5597,11 @@
     }
     #delete[i];
     #delete[go];
+    // The type check (NO_SUCH_METHOD) resolves a receiver by NAME only; when the
+    // same name is declared at different types in different scopes (e.g. an
+    // `array<string> collector` in one block and a `string collector` in another)
+    // the type is ambiguous — report unknown so the check stays silent (no FP).
+    if (conflict == 1) { dt = 0 - 1; }
     return dt;
 }
 
@@ -3461,6 +5612,8 @@
     #scanp(txCompStringMethods, int, 0) pOff;
     #scanp(txCompStringMethods, int, 1) pLen;
     #req[txCompStartsWith] txCompStartsWith;
+    txCompStartsWith(pOff, pLen, "append") ma;     if (ma == 1) { cssc::out("append"); cssc::outln(); }     #delete[ma];
+    txCompStartsWith(pOff, pLen, "declared") md;   if (md == 1) { cssc::out("declared"); cssc::outln(); }   #delete[md];
     txCompStartsWith(pOff, pLen, "char_at") m1;    if (m1 == 1) { cssc::out("char_at"); cssc::outln(); }    #delete[m1];
     txCompStartsWith(pOff, pLen, "contains") m2;   if (m2 == 1) { cssc::out("contains"); cssc::outln(); }   #delete[m2];
     txCompStartsWith(pOff, pLen, "endswith") m3;   if (m3 == 1) { cssc::out("endswith"); cssc::outln(); }   #delete[m3];
@@ -3487,6 +5640,7 @@
     #req[txCompStartsWith] txCompStartsWith;
     txCompStartsWith(pOff, pLen, "at") m1;         if (m1 == 1) { cssc::out("at"); cssc::outln(); }         #delete[m1];
     txCompStartsWith(pOff, pLen, "clear") m2;      if (m2 == 1) { cssc::out("clear"); cssc::outln(); }      #delete[m2];
+    txCompStartsWith(pOff, pLen, "declared") md;   if (md == 1) { cssc::out("declared"); cssc::outln(); }   #delete[md];
     txCompStartsWith(pOff, pLen, "contains") m3;   if (m3 == 1) { cssc::out("contains"); cssc::outln(); }   #delete[m3];
     txCompStartsWith(pOff, pLen, "erase") m4;      if (m4 == 1) { cssc::out("erase"); cssc::outln(); }      #delete[m4];
     txCompStartsWith(pOff, pLen, "first") m5;      if (m5 == 1) { cssc::out("first"); cssc::outln(); }      #delete[m5];
@@ -3507,7 +5661,7 @@
     #scanp(txCompBindMethods, int, 0) pOff;
     #scanp(txCompBindMethods, int, 1) pLen;
     #req[txEmitFiltered] txEmitFiltered;
-    txEmitFiltered(pOff, pLen, "size\nlength\naddmap\nat\npush_back\npop_back\nclear\ncontains\nindexof\nfirst\nlast\ninsert\nerase\nreverse\nslice");
+    txEmitFiltered(pOff, pLen, "size\nlength\naddmap\nat\npush_back\npop_back\nclear\ncontains\nindexof\nfirst\nlast\ninsert\nerase\nreverse\nslice\ndeclared");
 }
 
 // built-in `map<K,V>` methods (8) — matching map_si / map_ss.
@@ -3516,6 +5670,7 @@
     #scanp(txCompMapMethods, int, 1) pLen;
     #req[txCompStartsWith] txCompStartsWith;
     txCompStartsWith(pOff, pLen, "clear") m1;      if (m1 == 1) { cssc::out("clear"); cssc::outln(); }      #delete[m1];
+    txCompStartsWith(pOff, pLen, "declared") md;   if (md == 1) { cssc::out("declared"); cssc::outln(); }   #delete[md];
     txCompStartsWith(pOff, pLen, "get") m2;        if (m2 == 1) { cssc::out("get"); cssc::outln(); }        #delete[m2];
     txCompStartsWith(pOff, pLen, "has") m3;        if (m3 == 1) { cssc::out("has"); cssc::outln(); }        #delete[m3];
     txCompStartsWith(pOff, pLen, "keys") m4;       if (m4 == 1) { cssc::out("keys"); cssc::outln(); }       #delete[m4];
@@ -3555,6 +5710,77 @@
     #delete[sid];
     #delete[bestStart];
     return best;
+}
+
+// Scope id of the `#define` that ENCLOSES the byte offset `off`, resolved by
+// scanning the source BACKWARD for the nearest `#define(NAME` and mapping NAME
+// to its body scope (owner-kind 2). Unlike txScopeAt (line-range based), this is
+// immune to the completion's cursor-line blanking, which shrinks a scope's
+// recorded end line below the cursor when the `#req[` line is the body's only
+// statement -- the exact case that left `#req[` completion empty. For a nested
+// `#define` the nearest backward header is the INNER define, so its parent chain
+// (the enclosing define's locals + globals) is what becomes requirable. Falls
+// back to the line-based scope when the offset is not inside any `#define`.
+#define(txReqScopeAt) {
+    #scanp(txReqScopeAt, int, 0) off;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txSpanEqLit] txSpanEqLit;
+    #req[txScopeByOwner] txScopeByOwner;
+    #req[txScopeAt] txScopeAt;
+    #req[txSemaLineOf] txSemaLineOf;
+    #stack[int, 64] i = off;
+    #stack[int, 64] result = 0;
+    #stack[int, 32] state = 0;                          // 0 searching, 1 done
+    while (state == 0) {
+        if (i <= 0) { state = 1; }
+        if (state == 0) {
+            i = i - 1;
+            if (cssc::peek8(txSrc + i) == 35) {         // '#'
+                txSpanEqLit(i + 1, 7, "define(") isdef;
+                if (isdef == 1) {
+                    #stack[int, 64] ns = i + 8;         // first byte of NAME
+                    #stack[int, 64] ne = ns;
+                    #stack[int, 32] sg = 1;
+                    while (sg == 1) {
+                        if (ne >= txSrcLen) { sg = 0; }
+                        if (sg == 1) {
+                            #stack[int, 64] c = cssc::peek8(txSrc + ne);
+                            #stack[int, 32] id = 0;
+                            if (c >= 48) { if (c <= 57) { id = 1; } }
+                            if (c >= 65) { if (c <= 90) { id = 1; } }
+                            if (c >= 97) { if (c <= 122) { id = 1; } }
+                            if (c == 95) { id = 1; }
+                            if (id == 1) { ne = ne + 1; }
+                            if (id == 0) { sg = 0; }
+                            #delete[c];
+                            #delete[id];
+                        }
+                    }
+                    #delete[sg];
+                    if (ne > ns) {
+                        txScopeByOwner(ns, ne - ns, 2) sc;
+                        result = sc;
+                        #delete[sc];
+                    }
+                    #delete[ns];
+                    #delete[ne];
+                    state = 1;
+                }
+                #delete[isdef];
+            }
+        }
+    }
+    #delete[i];
+    #delete[state];
+    if (result == 0) {                                  // not inside a #define -> line-based
+        txSemaLineOf(off) ln;
+        txScopeAt(ln) sc2;
+        result = sc2;
+        #delete[ln];
+        #delete[sc2];
+    }
+    return result;
 }
 
 // 1 if the partial (pOff,pLen) occurs case-insensitively anywhere in the name
@@ -3789,9 +6015,14 @@
 // off = cursor offset (where the marker was). Detect the context and emit.
 //   #partial -> directives;  Obj->m -> object members;  obj.m -> object labels;
 //   Sector::m -> sector public members;  bare word -> in-scope names + kw/types.
-// #req[ candidates: kind-1 slots declared in ENCLOSING scopes (across isolation
+// #req[ candidates: bindings declared in ENCLOSING scopes (across isolation
 // barriers — that's what #req imports), prefix-matched, excluding deleted names
 // and duplicates. Skips the current scope's own locals (they need no #req).
+// Requirable = anything the runtime lets `#req[X]` name: a slot (kind 1), a
+// callable/#define (2, `#req` a function then CALL it), a param (5) of an
+// enclosing define, or an already-imported alias (7, re-#req'd through nested
+// defines — e.g. `#req[REG_ALLOCATE]` inside a define nested in the one that
+// itself did `#req[..] *REG_ALLOCATE`). Types (object/sector) are not #req'd.
 #define(txCompImportable) {
     #scanp(txCompImportable, int, 0) scope;
     #scanp(txCompImportable, int, 1) pOff;
@@ -3821,7 +6052,14 @@
             if (i >= txSemaSymCount) { ig = 0; }
             if (ig == 1) {
                 #stack[int, 64] o = i * 8;
-                if (cssc::peek64(txSemaSymKind + o) == 1) {
+                #stack[int, 64] sk = cssc::peek64(txSemaSymKind + o);
+                #stack[int, 32] reqK = 0;               // requirable kinds: slot/callable/param/import
+                if (sk == 1) { reqK = 1; }
+                if (sk == 2) { reqK = 1; }
+                if (sk == 5) { reqK = 1; }
+                if (sk == 7) { reqK = 1; }
+                #delete[sk];
+                if (reqK == 1) {
                     if (cssc::peek64(txSemaSymScope + o) == s) {
                         #stack[int, 64] nOff = cssc::peek64(txSemaSymOff + o);
                         #stack[int, 64] nLen = cssc::peek64(txSemaSymLen + o);
@@ -3864,6 +6102,7 @@
                         #delete[nLen];
                     }
                 }
+                #delete[reqK];
                 #delete[o];
                 if (ig == 1) { i = i + 1; }
             }
@@ -4334,186 +6573,22 @@
     #scanp(txCompModuleMethods, int, 1) aliasLen;
     #scanp(txCompModuleMethods, int, 2) pOff;
     #scanp(txCompModuleMethods, int, 3) pLen;
-    #req[txSrc] txSrc;
-    #req[txSrcLen] txSrcLen;
-    #req[txEmitFiltered] txEmitFiltered;
-    #req[txSpanEqLit] txSpanEqLit;
-    #req[txDdSpanEq] txDdSpanEq;
-    #stack[int, 64] modOff = 0;
-    #stack[int, 64] modLen = 0;
-    #stack[int, 32] found = 0;
-    #stack[int, 64] i = 0;
-    while (i < txSrcLen) {
-        if (found == 1) { i = txSrcLen; }
-        if (found == 0) {
-            #stack[int, 32] hit = 0;
-            if (cssc::peek8(txSrc + i) == 35) {                 // '#'
-                txSpanEqLit(i + 1, 7, "include") inc;
-                txSpanEqLit(i + 1, 6, "depend") dep;
-                if (inc == 1) { hit = 1; }
-                if (dep == 1) { hit = 1; }
-                #delete[inc];
-                #delete[dep];
-            }
-            if (hit == 1) {
-                #stack[int, 64] q = i;
-                #stack[int, 32] qg = 1;                          // advance to the opening quote
-                while (qg == 1) {
-                    if (q >= txSrcLen) { qg = 0; }
-                    if (qg == 1) {
-                        #stack[int, 64] qc = cssc::peek8(txSrc + q);
-                        if (qc == 34) { qg = 0; }
-                        if (qc == 39) { qg = 0; }
-                        if (qc == 41) { qg = 0; }                // ')' before a quote -> bail
-                        #delete[qc];
-                        if (qg == 1) { q = q + 1; }
-                    }
-                }
-                #stack[int, 64] mo = 0;
-                #stack[int, 64] ml = 0;
-                if (q < txSrcLen) {
-                    #stack[int, 64] qc2 = cssc::peek8(txSrc + q);
-                    if (qc2 == 34) {                             // string module name
-                        mo = q + 1;
-                        #stack[int, 64] e = mo;
-                        #stack[int, 32] eg = 1;
-                        while (eg == 1) {
-                            if (e >= txSrcLen) { eg = 0; }
-                            if (eg == 1) { if (cssc::peek8(txSrc + e) == 34) { eg = 0; } else { e = e + 1; } }
-                        }
-                        ml = e - mo;
-                        #delete[e];
-                        #delete[eg];
-                        // skip: closing quote, ')', spaces -> the alias identifier
-                        #stack[int, 64] a = mo + ml + 1;
-                        #stack[int, 32] ag = 1;
-                        while (ag == 1) {
-                            if (a >= txSrcLen) { ag = 0; }
-                            if (ag == 1) {
-                                #stack[int, 64] ac = cssc::peek8(txSrc + a);
-                                #stack[int, 32] skip = 0;
-                                if (ac == 41) { skip = 1; }      // ')'
-                                if (ac == 32) { skip = 1; }
-                                if (ac == 9) { skip = 1; }
-                                if (ac == 13) { skip = 1; }
-                                if (ac == 10) { skip = 1; }
-                                if (skip == 0) { ag = 0; }
-                                #delete[ac];
-                                #delete[skip];
-                                if (ag == 1) { a = a + 1; }
-                            }
-                        }
-                        #delete[ag];
-                        // read the alias identifier
-                        #stack[int, 64] al = 0;
-                        #stack[int, 32] ig = 1;
-                        while (ig == 1) {
-                            #stack[int, 64] ic = cssc::peek8(txSrc + a + al);
-                            #stack[int, 32] isw = 0;
-                            if (ic >= 65) { if (ic <= 90) { isw = 1; } }
-                            if (ic >= 97) { if (ic <= 122) { isw = 1; } }
-                            if (ic >= 48) { if (ic <= 57) { isw = 1; } }
-                            if (ic == 95) { isw = 1; }
-                            if (isw == 0) { ig = 0; }
-                            #delete[ic];
-                            #delete[isw];
-                            if (ig == 1) { al = al + 1; }
-                        }
-                        #delete[ig];
-                        txDdSpanEq(aliasOff, aliasLen, a, al) me;
-                        if (me == 1) { modOff = mo; modLen = ml; found = 1; }
-                        #delete[me];
-                        #delete[al];
-                        #delete[a];
-                    }
-                    #delete[qc2];
-                }
-                #delete[mo];
-                #delete[ml];
-                #delete[q];
-            }
-            #delete[hit];
-            if (found == 0) { i = i + 1; }
-        }
+    #req[txMdAliasCanon] txMdAliasCanon;
+    #req[txMdCanOff] txMdCanOff;
+    #req[txMdCanLen] txMdCanLen;
+    #req[txMdEmitTypes] txMdEmitTypes;
+    #req[txMdEmitFuncs] txMdEmitFuncs;
+    // Resolve the alias (`#include("MOD") alias;`) to its CANONICAL module key
+    // (arch-prefix stripped) and emit that module's constructor TYPES + namespace
+    // FUNCTIONS from the generated moddocs surface -- the SAME cssc_aware STUBs the
+    // Python reference completes from, so gui/stdio/cssc.dll/cssc.sys/... stay in
+    // sync automatically (no hand-maintained per-module list to drift).
+    txMdAliasCanon(aliasOff, aliasLen) f;
+    if (f == 1) {
+        txMdEmitTypes(txMdCanOff, txMdCanLen, pOff, pLen);
+        txMdEmitFuncs(txMdCanOff, txMdCanLen, pOff, pLen);
     }
-    #delete[i];
-    if (found == 1) {
-        txSpanEqLit(modOff, modLen, "stdio") s1;
-        if (s1 == 1) { txEmitFiltered(pOff, pLen, "write\nread\nexists\ncreatefile\ncreatedir\nremovefile\nremovedir\nmove\ncwd\nlistdir"); }
-        #delete[s1];
-        txSpanEqLit(modOff, modLen, "sizes") s2;
-        if (s2 == 1) { txEmitFiltered(pOff, pLen, "small_int\nnormal_int\nlarge_int\nsmall_float\nnormal_float\nlarge_float\nsmall_string\nnormal_string\nlarge_string\nsmall_bool\nnormal_bool\nlarge_bool\nsmall_array\nnormal_array\nlarge_array\nsmall_vector\nnormal_vector\nlarge_vector\nsmall_map\nnormal_map\nlarge_map\nsmall_auto\nnormal_auto\nlarge_auto"); }
-        #delete[s2];
-        txSpanEqLit(modOff, modLen, "cssc.ini") s3;
-        if (s3 == 1) { txEmitFiltered(pOff, pLen, "open\ncreate\nread\nwrite\ndelete\nhas_key\nhas_section\nsections\nkeys\nvalues\nall\nsave\nmerge\nexists\nsize\nsearch\nget_typed\nset_typed\nget_or_default\nincrement\ntoggle\nadd_section\nremove_section\nto_json\nto_map\nfrom_map"); }
-        #delete[s3];
-        txSpanEqLit(modOff, modLen, "cssc.sys") s4;
-        if (s4 == 1) { txEmitFiltered(pOff, pLen, "platform\nos\narch\nhostname\nuser\npid\nargv\nargc\nexec\nexec_async\nexit\nsleep\ntime\ntimestamp\nclock\nuptime\ncpu_count\nmemory\ndisk_usage\nis_admin\nwhich\nkill\nprocesses\nis_64bit\nbeep\nclipboard_get\nclipboard_set\nopen_url\nopen_file\nnotify\ntemp_dir\nenv"); }
-        #delete[s4];
-        txSpanEqLit(modOff, modLen, "cssc.math") s5;
-        if (s5 == 1) { txEmitFiltered(pOff, pLen, "pi\ne\ntau\ninf\nnan\nabs\nceil\nfloor\nround\ntrunc\nsign\nclamp\nmin\nmax\npow\nsqrt\ncbrt\nhypot\nexp\nlog\nlog2\nlog10\nsin\ncos\ntan\nasin\nacos\natan\natan2\nsinh\ncosh\ntanh\ndeg\nrad\nfactorial\ngcd\nlcm\nperm\ncomb\nfib\nmod\ndivmod\nis_even\nis_odd\nis_prime\nfmod\nsum\navg\nmedian\nvariance\nstddev\ndot\ncross\nmagnitude\nnormalize\ndistance\nlerp\nmap_range"); }
-        #delete[s5];
-        txSpanEqLit(modOff, modLen, "cssc.fastif") s6;
-        if (s6 == 1) { txEmitFiltered(pOff, pLen, "if\nunless\neither\ncoalesce\nfallback\nall\nany\nnone\neq\nne\ngt\nlt\nge\nle\nguard\nassert\nrequire\nmap_value\nclamp\nin_range\nbetween\ndefault\nis_null\nis_not_null\nnull_or\nswitch\nmatch\nand_then\nor_else\nxor\nnand\nnor\nimplies"); }
-        #delete[s6];
-        txSpanEqLit(modOff, modLen, "cssc.peek") s7;
-        if (s7 == 1) { txEmitFiltered(pOff, pLen, "peek\ncpeek\npeek_safe\npeek_next\npeek_prev\npeek_first\npeek_last\npeek_at\npeek_range\npeek_window\npeek_around\npeek_ahead\npeek_behind\nfind\nfind_index\nfind_last\ncontains\ncount\nhas_next\nhas_prev\nis_first\nis_last\nis_empty\nis_valid_index\nmin\nmax\nsum\navg\ntake\ntake_last\nskip\nskip_last\npairs\nzip\nenumerate"); }
-        #delete[s7];
-        txSpanEqLit(modOff, modLen, "peek") s7b;
-        if (s7b == 1) { txEmitFiltered(pOff, pLen, "peek\ncpeek\npeek_safe\npeek_next\npeek_prev\npeek_first\npeek_last\nfind\nfind_index\ncontains\ncount\nis_empty\nmin\nmax\nsum\navg\ntake\nskip\npairs\nzip\nenumerate"); }
-        #delete[s7b];
-        txSpanEqLit(modOff, modLen, "cssc.io") s8;
-        if (s8 == 1) { txEmitFiltered(pOff, pLen, "read\nwrite\nappend\nread_lines\nwrite_lines\nread_json\nwrite_json\nexists\nsize\ndelete\ncopy\nmove\nrename\ntouch\nhead\ntail\ngrep\ncount_lines\nmd5\nsha256\ntemp_file\ncompress\ndecompress"); }
-        #delete[s8];
-        txSpanEqLit(modOff, modLen, "cssc.paths") s9;
-        if (s9 == 1) { txEmitFiltered(pOff, pLen, "resolve\njoin\ndirname\nbasename\next\nstem\nexists\nis_file\nis_dir\nabs\nrel\nnormalize\nlist\nlist_files\nlist_dirs\nhome\ntemp\ncwd\nscript_dir\nappdata\nmkdir\nrmdir\ntouch\nsize\ncopy\nmove\ndelete\nrename\nparent\nparts"); }
-        #delete[s9];
-        txSpanEqLit(modOff, modLen, "cssc.env") s10;
-        if (s10 == 1) { txEmitFiltered(pOff, pLen, "get\nset\nhas\ndelete\nall\nkeys\nexpand\npath\nadd_path\nhome\nuser\ntemp\nappdata\nhostname\nos_name\narch\nis_windows\nis_linux\nis_mac\nget_or_default\nget_int\nget_bool\nget_list"); }
-        #delete[s10];
-        txSpanEqLit(modOff, modLen, "cssc.binary") s11;
-        if (s11 == 1) { txEmitFiltered(pOff, pLen, "read\nwrite\ntobinary\nfrombinary\ntypeof\nadd\nfind\ncontains\ndelete\nget\ngetBytes"); }
-        #delete[s11];
-        txSpanEqLit(modOff, modLen, "cssl") s12;
-        if (s12 == 1) { txEmitFiltered(pOff, pLen, "run\nexecute\nresolve\nresolve_exists\nvalidate"); }
-        #delete[s12];
-        txSpanEqLit(modOff, modLen, "sys") s13;
-        if (s13 == 1) { txEmitFiltered(pOff, pLen, "args\nargc\narg\nhas_arg\narg_int\narg_float\narg_bool"); }
-        #delete[s13];
-        txSpanEqLit(modOff, modLen, "video") s14;
-        if (s14 == 1) { txEmitFiltered(pOff, pLen, "open\nclose\nisOpen\npresent\nclear\nsetPixel\ndrawLine\ndrawRect\nfillRect\ndrawCircle\nsetMatrix"); }
-        #delete[s14];
-        txSpanEqLit(modOff, modLen, "cssc.dll") s15;
-        if (s15 == 1) { txEmitFiltered(pOff, pLen, "createdll\ndeletedll\nhasdll\nlistdlls\nlink\nget\nunlink\nislinked\neditlink\ngetall\nfind\ncreatesection\nlistsections\nlistentries"); }
-        #delete[s15];
-        txSpanEqLit(modOff, modLen, "x86_64.gui") sg;
-        if (sg == 1) { txEmitFiltered(pOff, pLen, "Screen\nFont\nText\nButton\nToolbar\nTextBox\nEditor\nList\nTree\nTerminal\nMenu\nPrompt\nTabs\nBrowser\nCallback"); }
-        #delete[sg];
-        txSpanEqLit(modOff, modLen, "sound") ssn;
-        if (ssn == 1) { txEmitFiltered(pOff, pLen, "load\nloadFromBytes\nunload\nplay\nstop\npause\nresume\nstopAll\nsetVolume\ngetVolume\nsetMasterVolume\ngetMasterVolume\nmute\nunmute\nisMuted\nfadeIn\nfadeOut\ncrossfade\naddEffect\nremoveEffect\nclearEffects\nlistEffects"); }
-        #delete[ssn];
-        txSpanEqLit(modOff, modLen, "keyboard") skb;
-        if (skb == 1) { txEmitFiltered(pOff, pLen, "listen\nunlisten\nhotkey\nisPressed\nisHeld\ngetState\ngetPressedKeys\nwaitFor\ntype\npress\nrelease\ntap\nstop\nstart\nisListening\nclearHotkeys\nclearListeners"); }
-        #delete[skb];
-        txSpanEqLit(modOff, modLen, "mouse") smo;
-        if (smo == 1) { txEmitFiltered(pOff, pLen, "client\nattach\nposition\nx\ny\nmove\nmoveRelative\nclick\ndoubleClick\npress\nrelease\nisPressed\nscroll\nscrollHoriz\nlisten\nunlisten\ngetButtons\nsync\nclamp\nclampX\nclampY\nisOver"); }
-        #delete[smo];
-        txSpanEqLit(modOff, modLen, "matrix") smx;
-        if (smx == 1) { txEmitFiltered(pOff, pLen, "get\nset\nfill\ncopy\nwidth\nheight"); }
-        #delete[smx];
-        txSpanEqLit(modOff, modLen, "network.http") snh;
-        if (snh == 1) { txEmitFiltered(pOff, pLen, "get\npost\nput\ndelete\nrequest\nset_timeout"); }
-        #delete[snh];
-        txSpanEqLit(modOff, modLen, "serialcommunication") ssc;
-        if (ssc == 1) { txEmitFiltered(pOff, pLen, "listen\nsend\nout\nread"); }
-        #delete[ssc];
-        txSpanEqLit(modOff, modLen, "asyncthreads") sat;
-        if (sat == 1) { txEmitFiltered(pOff, pLen, "run\ngetOutput"); }
-        #delete[sat];
-    }
-    #delete[modOff];
-    #delete[modLen];
-    #delete[found];
+    #delete[f];
 }
 
 // The builtin `cssc::` namespace — the native intrinsics the compiler lowers:
@@ -4525,122 +6600,141 @@
     #scanp(txCompCsscMethods, int, 0) pOff;
     #scanp(txCompCsscMethods, int, 1) pLen;
     #req[txEmitFiltered] txEmitFiltered;
-    txEmitFiltered(pOff, pLen, "outln\nout\nip\nipcall\nipto\nrun\nalloc\nfree\npeek8\npeek16\npeek32\npeek64\npoke8\npoke16\npoke32\npoke64\nmemcopy\nmemfill32\nprintRaw\nhostRead\nhostErr\nosReadFile\nargc\nargStr\nband\nbor\nbxor\nshl\nshr\niToF\nfToI\nfAdd\nfSub\nfMul\nfDiv\nfMod\nfCmp\nfNeg\nfAbs\nfSqrt\nfFloor\nfCeil\nfTrunc\nfRound\nfToStr\nstrToF\nosTime\nosTimestamp\nosClock\nosDetime\nosSdetime\nosSleep\nsleep\nosGetenv\nosSystem\nosPopen\nosPid\nosBeep\nosDiskUsage\nosKill\nosReadLine\nosStrftime\noutb\noutw\noutl\ninb\ninw\ninl\nmakeExec\ncallAddr\nrtsym\noutCapture\noutCaptureLen\noutCaptureEnd\nmodPath\nmodRead\nmodPathInc\nreadCs\nfontRow\nhlt\ncli\nsti\npause\nlgdt\nlidt\nltr\nreadCr0\nreadCr2\nreadCr3\nreadCr4\nwriteCr0\nwriteCr3\nwriteCr4\ninvlpg\nrdmsr\nwrmsr\nrdtsc\nisrFrame\nreadRsp\nfbAddr\nfbWidth\nfbHeight\nfbPitch\nfbBpp\nhhdmOffset\nmemmapCount\nmemmapBase\nmemmapLength\nmemmapType\nmemUsable\nheapUsed\nframesFree\nframesTotal\nmapMmio\nPI\nTAU\nE\nSQRT2\nLN2\nLN10\nEPSILON\nINFINITY");
+    // Two surfaces on `cssc::`: the low-level self-hosted/native primitives
+    // (peek/poke/alloc/f*/os*/kernel) AND the user-facing interpreter builtins
+    // (I/O, math, type-conv, container, control-flow, random, time, CLI). Both
+    // resolve at runtime, so both complete. The user-facing set mirrors the
+    // Python reference's `cssc::` completion (cssl_cssc `_ns_builtins` + the cssc
+    // CLI module) so the IDE offers random/to_int/typeof/sqrt/push/sort/... too.
+    txEmitFiltered(pOff, pLen, "outln\nout\nip\nipcall\nipto\nrun\nalloc\nfree\npeek8\npeek16\npeek32\npeek64\npoke8\npoke16\npoke32\npoke64\nmemcopy\nmemfill32\nprintRaw\nhostRead\nhostErr\nosReadFile\nargc\nargStr\nband\nbor\nbxor\nshl\nshr\niToF\nfToI\nfAdd\nfSub\nfMul\nfDiv\nfMod\nfCmp\nfNeg\nfAbs\nfSqrt\nfFloor\nfCeil\nfTrunc\nfRound\nfToStr\nstrToF\nosTime\nosTimestamp\nosClock\nosDetime\nosSdetime\nosSleep\nsleep\nosGetenv\nosSystem\nosPopen\nosPid\nosBeep\nosDiskUsage\nosKill\nosReadLine\nosStrftime\noutb\noutw\noutl\ninb\ninw\ninl\nmakeExec\ncallAddr\nrtsym\noutCapture\noutCaptureLen\noutCaptureEnd\nmodPath\nmodRead\nmodPathInc\nreadCs\nfontRow\nhlt\ncli\nsti\npause\nlgdt\nlidt\nltr\nreadCr0\nreadCr2\nreadCr3\nreadCr4\nwriteCr0\nwriteCr3\nwriteCr4\ninvlpg\nrdmsr\nwrmsr\nrdtsc\nisrFrame\nreadRsp\nfbAddr\nfbWidth\nfbHeight\nfbPitch\nfbBpp\nhhdmOffset\nmemmapCount\nmemmapBase\nmemmapLength\nmemmapType\nmemUsable\nheapUsed\nframesFree\nframesTotal\nmapMmio\nPI\nTAU\nE\nSQRT2\nLN2\nLN10\nEPSILON\nINFINITY\nabs\nmin\nmax\nlen\npush\npop\nsort\nrange\nsqrt\ninput\nexit\ntypeof\nis_string\nto_int\nto_float\nto_string\nrandom\nrandom_int\ntime\ntimestamp\ndate\ndatetime\ndetime\nsdetime\nelapsed\nclock\nuptime\ntime_format\nset_timezone\nreboot\nshell\nargs\ncopy\nntp_sync\nwifi_connect\nanalyze\nassemble\nbuild\ninterpret\ncreate_runtime\npctrace");
 }
 
-// `alias::` where alias is a `#load["rel/path.cssc"] alias;` binding -> complete the
-// LOADED file's top-level definitions (#define/#cdefine/sector/object names). Scans
-// the source for the matching #load, resolves the quoted path against the edited
-// file's directory, reads + scans that file, and emits the newly-found names that
-// prefix-match the partial word.
+// Resolve whether module alias (aliasOff,aliasLen) is LOADED at byte `cursorOff`
+// and, if so, where its file PATH string lives in txSrc. Scans every
+// `#load[path] alias` / `#unload[alias]` BEFORE the cursor, last-one-wins (mirrors
+// the runtime: #unload drops the module, a later #load re-binds it). Returns 1 and
+// sets txLoadPathO/txLoadPathL to the path span on success, else 0.
+#define(txLoadPathAt) {
+    #scanp(txLoadPathAt, int, 0) aliasOff;
+    #scanp(txLoadPathAt, int, 1) aliasLen;
+    #scanp(txLoadPathAt, int, 2) cursorOff;
+    #req[txSrc] txSrc;
+    #req[txSrcLen] txSrcLen;
+    #req[txSpanEqLit] txSpanEqLit;
+    #req[txDdSpanEq] txDdSpanEq;
+    #req[txLoadPathO] txLoadPathO;
+    #req[txLoadPathL] txLoadPathL;
+    #stack[int, 64] loaded = 0;
+    #stack[int, 64] lim = cursorOff;
+    if (lim > txSrcLen) { lim = txSrcLen; }
+    #stack[int, 64] i = 0;
+    while (i < lim) {
+        if (cssc::peek8(txSrc + i) == 35) {                      // '#'
+            txSpanEqLit(i + 1, 4, "load") isL;
+            txSpanEqLit(i + 1, 6, "unload") isU;
+            if (isU == 1) {                                      // #unload[alias]
+                #stack[int, 64] b = i + 7;                       // scan to '['
+                #stack[int, 32] bg = 1;
+                while (bg == 1) {
+                    if (b >= lim) { bg = 0; }
+                    if (bg == 1) { #stack[int, 64] bc = cssc::peek8(txSrc + b); if (bc == 91) { bg = 0; } else { if (bc == 10) { bg = 0; b = lim; } else { b = b + 1; } } #delete[bc]; }
+                }
+                #delete[bg];
+                if (b < lim) {
+                    #stack[int, 64] a = b + 1;
+                    #stack[int, 32] ws2 = 1;
+                    while (ws2 == 1) { if (a >= lim) { ws2 = 0; } if (ws2 == 1) { #stack[int, 64] wc = cssc::peek8(txSrc + a); if (wc == 32) { a = a + 1; } else { if (wc == 9) { a = a + 1; } else { ws2 = 0; } } #delete[wc]; } }
+                    #delete[ws2];
+                    #stack[int, 64] al = 0;
+                    #stack[int, 32] ig = 1;
+                    while (ig == 1) {
+                        if (a + al >= lim) { ig = 0; }
+                        if (ig == 1) { #stack[int, 64] ic = cssc::peek8(txSrc + a + al); #stack[int, 32] iw = 0; if (ic >= 65) { if (ic <= 90) { iw = 1; } } if (ic >= 97) { if (ic <= 122) { iw = 1; } } if (ic >= 48) { if (ic <= 57) { iw = 1; } } if (ic == 95) { iw = 1; } if (iw == 1) { al = al + 1; } else { ig = 0; } #delete[ic]; #delete[iw]; }
+                    }
+                    #delete[ig];
+                    txDdSpanEq(aliasOff, aliasLen, a, al) mu;
+                    if (mu == 1) { loaded = 0; }
+                    #delete[mu];
+                    #delete[al];
+                    #delete[a];
+                }
+                #delete[b];
+            }
+            if (isL == 1) {                                      // #load[path] alias
+                #stack[int, 64] q = i + 5;
+                #stack[int, 32] qg = 1;
+                while (qg == 1) {
+                    if (q >= lim) { qg = 0; }
+                    if (qg == 1) { #stack[int, 64] qc = cssc::peek8(txSrc + q); if (qc == 34) { qg = 0; } else { if (qc == 39) { qg = 0; } else { if (qc == 10) { qg = 0; q = lim; } else { q = q + 1; } } } #delete[qc]; }
+                }
+                #delete[qg];
+                if (q < lim) {
+                    #stack[int, 64] mo = q + 1;
+                    #stack[int, 64] e = mo;
+                    #stack[int, 32] eg = 1;
+                    while (eg == 1) { if (e >= lim) { eg = 0; } if (eg == 1) { #stack[int, 64] ec = cssc::peek8(txSrc + e); if (ec == 34) { eg = 0; } else { if (ec == 39) { eg = 0; } else { e = e + 1; } } #delete[ec]; } }
+                    #delete[eg];
+                    #stack[int, 64] ml = e - mo;
+                    #stack[int, 64] a = e + 1;
+                    #stack[int, 32] ag = 1;
+                    while (ag == 1) {
+                        if (a >= lim) { ag = 0; }
+                        if (ag == 1) { #stack[int, 64] ac = cssc::peek8(txSrc + a); #stack[int, 32] sk = 0; if (ac == 93) { sk = 1; } if (ac == 41) { sk = 1; } if (ac == 32) { sk = 1; } if (ac == 9) { sk = 1; } if (sk == 1) { a = a + 1; } else { ag = 0; } #delete[ac]; #delete[sk]; }
+                    }
+                    #delete[ag];
+                    #stack[int, 64] al = 0;
+                    #stack[int, 32] ig = 1;
+                    while (ig == 1) {
+                        if (a + al >= lim) { ig = 0; }
+                        if (ig == 1) { #stack[int, 64] ic = cssc::peek8(txSrc + a + al); #stack[int, 32] iw = 0; if (ic >= 65) { if (ic <= 90) { iw = 1; } } if (ic >= 97) { if (ic <= 122) { iw = 1; } } if (ic >= 48) { if (ic <= 57) { iw = 1; } } if (ic == 95) { iw = 1; } if (iw == 1) { al = al + 1; } else { ig = 0; } #delete[ic]; #delete[iw]; }
+                    }
+                    #delete[ig];
+                    txDdSpanEq(aliasOff, aliasLen, a, al) mm;
+                    if (mm == 1) { loaded = 1; txLoadPathO = mo; txLoadPathL = ml; }
+                    #delete[mm];
+                    #delete[al];
+                    #delete[a];
+                    #delete[ml];
+                    #delete[e];
+                    #delete[mo];
+                }
+                #delete[q];
+            }
+            #delete[isL];
+            #delete[isU];
+        }
+        i = i + 1;
+    }
+    #delete[i];
+    #delete[lim];
+    return loaded;
+}
+
+// `alias::` where alias is a `#load["rel/path.cssc"] alias;` binding STILL loaded at
+// the cursor (respecting a later `#unload[alias]`) -> complete the LOADED file's
+// top-level members (#define/#cdefine funcs, sector/object types, #stack/#heap/#auto
+// vars). Resolves the path against the edited file's directory, reads + harvests the
+// member surface, and emits the newly-found names that prefix-match the partial.
 #define(txCompLoadDefs) {
     #scanp(txCompLoadDefs, int, 0) aliasOff;
     #scanp(txCompLoadDefs, int, 1) aliasLen;
     #scanp(txCompLoadDefs, int, 2) pOff;
     #scanp(txCompLoadDefs, int, 3) pLen;
+    #scanp(txCompLoadDefs, int, 4) cursorOff;
     #req[txSrc] txSrc;
-    #req[txSrcLen] txSrcLen;
-    #req[txSpanEqLit] txSpanEqLit;
-    #req[txDdSpanEq] txDdSpanEq;
-    #req[txScanDefs] txScanDefs;
+    #req[txLoadPathAt] txLoadPathAt;
+    #req[txLoadPathO] txLoadPathO;
+    #req[txLoadPathL] txLoadPathL;
+    #req[txScanModMembers] txScanModMembers;
     #req[txExtBuf] txExtBuf;
     #req[txExtLen] txExtLen;
     #req[txExtInit] txExtInit;
     #req[txCompDirBuf] txCompDirBuf;
     #req[txCompDirLen] txCompDirLen;
-    #stack[int, 64] pathO = 0;
-    #stack[int, 64] pathL = 0;
-    #stack[int, 32] found = 0;
-    #stack[int, 64] i = 0;
-    while (i < txSrcLen) {
-        if (found == 1) { i = txSrcLen; }
-        if (found == 0) {
-            #stack[int, 32] isLoad = 0;
-            if (cssc::peek8(txSrc + i) == 35) {                  // '#'
-                txSpanEqLit(i + 1, 4, "load") ld;
-                if (ld == 1) { isLoad = 1; }
-                #delete[ld];
-            }
-            if (isLoad == 1) {
-                #stack[int, 64] q = i + 5;                       // scan to opening quote
-                #stack[int, 32] qg = 1;
-                while (qg == 1) {
-                    if (q >= txSrcLen) { qg = 0; }
-                    if (qg == 1) {
-                        #stack[int, 64] qc = cssc::peek8(txSrc + q);
-                        if (qc == 34) { qg = 0; }                // '"'
-                        if (qc == 39) { qg = 0; }                // '\''
-                        if (qc == 10) { qg = 0; }                // newline -> bail
-                        #delete[qc];
-                        if (qg == 1) { q = q + 1; }
-                    }
-                }
-                #delete[qg];
-                if (q < txSrcLen) {
-                    #stack[int, 64] qc2 = cssc::peek8(txSrc + q);
-                    if (qc2 == 34) {                             // quoted path
-                        #stack[int, 64] mo = q + 1;
-                        #stack[int, 64] e = mo;
-                        #stack[int, 32] eg = 1;
-                        while (eg == 1) {
-                            if (e >= txSrcLen) { eg = 0; }
-                            if (eg == 1) { if (cssc::peek8(txSrc + e) == 34) { eg = 0; } else { e = e + 1; } }
-                        }
-                        #delete[eg];
-                        #stack[int, 64] ml = e - mo;
-                        #stack[int, 64] a = e + 1;               // after closing quote -> skip ] ) spaces to alias
-                        #stack[int, 32] ag = 1;
-                        while (ag == 1) {
-                            if (a >= txSrcLen) { ag = 0; }
-                            if (ag == 1) {
-                                #stack[int, 64] ac = cssc::peek8(txSrc + a);
-                                #stack[int, 32] skip = 0;
-                                if (ac == 93) { skip = 1; }      // ']'
-                                if (ac == 41) { skip = 1; }      // ')'
-                                if (ac == 32) { skip = 1; }      // space
-                                if (ac == 9) { skip = 1; }       // tab
-                                if (skip == 1) { a = a + 1; } else { ag = 0; }
-                                #delete[ac];
-                                #delete[skip];
-                            }
-                        }
-                        #delete[ag];
-                        #stack[int, 64] al = 0;                  // alias identifier length
-                        #stack[int, 32] ig = 1;
-                        while (ig == 1) {
-                            if (a + al >= txSrcLen) { ig = 0; }
-                            if (ig == 1) {
-                                #stack[int, 64] ic = cssc::peek8(txSrc + a + al);
-                                #stack[int, 32] isw = 0;
-                                if (ic >= 65) { if (ic <= 90) { isw = 1; } }
-                                if (ic >= 97) { if (ic <= 122) { isw = 1; } }
-                                if (ic >= 48) { if (ic <= 57) { isw = 1; } }
-                                if (ic == 95) { isw = 1; }
-                                if (isw == 1) { al = al + 1; } else { ig = 0; }
-                                #delete[ic];
-                                #delete[isw];
-                            }
-                        }
-                        #delete[ig];
-                        txDdSpanEq(aliasOff, aliasLen, a, al) match;
-                        if (match == 1) { pathO = mo; pathL = ml; found = 1; }
-                        #delete[match];
-                        #delete[al];
-                        #delete[a];
-                        #delete[ml];
-                        #delete[e];
-                        #delete[mo];
-                    }
-                    #delete[qc2];
-                }
-                #delete[q];
-            }
-            #delete[isLoad];
-            if (found == 0) { i = i + 1; }
-        }
-    }
-    #delete[i];
-    if (found == 1) {
+    txLoadPathAt(aliasOff, aliasLen, cursorOff) ok;
+    if (ok == 1) {
+        #stack[int, 64] pathO = txLoadPathO;
+        #stack[int, 64] pathL = txLoadPathL;
         if (txExtBuf == 0) { txExtInit(); }
         #stack[int, 64] before = txExtLen;
         #stack[int, 64] pathBuf = cssc::alloc(4096);
@@ -4653,19 +6747,18 @@
         #stack[int, 64] fullLen = pp + pathL;
         #stack[int, 64] fileBuf = cssc::alloc(1200000);
         cssc::osReadFile(pathBuf, fullLen, fileBuf, 1200000) rn;
-        if (rn > 0) { txScanDefs(fileBuf, rn); }
-        // emit the newly-added names in [before, txExtLen) that prefix-match the partial
+        if (rn > 0) { txScanModMembers(fileBuf, rn); }
         #stack[int, 64] ee = before;
         while (ee < txExtLen) {
-            #stack[int, 64] j = ee;
+            #stack[int, 64] jj = ee;
             #stack[int, 32] jg = 1;
             while (jg == 1) {
-                if (j >= txExtLen) { jg = 0; }
-                if (jg == 1) { if (cssc::peek8(txExtBuf + j) == 10) { jg = 0; } else { j = j + 1; } }
+                if (jj >= txExtLen) { jg = 0; }
+                if (jg == 1) { if (cssc::peek8(txExtBuf + jj) == 10) { jg = 0; } else { jj = jj + 1; } }
             }
             #delete[jg];
-            #stack[int, 64] seglen = j - ee;
-            #stack[int, 32] pm = 1;                              // prefix-match pOff/pLen against the name
+            #stack[int, 64] seglen = jj - ee;
+            #stack[int, 32] pm = 1;
             if (pLen > seglen) { pm = 0; }
             if (pm == 1) {
                 #stack[int, 64] c = 0;
@@ -4686,7 +6779,7 @@
             }
             #delete[pm];
             #delete[seglen];
-            ee = j + 1;
+            ee = jj + 1;
         }
         #delete[ee];
         #delete[rn];
@@ -4695,10 +6788,10 @@
         #delete[pp];
         #delete[pathBuf];
         #delete[before];
+        #delete[pathO];
+        #delete[pathL];
     }
-    #delete[found];
-    #delete[pathL];
-    #delete[pathO];
+    #delete[ok];
 }
 
 #define(txCompleteAt) {
@@ -4718,6 +6811,7 @@
     #req[txCompKwType] txCompKwType;
     #req[txSpanEqLit] txSpanEqLit;
     #req[txCompImportable] txCompImportable;
+    #req[txReqScopeAt] txReqScopeAt;
     #req[txCompSectors] txCompSectors;
     #req[txCompModuleNames] txCompModuleNames;
     #req[txCompModuleMethods] txCompModuleMethods;
@@ -4770,10 +6864,13 @@
                         txSpanEqLit(db, dblen, "unload") isUnl;
                         if (isReq == 1) {
                             done = 1;
-                            txSemaLineOf(off) ln;
-                            txScopeAt(ln) sc;
+                            // Enclosing-define scope via backward scan (robust to
+                            // the cursor-line blanking that shrinks a scope below
+                            // the cursor and left `#req[` empty; also picks the
+                            // INNER define so a nested `#req[` sees the parent
+                            // define's locals + globals, not just globals).
+                            txReqScopeAt(off) sc;
                             txCompImportable(sc, p, pLen);
-                            #delete[ln];
                             #delete[sc];
                         }
                         if (isDel == 1) {
@@ -4884,7 +6981,8 @@
                 if (c1 == 62) {                              // "->" object member (type or instance)
                     done = 1;
                     txScanIdentBack(p - 2) q;
-                    txCompMember(q, (p - 2) - q, p, pLen, 1, 3, 0, 1);
+                    txCompMember(q, (p - 2) - q, p, pLen, 1, 3, 0, 1);   // data members
+                    txCompMember(q, (p - 2) - q, p, pLen, 2, 3, 0, 1);   // #define(Obj->m) methods
                     #delete[q];
                 }
             }
@@ -4899,7 +6997,7 @@
                     if (qCssc == 0) {
                         txCompMember(q, (p - 2) - q, p, pLen, 0, 4, 0, 1);   // user sector members
                         txCompModuleMethods(q, (p - 2) - q, p, pLen);        // #include("MOD") alias -> MOD methods
-                        txCompLoadDefs(q, (p - 2) - q, p, pLen);             // #load["file"] alias -> file defs
+                        txCompLoadDefs(q, (p - 2) - q, p, pLen, off);        // #load["file"] alias -> file defs
                     }
                     #delete[qCssc];
                     #delete[q];
@@ -5297,7 +7395,47 @@
         }
         if (k == 10) { txSemaCollectChain(cssc::peek64(txAstB + node * 8), scope); }
         if (k == 11) { txSemaCollectChain(cssc::peek64(txAstC + node * 8), scope); }
-        if (k == 30) { txSemaCollectChain(cssc::peek64(txAstB + node * 8), scope); }
+        if (k == 30) {                                             // SELECT `select (it) ?cursor { .. }`
+            // Register the ?cursor (node off/len = its name span) so it AND its
+            // methods complete inside the body. Kind 7 = borrow (not an owning
+            // slot -> never flagged as a leak). Its element type is inherited
+            // from the iterable when that is a typed container identifier.
+            if (len > 0) {
+                txSemaSymAdd(off, len, 7, scope, node);
+                #stack[int, 64] cSi = txSemaSymCount - 1;
+                #stack[int, 64] itNode = cssc::peek64(txAstA + node * 8);
+                if (itNode != 0) {
+                    if (cssc::peek64(txAstKind + itNode * 8) == 5) {   // iterable is a bare identifier
+                        #stack[int, 64] iOff = cssc::peek64(txAstOff + itNode * 8);
+                        #stack[int, 64] iLen = cssc::peek64(txAstLen + itNode * 8);
+                        #stack[int, 64] gi2 = 0;
+                        #stack[int, 32] gg2 = 1;
+                        while (gg2 == 1) {
+                            if (gi2 >= cSi) { gg2 = 0; }
+                            if (gg2 == 1) {
+                                #stack[int, 64] go3 = gi2 * 8;
+                                txDdSpanEq(iOff, iLen, cssc::peek64(txSemaSymOff + go3), cssc::peek64(txSemaSymLen + go3)) ie;
+                                if (ie == 1) {
+                                    cssc::poke64(txSemaSymDeclType + cSi * 8, cssc::peek64(txSemaSymDeclType + go3));
+                                    cssc::poke64(txSemaSymTypeOff + cSi * 8, cssc::peek64(txSemaSymTypeOff + go3));
+                                    cssc::poke64(txSemaSymTypeLen + cSi * 8, cssc::peek64(txSemaSymTypeLen + go3));
+                                }
+                                #delete[ie];
+                                #delete[go3];
+                                if (gg2 == 1) { gi2 = gi2 + 1; }
+                            }
+                        }
+                        #delete[gi2];
+                        #delete[gg2];
+                        #delete[iOff];
+                        #delete[iLen];
+                    }
+                }
+                #delete[itNode];
+                #delete[cSi];
+            }
+            txSemaCollectChain(cssc::peek64(txAstB + node * 8), scope);
+        }
         if (k == 12) { txSemaCollectChain(cssc::peek64(txAstA + node * 8), scope); }
         #delete[k];
         #delete[off];
@@ -5491,6 +7629,84 @@
     return result;
 }
 
+// POSITION-AWARE variant of txOwnResolve: resolve name (off,len) from fromScope,
+// but among several same-name slots in one scope pick the one whose declaration
+// is the MOST RECENT one BEFORE `posLimit` (the source offset of the reference,
+// e.g. a #delete's target). This is what pairs each delete with the right slot
+// when a name is re-captured in the same scope (`f() s; #delete[s]; f() s;
+// #delete[s];`) — the name-only txOwnResolve returned the first slot for BOTH
+// deletes, leaving the second slot falsely flagged LIFETIME_LEAK.
+#define(txOwnResolveAt) {
+    #scanp(txOwnResolveAt, int, 0) off;
+    #scanp(txOwnResolveAt, int, 1) len;
+    #scanp(txOwnResolveAt, int, 2) fromScope;
+    #scanp(txOwnResolveAt, int, 3) posLimit;
+    #req[txSrc] txSrc;
+    #req[txSemaSymOff] txSemaSymOff;
+    #req[txSemaSymLen] txSemaSymLen;
+    #req[txSemaSymKind] txSemaSymKind;
+    #req[txSemaSymScope] txSemaSymScope;
+    #req[txSemaSymCount] txSemaSymCount;
+    #req[txSemaScopeParent] txSemaScopeParent;
+    #req[txDdSpanEq] txDdSpanEq;
+    #stack[int, 64] result = 0 - 1;
+    #stack[int, 64] scope = fromScope;
+    #stack[int, 32] walking = 1;
+    while (walking == 1) {
+        if (scope < 0) { walking = 0; }
+        if (walking == 1) {
+            #stack[int, 64] bestOff = 0 - 1;
+            #stack[int, 64] i = 0;
+            #stack[int, 32] go = 1;
+            while (go == 1) {
+                if (i >= txSemaSymCount) { go = 0; }
+                if (go == 1) {
+                    #stack[int, 64] o = i * 8;
+                    #stack[int, 64] sk = cssc::peek64(txSemaSymKind + o);
+                    #stack[int, 32] ownish = 0;
+                    if (sk == 1) { ownish = 1; }
+                    if (sk == 5) {
+                        #stack[int, 64] po = cssc::peek64(txSemaSymOff + o);
+                        if (po > 0) { if (cssc::peek8(txSrc + po - 1) == 38) { ownish = 1; } }
+                        #delete[po];
+                    }
+                    if (ownish == 1) {
+                        if (cssc::peek64(txSemaSymScope + o) == scope) {
+                            #stack[int, 64] soff = cssc::peek64(txSemaSymOff + o);
+                            txDdSpanEq(off, len, soff,
+                                       cssc::peek64(txSemaSymLen + o)) eq;
+                            if (eq == 1) {
+                                if (soff < posLimit) {
+                                    if (soff > bestOff) { bestOff = soff; result = i; }
+                                }
+                            }
+                            #delete[eq];
+                            #delete[soff];
+                        }
+                    }
+                    #delete[sk];
+                    #delete[ownish];
+                    #delete[o];
+                    i = i + 1;
+                }
+            }
+            #delete[i];
+            #delete[go];
+            #delete[bestOff];
+            if (result >= 0) { walking = 0; }
+            if (walking == 1) {
+                if (scope == 0) { walking = 0; }
+                if (walking == 1) {
+                    scope = cssc::peek64(txSemaScopeParent + scope * 8);
+                }
+            }
+        }
+    }
+    #delete[scope];
+    #delete[walking];
+    return result;
+}
+
 // First RETURN's copy-flag in a subtree: 1 = `return &x` (copy/owned), 0 =
 // `return x` (reference/borrow), -1 = no return. Does NOT descend into nested
 // #define bodies (k==17) so it reads only THIS function's return.
@@ -5572,6 +7788,7 @@
     #req[txAstOff] txAstOff;
     #req[txAstLen] txAstLen;
     #req[txAstA] txAstA;
+    #req[txAstNum] txAstNum;
     #req[txAstCount] txAstCount;
     #req[txSemaSymNode] txSemaSymNode;
     #req[txFuncIsRefRet] txFuncIsRefRet;
@@ -5634,6 +7851,36 @@
                 #delete[gid];
                 #delete[tline];
             }
+            // A `mirror x` / `return x` (or `*x`) in REFERENCE form (Num==0) hands
+            // its operand out — the caller now references it, so the local is
+            // intentionally NOT #delete'd and must NOT be flagged as a leak. The
+            // `&`-COPY form (Num==1) keeps the local owned, so it still needs a
+            // #delete and is left to leak-check.
+            #stack[int, 32] isesc = 0;
+            if (k == 32) { isesc = 1; }
+            if (k == 20) { isesc = 1; }
+            if (isesc == 1) {
+                if (cssc::peek64(txAstNum + ai * 8) == 0) {
+                    #stack[int, 64] val = cssc::peek64(txAstA + ai * 8);
+                    if (val != 0) {
+                        if (cssc::peek64(txAstKind + val * 8) == 5) {   // bare identifier operand
+                            #stack[int, 64] voff = cssc::peek64(txAstOff + val * 8);
+                            #stack[int, 64] vlen = cssc::peek64(txAstLen + val * 8);
+                            txSemaLineOf(voff) vln;
+                            txScopeAt(vln) vsc;
+                            txOwnResolve(voff, vlen, vsc) vgid;
+                            if (vgid >= 0) { cssc::poke64(freed + vgid * 8, 1); }
+                            #delete[vgid];
+                            #delete[vsc];
+                            #delete[vln];
+                            #delete[voff];
+                            #delete[vlen];
+                        }
+                    }
+                    #delete[val];
+                }
+            }
+            #delete[isesc];
             #delete[k];
             #delete[isdel];
             ai = ai + 1;
@@ -5986,6 +8233,7 @@
             #delete[idx];
         }
         if (k == 7) { txDdRemove(off, len); }                   // DECL re-decl
+        if (k == 15) { txDdRemove(off, len); }                  // RESULT_CAPTURE `f() s;` re-declares s -> clears any prior delete of the old s
         // conditional / barrier bodies: catch-vs-outer, adds truncated on exit
         if (k == 9) {
             #stack[int, 64] b1 = txDdCount;

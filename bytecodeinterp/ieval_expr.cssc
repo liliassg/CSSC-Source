@@ -86,6 +86,7 @@
     #req[ciSecFind] ciSecFind;
     #req[ciObjFind] ciObjFind;
     #req[ciRaiseNamed] ciRaiseNamed;
+    #req[ciRaiseSector] ciRaiseSector;
     #req[ciLineAt] ciLineAt;
     #req[ciModOf] ciModOf;
     #req[ciTokFloat] ciTokFloat;
@@ -3106,6 +3107,7 @@
                         ciVecType(iv) vet;
                         #stack[int, 64] elt = vet;
                         if (vet == 8) { elt = ciVecPopType; }   // auto: real per-element type
+                        if (ciVecPopType == 3) { elt = 3; }     // out-of-bounds read -> null (0x0)
                         ciEvalType = elt;
                         if (elt == 1) { leftOwns = 1; }
                         #delete[elt];
@@ -4160,7 +4162,7 @@
                                     ciRaiseNamed("Unknown cssc builtin: ", ciSrc + o + uqcc + 2, l - uqcc - 2, guln);
                                 }
                                 if (guisc == 0) {
-                                    ciRaiseNamed("Unknown namespace: ", ciSrc + o, uqcc, guln);
+                                    ciRaiseSector(ciSrc + o, uqcc, guln);
                                 }
                                 left = 0;
                                 ciEvalType = 3;
@@ -4507,6 +4509,7 @@
                     ciVecType(iv) vet;
                     #stack[int, 64] elt = vet;
                     if (vet == 8) { elt = ciVecPopType; }   // auto: real per-element type
+                    if (ciVecPopType == 3) { elt = 3; }     // out-of-bounds read -> null (0x0)
                     ciEvalType = elt;
                     if (elt == 1) { leftOwns = 1; }
                     #delete[elt];
@@ -4828,18 +4831,15 @@
             if (op == 7) {
                 if (isFloat == 1) { cssc::fDiv(la, ra) r; left = r; leftType = 2; didFloat = 1; #delete[r]; }
                 if (isFloat == 0) {
-                    if (right == 0) { left = 0; didNull = 1; }
-                    if (right != 0) {
-                        cssc::iToF(left) lf;
-                        cssc::iToF(right) rf;
-                        cssc::fDiv(lf, rf) r;
-                        left = r;
-                        leftType = 2;
-                        didFloat = 1;
-                        #delete[lf];
-                        #delete[rf];
-                        #delete[r];
-                    }
+                    cssc::iToF(left) lf;
+                    cssc::iToF(right) rf;
+                    cssc::fDiv(lf, rf) r;
+                    left = r;
+                    leftType = 2;
+                    didFloat = 1;
+                    #delete[lf];
+                    #delete[rf];
+                    #delete[r];
                 }
             }
             if (op == 8) {
@@ -4851,11 +4851,11 @@
                         if (rm != 0) {
                             #stack[int, 32] rn = 0;
                             if (rm < 0) { rn = 1; }
-                            #stack[int, 32] bn = 0;
-                            if (right < 0) { bn = 1; }
-                            if (rn != bn) { rm = rm + right; }
+                            #stack[int, 32] ln = 0;
+                            if (left < 0) { ln = 1; }
+                            if (rn != ln) { rm = rm - right; }
                             #delete[rn];
-                            #delete[bn];
+                            #delete[ln];
                         }
                         left = rm;
                         #delete[rm];

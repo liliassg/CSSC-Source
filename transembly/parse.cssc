@@ -84,13 +84,20 @@
     if (txCur == 1) { txAstNew(3) n; node = n; cssc::poke64(txAstNum + n * 8, txTokNum); cssc::poke64(txAstB + n * 8, txTokFloat); txAdvance(); #delete[n]; }
     if (node == 0) { if (txCur == 3) { txAstNew(4) n; node = n; cssc::poke64(txAstOff + n * 8, txTokOff); cssc::poke64(txAstLen + n * 8, txTokLen); txAdvance(); #delete[n]; } }
     if (node == 0) {
-        if (txCur == 11) {                            // '{a, b, c}' initializer list
+        // Container literal: `{a, b, c}` OR `[a, b, c]`. Both forms initialise a
+        // vector/array/bind/map (the interpreter accepts either bracket, e.g.
+        // `#heap[vector<int>, N] nums = [10, 20, 30]`). `{`=11 closes on `}`=12;
+        // `[`=23 closes on `]`=24.
+        #stack[int, 32] litClose = 0;
+        if (txCur == 11) { litClose = 12; }
+        if (txCur == 23) { litClose = 24; }
+        if (litClose != 0) {
             txAstNew(22) il; node = il;               // ARRAY_LIT: A = first element
-            txAdvance();                              // '{'
+            txAdvance();                              // '{' or '['
             #stack[int, 64] last = 0;
             #stack[int, 32] go = 1;
             #stack[int, 32] isMap = 0;
-            if (txCur == 12) { go = 0; }              // empty '{}'
+            if (txCur == litClose) { go = 0; }        // empty '{}' / '[]'
             while (go == 1) {
                 txParseExpr() e;
                 if (e != 0) {
@@ -114,13 +121,14 @@
                 // separators just chain the next element.
                 if (txCur == 21) { txAdvance(); } else { if (txCur == 13) { txAdvance(); } else { go = 0; } }
             }
-            if (txCur == 12) { txAdvance(); }         // '}'
+            if (txCur == litClose) { txAdvance(); }   // '}' or ']'
             if (isMap == 1) { cssc::poke64(txAstKind + il * 8, 24); }   // MAP_LIT
             #delete[isMap];
             #delete[go];
             #delete[last];
             #delete[il];
         }
+        #delete[litClose];
     }
     if (node == 0) {
         if (txCur == 2) {                             // IDENT, maybe a call
@@ -228,17 +236,35 @@
             node = mc;
             #delete[mc];
         }
-        if (txCur == 34) {                            // '->' member access (read)
+        if (txCur == 34) {                            // '->' member access OR method call
             txAdvance();
-            txAstNew(38) ar;                          // ARROW
-            cssc::poke64(txAstA + ar * 8, node);      // A = object/instance expr
-            if (txCur == 2) {
-                cssc::poke64(txAstOff + ar * 8, txTokOff);
-                cssc::poke64(txAstLen + ar * 8, txTokLen);
-                txAdvance();                          // member name
+            #stack[int, 64] mnOff = 0;
+            #stack[int, 64] mnLen = 0;
+            if (txCur == 2) { mnOff = txTokOff; mnLen = txTokLen; txAdvance(); }  // member name
+            #stack[int, 32] isCall = 0;
+            if (txCur == 9) { isCall = 1; }           // `->name(args)` -> METHOD_CALL
+            if (isCall == 1) {
+                txAstNew(23) mc;                      // METHOD_CALL (same node as `.name(args)`)
+                cssc::poke64(txAstB + mc * 8, node);  // B = receiver
+                cssc::poke64(txAstOff + mc * 8, mnOff);
+                cssc::poke64(txAstLen + mc * 8, mnLen);
+                txAdvance();                          // '('
+                txParseCallArgs(mc);                  // args chain into A
+                if (txCur == 10) { txAdvance(); }     // ')'
+                node = mc;
+                #delete[mc];
             }
-            node = ar;
-            #delete[ar];
+            if (isCall == 0) {
+                txAstNew(38) ar;                      // ARROW (member read)
+                cssc::poke64(txAstA + ar * 8, node);  // A = object/instance expr
+                cssc::poke64(txAstOff + ar * 8, mnOff);
+                cssc::poke64(txAstLen + ar * 8, mnLen);
+                node = ar;
+                #delete[ar];
+            }
+            #delete[isCall];
+            #delete[mnLen];
+            #delete[mnOff];
         }
         // keep going only while another postfix follows, so `a[0].b()[1]` chains
         if (txCur != 23) { if (txCur != 33) { if (txCur != 34) { mgo = 0; } } }
@@ -486,6 +512,9 @@
     #req[txAstOff] txAstOff;
     #req[txAstLen] txAstLen;
     #req[txDeclTrap] txDeclTrap;
+    #req[txDeclBits] txDeclBits;
+    #req[txDeclHeap] txDeclHeap;
+    #req[txPendHeap] txPendHeap;
     txAdvance();                                          // 'stack'
     #stack[int, 32] isStrType = 0;                        // decl-type: 1=string 2=float 3=vector
     #stack[int, 64] bitW = 0;                             // declared bit width (`[T, N]`)
@@ -584,28 +613,17 @@
         cssc::poke64(txAstNum + n * 8, isStrType);        // decl-type: 1=string 2=float 3=vector
         cssc::poke64(txAstC + n * 8, elemKind);           // vector element kind
         cssc::poke64(txAstB + n * 8, isMember);           // 1 = object member
+        cssc::poke64(txDeclBits + n * 8, bitW);           // declared scalar bit width (0 = implicit)
+        cssc::poke64(txDeclHeap + n * 8, txPendHeap);     // 1 = #heap decl (for the trap message)
         if (txCur == 14) {
             txAdvance();
             txParseExpr() init;
             cssc::poke64(txAstA + n * 8, init);
-            // RAW bit-limit: a `string` literal must fit its declared width, so
-            // `#stack[string, 64] = "hello mirror";` (96 bits > 64) is REJECTED --
-            // matching the reference's `#stack: value exceeds bit limit` trap.
-            if (isStrType == 1) {
-                if (bitW > 0) {
-                    if (cssc::peek64(txAstKindS + init * 8) == 4) {
-                        #stack[int, 64] litBits = cssc::peek64(txAstLen + init * 8) * 8;
-                        // A `string` literal wider than its declared bits is the
-                        // interpreter's RUNTIME "value exceeds bit limit" trap. Mark
-                        // the DECL so lowering emits a trap that fires WHEN the decl
-                        // runs -- an error-path over-long string (main.cssc's e020,
-                        // never reached on a clean compile) must NOT block the build,
-                        // which a compile-time rejection wrongly did (broke self-host).
-                        if (litBits > bitW) { cssc::poke64(txDeclTrap + n * 8, 1); }
-                        #delete[litBits];
-                    }
-                }
-            }
+            // NOTE: a `string` literal wider than its declared bits is NO LONGER a
+            // trap. The interpreter (the oracle) now GROWS the string buffer for a
+            // string value (`#stack[string, 64] = "hello mirror"` keeps the full
+            // 12-byte string; the declared width is nominal for strings). Only
+            // SCALAR bit-limits stay strict. Matches the ref-by-default model.
             #delete[init];
         }
         if (txCur == 13) { txAdvance(); }
@@ -639,9 +657,100 @@
         cssc::poke64(txAstLen + fd * 8, txTokLen);
         txAdvance();                                      // NAME
     }
+    // object method `#define(Obj->method)`: retarget to the MEMBER (`method`),
+    // so it registers as a method in the object's scope. The `->`/`.` chain MUST
+    // be consumed or the leftover `->method)` desyncs the block parse (an object
+    // body would swallow the following statements).
+    #stack[int, 32] dmgo = 1;
+    while (dmgo == 1) {
+        #stack[int, 32] dArrow = 0;
+        if (txCur == 34) { dArrow = 1; }                  // '->'
+        if (txCur == 33) { dArrow = 1; }                  // '.'
+        if (dArrow == 0) { dmgo = 0; }
+        if (dArrow == 1) {
+            txAdvance();                                  // '->' / '.'
+            if (txCur == 2) {
+                cssc::poke64(txAstOff + fd * 8, txTokOff);
+                cssc::poke64(txAstLen + fd * 8, txTokLen);
+                txAdvance();
+            }
+        }
+        #delete[dArrow];
+    }
+    #delete[dmgo];
     if (txCur == 10) { txAdvance(); }                     // ')'
     txParseBlock() body;
     cssc::poke64(txAstA + fd * 8, body);
+    #stack[int, 64] r = fd;
+    #delete[fd];
+    #delete[body];
+    return r;
+}
+
+// cdefine := 'cdefine' '(' NAME (',' PARAM)* ')' block  -> FUNC_DEF (kind 17)
+// with a synthesised SCANP (kind 18) per positional param PREPENDED to the body.
+// `#cdefine(mul, x, y){ return x*y; }` == `#define(mul){ #scanp(mul,int,0) x;
+// #scanp(mul,int,1) y; return x*y; }` -- reusing the whole #define + #scanp +
+// call-marshaling machinery. Cursor ON 'cdefine'.
+#stack[int, 64] txParseCdefine;
+#define(txParseCdefine) {
+    #req[txCur] txCur;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    #req[txAdvance] txAdvance;
+    #req[txParseBlock] txParseBlock;
+    #req[txAstNew] txAstNew;
+    #req[txAstA] txAstA;
+    #req[txAstNum] txAstNum;
+    #req[txAstB] txAstB;
+    #req[txAstNext] txAstNext;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    txAdvance();                                          // 'cdefine'
+    if (txCur == 9) { txAdvance(); }                      // '('
+    txAstNew(17) fd;
+    if (txCur == 2) {
+        cssc::poke64(txAstOff + fd * 8, txTokOff);        // fn NAME (`mul` or `Sec::mul`)
+        cssc::poke64(txAstLen + fd * 8, txTokLen);
+        txAdvance();
+    }
+    // Collect the positional params into a SCANP chain (idx 0,1,2,...).
+    #stack[int, 64] scHead = 0;
+    #stack[int, 64] scLast = 0;
+    #stack[int, 64] pidx = 0;
+    #stack[int, 32] pgo = 1;
+    while (pgo == 1) {
+        if (txCur == 21) {                                // ','
+            txAdvance();
+            // optional ownership prefix on a param name.
+            if (txCur == 6) { txAdvance(); }              // '*'
+            if (txCur == 30) { txAdvance(); }             // '&'
+            if (txCur == 2) {
+                txAstNew(18) sc;                          // SCANP
+                cssc::poke64(txAstOff + sc * 8, txTokOff);
+                cssc::poke64(txAstLen + sc * 8, txTokLen);
+                cssc::poke64(txAstNum + sc * 8, pidx);    // positional index
+                cssc::poke64(txAstB + sc * 8, 0);         // type tag 0 = int/auto
+                if (scHead == 0) { scHead = sc; }
+                if (scLast != 0) { cssc::poke64(txAstNext + scLast * 8, sc); }
+                scLast = sc;
+                pidx = pidx + 1;
+                txAdvance();
+            }
+        } else { pgo = 0; }
+    }
+    #delete[pgo];
+    #delete[pidx];
+    if (txCur == 10) { txAdvance(); }                     // ')'
+    txParseBlock() body;
+    // PREPEND the SCANP chain to the body's statement chain.
+    if (scHead != 0) {
+        cssc::poke64(txAstNext + scLast * 8, cssc::peek64(txAstA + body * 8));
+        cssc::poke64(txAstA + body * 8, scHead);
+    }
+    cssc::poke64(txAstA + fd * 8, body);
+    #delete[scLast];
+    #delete[scHead];
     #stack[int, 64] r = fd;
     #delete[fd];
     #delete[body];
@@ -769,6 +878,10 @@
     // `#req[g] &alias;` is the SNAPSHOT form: an independent copy, with no
     // write-back to the global (probe p_req_amp -> global stays 1). Num = 1.
     if (txCur == 30) { cssc::poke64(txAstNum + rq * 8, 1); txAdvance(); }
+    // `#req[g] *alias;` is the SAME rename as `#req[g] alias;`, just with a
+    // '*' (reference) prefix -- a borrow import, NOT a snapshot copy (Num stays
+    // 0). Skip the '*' (token 6) so the alias identifier is captured in B/C.
+    if (txCur == 6) { txAdvance(); }                      // '*' reference prefix
     if (txCur == 2) {
         cssc::poke64(txAstB + rq * 8, txTokOff);          // alias off
         cssc::poke64(txAstC + rq * 8, txTokLen);          // alias len
@@ -815,7 +928,14 @@
     return r;
 }
 
-// delete := 'delete' '[' NAME ']' ';'  -> DELETE (kind 21). Cursor ON 'delete'.
+// delete := 'delete' '[' NAME ('->'|'.' MEMBER)* ']' ';'  -> DELETE (kind 21).
+// Cursor ON 'delete'. For an object-member delete `#delete[Obj->member]` the
+// TARGET is the specific member: Off/Len name the FINAL identifier (`member`),
+// so the deleted-set / double-delete distinguish `Obj->x` from `Obj->name`
+// (each member frees independently, matching the runtime + Python reference).
+// The `->`/`.` chain MUST be consumed or the leftover `->member]` desyncs the
+// enclosing parse (an object `free { #delete[Obj->m]; }` block would otherwise
+// swallow following top-level statements into the object body).
 #stack[int, 64] txParseDelete;
 #define(txParseDelete) {
     #req[txCur] txCur;
@@ -829,10 +949,27 @@
     if (txCur == 23) { txAdvance(); }                     // '['
     txAstNew(21) dl;
     if (txCur == 2) {
-        cssc::poke64(txAstOff + dl * 8, txTokOff);
+        cssc::poke64(txAstOff + dl * 8, txTokOff);        // base name (updated per member)
         cssc::poke64(txAstLen + dl * 8, txTokLen);
         txAdvance();
     }
+    #stack[int, 32] mgo = 1;                              // consume `->m` / `.m` chain
+    while (mgo == 1) {
+        #stack[int, 32] isArrow = 0;
+        if (txCur == 34) { isArrow = 1; }                 // '->'
+        if (txCur == 33) { isArrow = 1; }                 // '.'
+        if (isArrow == 0) { mgo = 0; }
+        if (isArrow == 1) {
+            txAdvance();                                  // '->' / '.'
+            if (txCur == 2) {
+                cssc::poke64(txAstOff + dl * 8, txTokOff);  // retarget to the MEMBER
+                cssc::poke64(txAstLen + dl * 8, txTokLen);
+                txAdvance();
+            }
+        }
+        #delete[isArrow];
+    }
+    #delete[mgo];
     if (txCur == 24) { txAdvance(); }                     // ']'
     if (txCur == 13) { txAdvance(); }                     // ';'
     #stack[int, 64] r = dl;
@@ -923,6 +1060,7 @@
     #req[txTokOff] txTokOff;
     #req[txTokLen] txTokLen;
     #req[txAdvance] txAdvance;
+    #req[txPendHeap] txPendHeap;
     #req[txSpanIs] txSpanIs;
     #req[txParseStackBody] txParseStackBody;
     #req[txParseDefine] txParseDefine;
@@ -941,6 +1079,7 @@
         txSpanIs(o, l, "heap") isHeap;                   // #heap[T,bits] name -> same DECL body
         txSpanIs(o, l, "auto") isAuto;                   // #auto[T] name -> same DECL body
         txSpanIs(o, l, "define") isDef;
+        txSpanIs(o, l, "cdefine") isCdef;                 // #cdefine(name, p1, p2) -> FUNC_DEF + scanp
         txSpanIs(o, l, "scanp") isScn;
         txSpanIs(o, l, "scanp_opt") isScnO;              // def-module optional param
         txSpanIs(o, l, "req") isReq;
@@ -951,11 +1090,48 @@
         txSpanIs(o, l, "depend") isDep;                   // #depend("MOD") alias -> MODALIAS
         txSpanIs(o, l, "load") isLoad;                    // #load[FILE] alias -> MODALIAS
         txSpanIs(o, l, "unload") isUnl;                   // #unload[alias] -> FREE
+        txSpanIs(o, l, "video") isVideo;                  // #video[w,h,fps] name -> VIDEO_DECL (kind 45)
+        txSpanIs(o, l, "matrix") isMatrix;                 // #matrix[w,h] name -> MATRIX_DECL (kind 46)
+        txSpanIs(o, l, "catch") isCatch;                  // #catch (expr) ?e { block } -> SKIP
         #stack[int, 32] known = 0;
-        if (isStk == 1) { txParseStackBody() d; node = d; known = 1; #delete[d]; }
-        if (known == 0) { if (isHeap == 1) { txParseStackBody() d; node = d; known = 1; #delete[d]; } }
-        if (known == 0) { if (isAuto == 1) { txParseStackBody() d; node = d; known = 1; #delete[d]; } }
+        // `#catch (expr) ?err { block }` (stdgrace): the interpreter produces no
+        // output from a graceful catch whose body doesn't fire, so SKIP the whole
+        // construct (balanced `(...)`, `?name`, balanced `{...}`) -- emitting
+        // nothing. Without this the unknown-directive skip-to-`;` desyncs on the
+        // block's inner `;`, leaking the body as top-level statements.
+        if (isCatch == 1) {
+            known = 1;
+            txAdvance();                                  // 'catch'
+            if (txCur == 9) {                             // '(' ... ')'
+                #stack[int, 32] pd = 1;
+                txAdvance();
+                while (pd > 0) {
+                    if (txCur == 9) { pd = pd + 1; }
+                    if (txCur == 10) { pd = pd - 1; }
+                    if (txCur == 0) { pd = 0; }
+                    txAdvance();
+                }
+                #delete[pd];
+            }
+            if (txCur == 32) { txAdvance(); }             // '?'
+            if (txCur == 2) { txAdvance(); }              // err name
+            if (txCur == 11) {                            // '{' ... '}'
+                #stack[int, 32] bd = 1;
+                txAdvance();
+                while (bd > 0) {
+                    if (txCur == 11) { bd = bd + 1; }
+                    if (txCur == 12) { bd = bd - 1; }
+                    if (txCur == 0) { bd = 0; }
+                    txAdvance();
+                }
+                #delete[bd];
+            }
+        }
+        if (isStk == 1) { txPendHeap = 0; txParseStackBody() d; node = d; known = 1; #delete[d]; }
+        if (known == 0) { if (isHeap == 1) { txPendHeap = 1; txParseStackBody() d; node = d; known = 1; #delete[d]; } }
+        if (known == 0) { if (isAuto == 1) { txPendHeap = 0; txParseStackBody() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isDef == 1) { txParseDefine() d; node = d; known = 1; #delete[d]; } }
+        if (known == 0) { if (isCdef == 1) { txParseCdefine() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isScn == 1) { txParseScanp() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isScnO == 1) { txParseScanp() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isReq == 1) { txParseReq() d; node = d; known = 1; #delete[d]; } }
@@ -966,6 +1142,8 @@
         if (known == 0) { if (isDep == 1) { txParseModAlias() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isLoad == 1) { txParseModAlias() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) { if (isUnl == 1) { txParseFree() d; node = d; known = 1; #delete[d]; } }
+        if (known == 0) { if (isVideo == 1) { txParseVideo() d; node = d; known = 1; #delete[d]; } }
+        if (known == 0) { if (isMatrix == 1) { txParseMatrix() d; node = d; known = 1; #delete[d]; } }
         if (known == 0) {                                 // unknown directive: skip to ';'
             #stack[int, 32] sk = 1;
             while (sk == 1) { if (txCur == 13) { sk = 0; } if (txCur == 0) { sk = 0; } if (sk == 1) { txAdvance(); } }
@@ -977,6 +1155,7 @@
         #delete[isHeap];
         #delete[isAuto];
         #delete[isDef];
+        #delete[isCdef];
         #delete[isScn];
         #delete[isScnO];
         #delete[isReq];
@@ -987,9 +1166,134 @@
         #delete[isDep];
         #delete[isLoad];
         #delete[isUnl];
+        #delete[isVideo];
+        #delete[isMatrix];
+        #delete[isCatch];
         #delete[o];
         #delete[l];
     }
+    return node;
+}
+
+// #video[w, h, fps] name;  ->  VIDEO_DECL (kind 44). A/B/C = w/h/fps (literals),
+// Off/Len = the handle var name. Cursor ON 'video'.
+#stack[int, 64] txParseVideo;
+#define(txParseVideo) {
+    #req[txCur] txCur;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    #req[txTokNum] txTokNum;
+    #req[txAdvance] txAdvance;
+    #req[txAstNew] txAstNew;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    #req[txAstC] txAstC;
+    txAdvance();                                          // 'video'
+    #stack[int, 64] vw = 320;
+    #stack[int, 64] vh = 240;
+    #stack[int, 64] vfps = 60;
+    if (txCur == 23) {                                    // '['
+        txAdvance();
+        #stack[int, 32] vi = 0;
+        #stack[int, 32] sk = 1;
+        while (sk == 1) {
+            if (txCur == 24) { sk = 0; }                  // ']'
+            if (txCur == 0) { sk = 0; }
+            if (sk == 1) {
+                if (txCur == 1) {                         // a number literal
+                    if (vi == 0) { vw = txTokNum; }
+                    if (vi == 1) { vh = txTokNum; }
+                    if (vi == 2) { vfps = txTokNum; }
+                    vi = vi + 1;
+                }
+                txAdvance();
+            }
+        }
+        if (txCur == 24) { txAdvance(); }
+        #delete[sk];
+        #delete[vi];
+    }
+    #stack[int, 64] node = 0;
+    if (txCur == 2) {                                     // handle var name
+        #stack[int, 64] nOff = txTokOff;
+        #stack[int, 64] nLen = txTokLen;
+        txAdvance();
+        txAstNew(45) n;
+        node = n;
+        cssc::poke64(txAstOff + n * 8, nOff);
+        cssc::poke64(txAstLen + n * 8, nLen);
+        cssc::poke64(txAstA + n * 8, vw);
+        cssc::poke64(txAstB + n * 8, vh);
+        cssc::poke64(txAstC + n * 8, vfps);
+        #delete[n];
+        #delete[nLen];
+        #delete[nOff];
+    }
+    if (txCur == 13) { txAdvance(); }                     // ';'
+    #delete[vfps];
+    #delete[vh];
+    #delete[vw];
+    return node;
+}
+
+// #matrix[w, h] name;  ->  MATRIX_DECL (kind 46). A/B = w/h (literals). transembly
+// has no LED-matrix peripheral, so any extra arg (`scale`) is ignored — every
+// #matrix is the CsscMatrix pixel-array, matching the interpreter.
+#stack[int, 64] txParseMatrix;
+#define(txParseMatrix) {
+    #req[txCur] txCur;
+    #req[txTokOff] txTokOff;
+    #req[txTokLen] txTokLen;
+    #req[txTokNum] txTokNum;
+    #req[txAdvance] txAdvance;
+    #req[txAstNew] txAstNew;
+    #req[txAstOff] txAstOff;
+    #req[txAstLen] txAstLen;
+    #req[txAstA] txAstA;
+    #req[txAstB] txAstB;
+    txAdvance();                                          // 'matrix'
+    #stack[int, 64] mw = 0;
+    #stack[int, 64] mh = 0;
+    if (txCur == 23) {                                    // '['
+        txAdvance();
+        #stack[int, 32] mi = 0;
+        #stack[int, 32] sk = 1;
+        while (sk == 1) {
+            if (txCur == 24) { sk = 0; }                  // ']'
+            if (txCur == 0) { sk = 0; }
+            if (sk == 1) {
+                if (txCur == 1) {                         // number literal
+                    if (mi == 0) { mw = txTokNum; }
+                    if (mi == 1) { mh = txTokNum; }
+                    mi = mi + 1;
+                }
+                txAdvance();
+            }
+        }
+        if (txCur == 24) { txAdvance(); }
+        #delete[sk];
+        #delete[mi];
+    }
+    #stack[int, 64] node = 0;
+    if (txCur == 2) {                                     // handle var name
+        #stack[int, 64] nOff = txTokOff;
+        #stack[int, 64] nLen = txTokLen;
+        txAdvance();
+        txAstNew(46) n;
+        node = n;
+        cssc::poke64(txAstOff + n * 8, nOff);
+        cssc::poke64(txAstLen + n * 8, nLen);
+        cssc::poke64(txAstA + n * 8, mw);
+        cssc::poke64(txAstB + n * 8, mh);
+        #delete[n];
+        #delete[nLen];
+        #delete[nOff];
+    }
+    if (txCur == 13) { txAdvance(); }                     // ';'
+    #delete[mh];
+    #delete[mw];
     return node;
 }
 
@@ -1390,25 +1694,74 @@
         }
     }
     if (node == 0) {
-        if (txCur == 23) {                                // id '[' i ']' = expr;
+        if (txCur == 23) {                                // id '[' i ']' ...
             txAstNew(5) rn2;                              // receiver IDENT
             cssc::poke64(txAstOff + rn2 * 8, nameOff);
             cssc::poke64(txAstLen + rn2 * 8, nameLen);
             txAdvance();                                  // '['
             txParseExpr() ie2;
             if (txCur == 24) { txAdvance(); }             // ']'
-            txAstNew(26) ia;                              // INDEX_ASSIGN
-            cssc::poke64(txAstB + ia * 8, rn2);           // B = receiver
-            cssc::poke64(txAstA + ia * 8, ie2);           // A = index/key
-            if (txCur == 14) {                            // '='
+            if (txCur == 14) {                            // '=' -> INDEX_ASSIGN
+                txAstNew(26) ia;
+                cssc::poke64(txAstB + ia * 8, rn2);       // B = receiver
+                cssc::poke64(txAstA + ia * 8, ie2);       // A = index/key
                 txAdvance();
                 txParseExpr() iv;
                 cssc::poke64(txAstC + ia * 8, iv);        // C = value
                 #delete[iv];
+                node = ia;
+                #delete[ia];
+            }
+            if (node == 0) {                              // not '=' -> INDEX read (maybe captured)
+                txAstNew(25) ix2;                         // INDEX: A = index, B = receiver
+                cssc::poke64(txAstB + ix2 * 8, rn2);
+                cssc::poke64(txAstA + ix2 * 8, ie2);
+                // `recv[i] *name;` / `recv[i] name;` -> RESULT_CAPTURE: set-indexing a
+                // call receiver whose last return is a `{..}` set hands back that
+                // element (often a function value). '*' is an optional ref prefix.
+                if (txCur == 6) { txAdvance(); }          // '*' ref prefix
+                #stack[int, 32] icap = 0;
+                if (txCur == 2) {                         // trailing non-keyword IDENT -> capture
+                    #stack[int, 64] io = txTokOff;
+                    #stack[int, 64] il = txTokLen;
+                    txSpanIs(io, il, "if") j1;
+                    txSpanIs(io, il, "while") j2;
+                    txSpanIs(io, il, "for") j3;
+                    txSpanIs(io, il, "else") j4;
+                    txSpanIs(io, il, "return") j5;
+                    #stack[int, 32] jkw = 0;
+                    if (j1 == 1) { jkw = 1; }
+                    if (j2 == 1) { jkw = 1; }
+                    if (j3 == 1) { jkw = 1; }
+                    if (j4 == 1) { jkw = 1; }
+                    if (j5 == 1) { jkw = 1; }
+                    if (jkw == 0) {
+                        txAdvance();
+                        txAstNew(15) rcx; node = rcx;      // RESULT_CAPTURE
+                        cssc::poke64(txAstA + rcx * 8, ix2);
+                        cssc::poke64(txAstOff + rcx * 8, io);
+                        cssc::poke64(txAstLen + rcx * 8, il);
+                        icap = 1;
+                        #delete[rcx];
+                    }
+                    #delete[jkw];
+                    #delete[j1];
+                    #delete[j2];
+                    #delete[j3];
+                    #delete[j4];
+                    #delete[j5];
+                    #delete[io];
+                    #delete[il];
+                }
+                if (icap == 0) {                          // bare index expr statement
+                    txAstNew(16) esx; node = esx;
+                    cssc::poke64(txAstA + esx * 8, ix2);
+                    #delete[esx];
+                }
+                #delete[icap];
+                #delete[ix2];
             }
             if (txCur == 13) { txAdvance(); }             // ';'
-            node = ia;
-            #delete[ia];
             #delete[ie2];
             #delete[rn2];
         }
@@ -2077,6 +2430,26 @@
         }
         #delete[ago];
         if (txCur == 18) { txAdvance(); }                 // '>'
+    }
+    if (txCur == 9) {                                     // '(' args ')' -- paren form
+        txAdvance();                                      // (the reference accepts both
+        #stack[int, 32] pgo = 1;                          //  `call lbl<..>` and `call lbl(..)`)
+        while (pgo == 1) {
+            if (txCur == 10) { pgo = 0; }                 // ')'
+            if (txCur == 0) { pgo = 0; }
+            if (pgo == 1) {
+                txParseAdd() pa;
+                if (pa != 0) {
+                    if (aLast == 0) { cssc::poke64(txAstA + cl * 8, pa); }
+                    if (aLast != 0) { cssc::poke64(txAstNext + aLast * 8, pa); }
+                    aLast = pa;
+                }
+                #delete[pa];
+                if (txCur == 21) { txAdvance(); }         // ','
+            }
+        }
+        #delete[pgo];
+        if (txCur == 10) { txAdvance(); }                 // ')'
     }
     if (txCur == 2) {                                     // trailing capture name
         cssc::poke64(txAstB + cl * 8, txTokOff);

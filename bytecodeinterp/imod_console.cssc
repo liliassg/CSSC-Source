@@ -215,7 +215,7 @@
     if (mid == 1) {
         #stack[int, 64] pp = p;
         if (pp < 0) { pp = pp + 1000; }
-        cx = pp * (w - 1) / 1000;
+        cx = cssc::div(pp * (w - 1), 1000);
         if (cx < 0) { cx = 0; }
         if (cx > w - 1) { cx = w - 1; }
         #delete[pp];
