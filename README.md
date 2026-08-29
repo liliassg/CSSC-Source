@@ -23,7 +23,6 @@ decide where each value lives and when it goes away.
 | `semantic_analyisis/` | The analyzer behind the diagnostics and the language server. |
 | `c/` | The C runtime the compiled output links against. |
 | `modules/`, `user/` | Built-in modules and example programs. |
-| `bootstrap/` | The stage 0 toolchain. Still Python, being replaced by stage 1. |
 | `doc/` | The language reference. Start at [`doc/00-getting-started.md`](doc/00-getting-started.md). |
 | `web/` | The source of cssclang.com. |
 | `webtools/` | Build scripts for the site. |
