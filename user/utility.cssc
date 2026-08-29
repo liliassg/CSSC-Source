@@ -1,0 +1,133 @@
+/*
+
+CCC - Utilitys (utility.cssc)
+    *using CSSC-6*
+made by lilias hatterscheidt
+*/
+#stack[int, 32] print;
+#stack[bool, 16] debug = false;
+#stack[int, 16] safe_size;
+#stack[int, 16] safetyl;
+#stack[int, 16] safe_size_e020;
+#define(safe_size_e020) {
+    //d \r100g0b0 only use eval! \r0g0b0
+    #scanp(safe_size_e020, auto, 0) *v;
+    #scanp(safe_size_e020, auto, 1) *comb;
+    #size[v] used;
+    #capacity[v] cap;
+    #stack[int, 32] ideal = (cap - used);
+    #size[comb] buf;
+    if (ideal - buf <= 0) {
+        buf += 128; // prevention padding
+        #resize[v, buf];
+    } else {
+    }
+    #delete[ideal];    
+}
+#define(safetyl) { // first declr without print itself
+    //d \r100g0b0 only use heaps! \r0g0b0
+    #scanp(safetyl, hex, 0) *v;
+    #scanp(safetyl, auto, 1) *comb;
+    #size[v] used;
+    #capacity[v] cap;
+    #stack[int, 32] ideal = (cap - used);
+    #size[comb] buf;
+    if (ideal - buf <= 0) {
+        buf += 128; // prevention padding
+        #resize[v, buf];
+    } else {
+    }
+    #delete[ideal];
+
+}
+#define(print) {
+    #req[debug] debug;
+    #req[safetyl] safe_size;
+    /*
+        Chill Print, does not get angry when inside evaluation (E020)
+
+        All parameters are expected to be transient or references. never pass a copy
+    */
+    #scanp(print, string, 0) *message;
+    #scanp(print, auto, 1) *opt0 = "\k";
+    #scanp(print, auto, 2) *opt1 = "\k";
+    #scanp(print, auto, 3) *opt2 = "\k";
+    #scanp(print, auto, 4) *opt3 = "\k";
+    #scanp(print, auto, 5) *opt4 = "\k";
+    #scanp(print, auto, 6) *opt5 = "\k";
+    #scanp(print, auto, 7) *opt6 = "\k";
+    #scanp(print, auto, 8) *opt7 = "\k";
+    #stack[string, 512] cleanmsg;
+    select (message) ?char {
+        if (char == "$" && char.pos() == 0) {
+            if (!debug) {
+                return;
+            }
+        }
+        safe_size(cleanmsg, char);
+        cleanmsg += &char;
+        jump;
+    }
+    if (cleanmsg != "") {
+        message = cleanmsg;
+    }
+    #delete[cleanmsg];
+    #stack[vector<auto>, 4048] OPT = {opt0, opt1, opt2, opt3, opt4, opt5, opt6, opt7};
+    #stack[vector<auto>, 2028] promoted_opt;
+    select (OPT) ?n {
+        if (n != "\k") {
+            safe_size(promoted_opt, n);
+            promoted_opt.push_back(&n);
+        }
+        jump;
+    }
+    // Parsen wir den string
+    #stack[vector<string>, 1028] final;
+    select (message) ?char {
+        if (char == 0x0) { // wenn ende der liste, out of bound == 0x0
+            break;
+        }
+        if (char != "%") {
+            safe_size(final, char);
+            final.push_back(&char);
+        } else {
+            promoted_opt.pop_front() popped;
+            char = &popped;
+            safe_size(final, char);
+            final.push_back(&char);
+            #delete[popped];
+        }
+        jump;
+    }
+    #stack[string, 1028] output;
+    for (int i = 0; i < final.size(); i++) {
+        #auto[string] finalp = final.at(i);
+        safe_size(output, finalp);
+        output += finalp;
+        #delete[finalp];
+    }
+    // endlich ausgeben:
+    cssc::outln(output);
+    #delete[output];
+    #delete[final];
+    #delete[promoted_opt];
+    #delete[OPT];
+}
+
+#define(safe_size) {
+    #req[print] p;
+    //d \r100g0b0 only use heaps! \r0g0b0
+    #scanp(safe_size, auto, 0) *v;
+    #scanp(safe_size, auto, 1) *comb;
+    #size[v] used;
+    #capacity[v] cap;
+    #stack[int, 32] ideal = (cap - used);
+    #size[comb] buf;
+    if (ideal - buf <= 0) {
+        buf += 128; // prevention padding
+        #resize[v, buf];
+    } else {
+    }
+    #delete[ideal];
+
+}

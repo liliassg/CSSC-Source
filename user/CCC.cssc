@@ -1,0 +1,466 @@
+/*
+CCC - CSSC Compressor
+    **using CSSC-6/7**
+made by lilias hatterscheidt
+*/
+cssc::outln("started CCC");
+#stack[string, 32] STRING;
+#include("cssc.sys") system;
+#include("stdio") stdio;
+#include("cssc.peek") peek;
+#load['utility.cssc'] ut;
+#stack[int, 16] main;
+#stack[vector<string>, 12945] lex;
+#stack[int, 16] pathing;
+#stack[vector<string>, 12945] assemble;
+#stack[int, 16] relex;
+#stack[int, 16] appendmark;
+#heap[array<string>, 1028] sonderzeichen = {".", ",", "!", ":", "-", "/", "?"};
+#heap[string, 1028] RawSource;
+#heap[array<auto>, 1028] Tokenized;
+#stack[string, 512] wordbookfile;
+sector global {
+    #stack[int, 32] protocoll;
+
+} free {
+    #delete[protocoll];
+}
+
+#define(appendmark) {
+    #req[stdio] stdio;
+    #scanp(appendmark, string, 0) path;
+    #scanp(appendmark, string, 1) dictpath;
+    #stack[string, 512] fe;
+    #stack[bool, 16] foundpoint = false;
+    select (path) ?p {
+        if (foundpoint) {
+            fe += &p;
+            jump;
+        }
+        if (p == ".") {
+            foundpoint = true;
+        }
+        jump;
+    }
+    #delete[foundpoint];
+    // stdio::write truncates, so read the dict back, append the marker
+    // line, and write the whole thing. The marker records the original
+    // file extension so relex can rebuild the source filename.
+    #auto[string] existing = stdio::read(dictpath);
+    #auto[string] fin = existing + "\n" + "f$@xp=" + fe;
+    stdio::write(dictpath, fin);
+    #delete[existing];
+    #delete[fe];
+    #delete[fin];
+
+}
+#define(pathing) {
+    //d DOCU
+    #req[stdio] *s;
+    #req[ut] *u;
+    #req[Tokenized] *tok;
+    #scanp(pathing, string, 0) *path;
+    #scanp(pathing, auto, 1) *replace = "/k";
+    u::print("$ started pathing %, r=%", path, replace);
+    if (!s::exists(path)) {
+        u::print("invaild path! % not found", path);
+    }
+    if (replace != "/k" && replace != 0x0) {
+        stdio::createfile(replace[0]);
+        stdio::createfile(replace[1]);
+        stdio::write(replace[0], tok[0]);
+        stdio::write(replace[1], tok[1]);
+        u::print("Compress Sucsessfull. Worte file %, %", replace[0], replace[1]);
+    } else {
+        #req[RawSource] *rs;
+        #auto[string] file = s::read(path);
+        if (file.size() <= 1300) {
+            u::print("WARNING! file % only contains % letter, it may cause the text not really to compress, please use files larger then 1300", path, file.size());
+            cssc::input("Do you want to proceed? (ENTER or CTRL+C)");
+        }
+        // NOTE: no trailing "\n" is appended — lex's post-loop already
+        // flushes the final word, and an added newline would round-trip
+        // back into the decoded file as a spurious trailing blank line.
+        u::print("$greped file: {%}", path);
+        u::safe_size(*rs, *file);
+        rs = file;
+        #delete[file];
+    }
+
+}
+#define(lex) {
+    #req[ut] *u;
+    u::print("$ started lexing");
+    #req[RawSource] *rs;
+    #req[Tokenized] *tok;
+    #stack[vector<string>, 2048] words;
+    #stack[string, 32] newline = "\n";
+    #stack[string, 16] space = " ";
+    #stack[string, 512] current;
+    #req[sonderzeichen] *sonder;
+    select (rs) ?char {
+        if (sonder.contains(char)) {
+                current = current  + char;
+                u::safe_size(words, current);
+                words.push_back(&current);
+                current = "";
+                jump;
+            }
+        if (char == " " || char == "\t" || char == "\r" || char == "\n") {
+            if (current != "") {
+                u::safe_size(words, current);
+                words.push_back(&current);
+                current = "";
+            }
+            u::safe_size(words, char);
+            words.push_back(&char);
+        } else {
+            u::safe_size(current, char);
+            current += char;
+        }
+        jump;
+    }
+    if (current != "") {
+        words.push_back(&current);
+    }
+    u::print("$ lex finished wording");
+    #delete[current];
+    u::print("$wordcount: %", words.size());
+    #heap[array<map<int, int>>, 1028] lexica;
+    #heap[map<string, int>, 1028] pair;
+    #stack[int, 64] id_counter = 0;
+    u::print("$ words: %", words);
+    select (words) ?w {
+        if (w == newline || w == space) {
+            lexica.push(&w);
+            jump;
+        }
+        if (lexica.contains(w)) {
+            if (pair.has(w)) {
+                w = pair.get(w);
+            } else {
+                u::safe_size(*pair, *w);
+                pair.append(&w, &id_counter);
+                id_counter++;
+            }
+        }
+        u::safe_size(*lexica, *w);
+        lexica.push(&w);
+        jump;
+    }
+    u::print("$ lexica: %", lexica);
+    #auto[string] final_lexica;
+    #stack[bool, 16] confirm = false;
+    select (lexica) ?final_lex {
+        if (pair.get(final_lex)) {
+            #stack[int, 32] lexed_id = pair.get(final_lex);
+            confirm = true;
+        
+        }
+        if (confirm) {
+            final_lex = lexed_id;
+            confirm = false;
+        }
+        final_lexica += &final_lex;
+        #delete[lexed_id];
+        jump;
+    }
+    #delete[confirm];
+    #delete[lexica];
+    #delete[newline];
+    #delete[space];
+    tok = {&final_lexica, &pair};
+    #delete[final_lexica];
+    #delete[id_counter];
+    #delete[pair];
+    #delete[words];
+}
+#define(assemble) { 
+    #scanp(assemble, string, 0) *filename;
+    #req[Tokenized] *tok;
+    #req[ut] *u;
+    u::print("$assembler: assembling >> % <<", tok);
+    u::print("assembling %...", filename);
+    #stack[string, 32] newline = "\n";
+    #auto[string] TEXT;
+    #auto[string] DICT;
+    select (tok[0]) ?s {
+        #auto[string] piece = cssc::to_string(s);
+        TEXT += piece;
+        #delete[piece];
+        jump;
+    }
+    #auto[vector<string>] dkeys = tok[1].keys();
+    #stack[string, 8] eq = "=";
+    select (dkeys) ?k {
+        #stack[string, 1028] ns = k + eq + cssc::to_string(tok[1].get(k)) + newline;
+        DICT += ns;
+        #delete[ns];
+        jump;
+    }
+    #delete[dkeys];
+    #delete[eq];
+    #delete[newline];
+    tok[0] = TEXT;
+    tok[1] = DICT;
+    #delete[TEXT];
+    #delete[DICT];
+    #stack[string, 256] end = ".ccc";
+    #stack[string, 256] mark = ".cccl";
+    #stack[int, 64] rndid = cssc::random_int(0, 9999999);
+    #stack[string, 1028] fn;
+    #stack[string, 1028] fn_l;
+    select (filename) ?f {
+        if (f == ".") {
+            break;
+        }
+        fn += f;
+        jump;
+    }
+    #stack[string, 256] sm = fn + "-" + cssc::to_string(rndid) + &end;
+    #stack[string, 256] sn = fn + "-" + cssc::to_string(rndid) + &mark;
+    fn = sm;
+    fn_l = sn;
+    #delete[sm];
+    #delete[sn];
+    #delete[rndid];
+    #delete[end];
+    #delete[mark];
+    return {fn, fn_l};
+}
+#define(relex) {
+    #req[peek] peek;
+    #req[stdio] stdio;
+    #req[ut] u;
+    #scanp(relex, string, 0) path;
+    #stack[string, 256] look = ".ccc";
+    #stack[string, 256] encr = ".cccl";
+    #stack[string, 1028] base;
+    select (path) ?l {
+        if (l == ".") {
+            break;
+        }
+        base += &l;
+        jump;
+    }
+    #stack[string, 1028] textfile = base + look;
+    #stack[string, 1028] dictfile = base + encr;
+    #delete[look];
+    #delete[encr];
+    if (!stdio::exists(textfile)) {
+        u::print("cant find %", textfile);
+        exit(2);
+        return;
+    }
+    if (!stdio::exists(dictfile)) {
+        u::print("cant find %", dictfile);
+        exit(2);
+        return;
+    }
+    stdio::read(textfile) text;
+    stdio::read(dictfile) dict_;
+    // Parse the dictionary: one `word=id` per line, split on the first '='.
+    // One special line `f$@xp=<ext>` carries the original file extension —
+    // capture it into `origending` instead of adding it to the word/key
+    // tables. `switch` = which side of the '=' we are currently reading.
+    #stack[string, 256] origending;
+    #stack[string, 64] marker = "f$@xp";
+    #stack[int, 32] switch = 0;
+    #auto[array<string>] words;
+    #auto[array<string>] keys;
+    #auto[string] words_local;
+    #auto[string] number_local;
+    select (dict_) ?s {
+        if (s == "\n") {
+            if (words_local == marker) {
+                origending = &number_local;
+            } else {
+                if (words_local != "") {
+                    words.push(&words_local);
+                    keys.push(&number_local);
+                }
+            }
+            words_local = "";
+            number_local = "";
+            switch = 0;
+            jump;
+        }
+        if (s == "=") {
+            switch = 1;
+            jump;
+        }
+        if (switch == 0) {
+            words_local += &s;
+        }
+        if (switch == 1) {
+            number_local += s;
+        }
+        jump;
+    }
+    // the final line has no trailing newline — flush it here
+    if (words_local == marker) {
+        origending = &number_local;
+    } else {
+        if (words_local != "") {
+            words.push(&words_local);
+            keys.push(&number_local);
+        }
+    }
+    #delete[marker];
+    #auto[map<int, string>] relexedd;
+    #stack[int, 32] i;
+    for (i = 0; i < keys.size(); i++) {
+        relexedd.append(cssc::to_int(keys[i]), &words[i]);
+    }
+    #delete[i];
+    #stack[string, 1028] encrypted;
+    #stack[string, 512] dtok;
+    #stack[string, 16] dsp = " ";
+    #stack[string, 16] dnl = "\n";
+    select (text) ?c {
+        if (c == dsp || c == dnl) {
+            if (dtok.isdigit()) {
+                #stack[int, 60] did = cssc::to_int(dtok);
+                if (relexedd.has(did)) {
+                    #stack[string, 512] dw = relexedd.get(did);
+                    encrypted += dw;
+                    #delete[dw];
+                } else {
+                    encrypted += dtok;
+                }
+                #delete[did];
+            } else {
+                encrypted += dtok;
+            }
+            dtok = "";
+            encrypted += c;
+        } else {
+            dtok += &c;
+        }
+        jump;
+    }
+    if (dtok != "") {
+        if (dtok.isdigit()) {
+            #stack[int, 32] did2 = cssc::to_int(dtok);
+            if (relexedd.has(did2)) {
+                encrypted += relexedd.get(did2);
+            } else {
+                ut::safe_size(encrypted, dtok);
+                encrypted += dtok;
+            }
+            #delete[did2];
+        } else {
+            ut::safe_size(encrypted, dtok);
+            encrypted += dtok;
+        }
+    }
+    #delete[dtok];
+    #delete[dsp];
+    #delete[dnl];
+    #delete[relexedd];
+    u::print("re-creating origanl file:");
+    // origending already holds the original extension (the value after '='
+    // on the f$@xp marker line). Rebuild the source name: everything in the
+    // .ccc path before the first '-' (the random id), then '.' + extension.
+    #stack[string, 512] orig_path;
+    select (path) ?p {
+        if (p == "-") {
+            break;
+        }
+        orig_path += &p;
+        jump;
+    }
+    #stack[string, 1028] finalfile = orig_path + "." + origending;
+    if (!stdio::exists(finalfile)) {
+        stdio::createfile(finalfile);
+    }
+    stdio::write(finalfile, encrypted) status;
+    u::print("$wrote: %", status);
+    if (status) {
+        stdio::removefile(textfile);
+        u::print("$deleted: %", textfile);
+        stdio::removefile(dictfile);
+        u::print("$deleted: %", dictfile);
+    } else {
+        u::print("could not write file");
+    }
+    #delete[status];
+    #delete[orig_path];
+    u::print("file % encrypted sucssesfully to %", textfile, finalfile);
+    #delete[textfile];
+    #delete[dictfile];
+    #delete[encrypted];
+    #delete[finalfile];
+    #delete[number_local];
+    #delete[words_local];
+    #delete[words];
+    #delete[text];
+    #delete[dict_];
+    #delete[keys];
+    #delete[switch];
+    #delete[base];
+    #delete[origending];
+}
+#define(main) {
+    #req[ut] *u;
+    #req[system] *sys;
+    #req[STRING] *str;
+    #req[global] *global;
+    #stack[array<auto>, 1028] args = sys::argv();
+    u::print("cc with args: %", args);
+    #stack[string, 1028] source_location = args[0];
+    #stack[string, 128] flag0 = args[1];
+    if (flag0 == "--debug") {
+        u::debug = true;
+        cssc::outln("debugging CCC");
+    }
+    if (source_location.endswith(".ccc")) {
+        #req[relex] relex;
+        u::print("decrompressing %", source_location);
+        relex(source_location);
+        return 0;
+    }
+    #delete[flag0];
+    #delete[args];
+    // check if path is a valid arg
+    if (source_location == 0x0 || cssc::typeof(source_location) != cssc::typeof(str) || source_location == "") {
+        cssc::outln("not a valid path");
+        exit(2);
+    }
+    // main
+    u::print("compressing %", source_location);
+    #req[lex] lex; // lex luthor!
+    #req[pathing] pathing;
+    #req[appendmark] appendmark;
+    pathing(*source_location);
+    lex();
+    #req[assemble] assemble;
+    assemble(source_location) assembled;
+    if (assembled == 0x0) {
+        u::print("smth went wrong in assembling '%'", source_location);
+    } else {
+        u::print("assembled % sucsessfully", source_location);
+    }
+    pathing(*source_location, *assembled);
+    appendmark(source_location, assembled[1]);
+    #delete[assembled];
+    #delete[source_location];
+    #delete[protocoll_id];
+    
+}
+main();
+cssc::outln("process finished.");
+//! Cleanup
+#delete[main];
+#delete[STRING];
+#delete[lex];
+#delete[pathing];
+#delete[assemble];
+#delete[relex];
+#delete[wordbookfile];
+#delete[appendmark];
+#unload[ut];
+#free[global];
+#free[system];
+#free[stdio];
+#free[peek];
