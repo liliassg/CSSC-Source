@@ -47,7 +47,26 @@ documentation says so rather than pretending everything is finished.
 
 ## Documentation
 
-The reference lives in [`doc/`](doc/). Each chapter stands on its own.
+The reference lives in [`doc/`](doc/) and is also readable at
+[cssclang.com/docs](https://cssclang.com/docs/). Each chapter stands on its own.
 
 If the docs and the language ever disagree, trust the language and tell me about
 the doc bug so I can fix it.
+
+## License, and the name
+
+The code is under the [Apache License 2.0](LICENSE). Use it, ship it, build
+things with it, commercially or not. You do not owe me anything for that.
+
+The name is a separate matter, and I want to be clear about it rather than leave
+it to be guessed. **CSSC**, **Control Specified Source Compiling** and the star
+are mine and are not part of the license. Section 6 of Apache 2.0 says so
+explicitly: it grants no trademark rights.
+
+In practice that means: if you fork this and take it somewhere I did not, that
+is allowed and I would rather you did that than nothing. But give it your own
+name. CSSC is the thing I have been building for three years and I would like
+that name to keep meaning this project.
+
+If you want to contribute back instead of forking, that is what I would prefer.
+Open an issue.
