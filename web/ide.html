@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSC IDE</title>
+<meta name="description" content="The CSSC IDE. Ownership highlighting, an analyzer that reads lifetimes, autocleanup, a debugger that marks the line it is on, and a language server that tells you the capacity of a slot.">
+<link rel="icon" href="star.png" type="image/png">
+<link rel="stylesheet" href="font.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark">CSSC</h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="ide.html" aria-current="page">ide</a></li>
+        <li><a href="news.html">news</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main>
+
+    <section>
+      <h2>The IDE</h2>
+
+      <p class="lead">CSSC makes you say where every value lives and when it
+      dies. That is the deal the language offers, and it only pays off if you can
+      see what you said. So that is what the editor is for.</p>
+
+      <p>It opens with <code>cssc workspace</code>. It is 3,459 lines of CSSC,
+      which also makes it the first thing I break whenever I get the language
+      wrong.</p>
+
+      <figure class="wide">
+        <img src="img/workspace.png" width="2556" height="560"
+          alt="The CSSC IDE on startup: menu bar, a file tree on the left, and an empty editor pane.">
+      </figure>
+    </section>
+
+    <section>
+      <h2>Ownership, both ends at once</h2>
+
+      <p>Put the cursor anywhere in an allocation's life and both ends light up:
+      the line that made it and the line that frees it. Take the free away and
+      the allocation turns orange. Same file, two states.</p>
+
+      <div class="pair">
+        <figure>
+          <a href="img/ownership_freed.png">
+            <img src="img/ownership_freed.png" width="1010" height="990"
+              alt="A CSSC file where line 5, an auto string allocation named tmp, and line 39, the matching delete, are both highlighted purple.">
+          </a>
+          <figcaption>tmp is made on line 5 and freed on line 39. Both ends
+          marked, thirty-four lines apart.</figcaption>
+        </figure>
+
+        <figure>
+          <a href="img/ownership_leak.png">
+            <img src="img/ownership_leak.png" width="1010" height="960"
+              alt="The same file with the delete for tmp removed. Line 5 is highlighted orange instead of purple.">
+          </a>
+          <figcaption>The same file with that free removed. Line 5 goes orange.
+          No dialog, no list to open.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Autocleanup</h2>
+
+      <p>F10 reads the file, works out what you allocated and never freed, and
+      writes the frees in for you. Then it tells you exactly what it added.</p>
+
+      <figure class="wide">
+        <img src="img/autoclean.png" width="1200" height="135"
+          alt="Four delete and free statements inserted at the end of a CSSC file, highlighted green.">
+      </figure>
+
+      <figure class="wide">
+        <img src="img/autoclean_report.png" width="890" height="150"
+          alt="Terminal output reading: autoclean run_all.cssc, inserted 4 frees, listing lines 38 to 41, prevented about 0.01 MB of leaks.">
+        <figcaption>It names every line it touched and what kind of thing it
+        released. <a href="img/autoclean_full.png">The whole window.</a></figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>The analyzer</h2>
+
+      <p>F1 puts the analyzer's findings inline and F2 clears them again. It
+      reads ownership, not just syntax, so it catches the things the language
+      actually punishes you for. Here it is telling me that a <code
+      >select</code> cursor is borrowed, that keeping it will leave a stale
+      reference once the loop ends, and what to write instead.</p>
+
+      <figure class="wide">
+        <a href="img/analyzer_full.png">
+          <img src="img/analyzer.png" width="1685" height="413"
+            alt="A CSSC function in the IDE with an inline analyzer warning reading: select cursor is borrowed not copied and dies after the block, pass ampersand cursor to keep it.">
+        </a>
+        <figcaption>The rule from the docs, enforced in the editor before
+        anything runs. Click for the whole window.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Watching it run</h2>
+
+      <p>F5 runs the file on the interpreter. While it runs, the editor marks
+      where the interpreter is: red for the line it is on, blue for what it has
+      already been through.</p>
+
+      <figure class="wide">
+        <a href="img/debug_trace_full.png">
+          <img src="img/debug_ip.png" width="1090" height="390"
+            alt="A running CSSC file where line 9 is highlighted red as the current line and lines 7 and 8 are blue as already executed.">
+        </a>
+      </figure>
+
+      <p>F4 tracks a single variable and logs every value it takes, each with
+      the line that changed it. F3 does it on demand: hover a variable while the
+      program runs and you get its value right now.</p>
+
+      <figure class="wide">
+        <img src="img/debug_track.png" width="900" height="185"
+          alt="Tracking output showing tmp taking the values s, sy, syn and synt, each labelled with line 14.">
+        <figcaption>A string growing one character at a time, with the line
+        responsible for each step.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>The language server</h2>
+
+      <p>Hovering a slot gives you the type and the capacity in bits, which in
+      CSSC is the part you actually need, along with what it was initialized
+      to.</p>
+
+      <figure>
+        <img src="img/hover.png" width="1002" height="268"
+          alt="A hover box in the CSSC IDE reading: slot mutier_h, string, 256 bits, init open bracket mutier close bracket.">
+      </figure>
+
+      <p>Completions know the <code>cssc::</code> builtins and whatever module
+      you loaded. Argument hints show the signature while you are still inside
+      the parentheses.</p>
+
+      <figure>
+        <img src="img/completions.png" width="533" height="230"
+          alt="A completion list after typing cssc colon colon, offering outln, out, alloc, free, peek8, peek16, peek32 and peek64.">
+      </figure>
+
+      <figure>
+        <img src="img/arguments.png" width="902" height="88"
+          alt="An argument hint showing print_str taking an int text and an int owner.">
+      </figure>
+    </section>
+
+    <section>
+      <h2>Comments you can color</h2>
+
+      <p>Comments and block comments take <code>\r()g()b()</code> and the editor
+      renders them live, so a long file can carry structure you can see instead
+      of structure you have to remember. Docstrings work the same way: a <code
+      >//d</code> line under a <code class="directive">#define()</code> belongs
+      to the function, the way Python taught me it should.</p>
+
+      <figure class="wide">
+        <a href="img/syntax.png">
+          <img src="img/comments.png" width="970" height="510"
+            alt="A CSSC source file where section comments reading VARIABLES, FUNCTIONS and PUBLIC EXPORT are rendered in cyan and DEFINITIONS in magenta.">
+        </a>
+        <figcaption>Section markers in a real file of mine. It sounds like a
+        small thing. It is the reason I stopped losing my place in my own
+        code.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>The keys</h2>
+
+      <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>key</th><th>what it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>F1</td><td>show the analyzer's hints inline</td></tr>
+          <tr><td>F2</td><td>hide every hint, from F1 and F10 both</td></tr>
+          <tr><td>F3</td><td>hover a variable for its value at runtime</td></tr>
+          <tr><td>F4</td><td>track one variable and log every value it takes</td></tr>
+          <tr><td>F5</td><td>run on the interpreter</td></tr>
+          <tr><td>F6</td><td>compile</td></tr>
+          <tr><td>F9</td><td>introspect a module</td></tr>
+          <tr><td>F10</td><td>autocleanup, insert the frees you forgot</td></tr>
+          <tr><td>F11</td><td>fullscreen</td></tr>
+          <tr><td>Ctrl+R</td><td>paste several <code class="directive">#req[]</code> into a scope at once</td></tr>
+          <tr><td>Ctrl+D</td><td>the same for <code class="directive">#delete[]</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p class="aside">There is a terminal in the window too, which takes CSSC
+      commands like build and run as well as ordinary shell ones.</p>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <p>CSSC 7.4, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="cssc.js"></script>
+</body>
+</html>

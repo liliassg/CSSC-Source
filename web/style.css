@@ -1,0 +1,494 @@
+/* cssclang.com
+   Colors are lifted from the CSSC IDE, so the site and the editor agree.
+   Type is CSSC Pixel, the 8x8 font the video module draws with (font.css).
+
+   The whole page sits on an 8px grid. One source pixel of the font is 2 CSS px
+   at the desktop size, so every size here is a multiple of 8 and the glyphs land
+   on whole pixels instead of being smeared across half of one. */
+
+:root {
+  --bg: #000000;
+  --panel: #0E1016;
+  --panel-edge: #1A1424;
+  --selection: #572663;
+
+  --text: #CFC8E0;
+  --text-bright: #E6E2F0;
+  --text-dim: #B8C0CC;
+  --muted: #8A84A0;
+
+  --magenta: #C74DE0;
+  --violet: #C77DFF;
+  --teal: #4EC9B0;
+  --rose: #F0A0C0;
+  --rule: #E6E2F0;
+
+  /* syntax, sampled pixel for pixel out of the IDE screenshots */
+  --syn-directive: #E060C0;
+  --syn-keyword: #C77DFF;
+  --syn-type: #4EC9B0;
+  --syn-func: #4DA6FF;
+  --syn-string: #F0A0C0;
+  --syn-number: #B5CEA8;
+  --syn-comment: #5A6473;
+  --syn-doc: #6E7A6A;
+  --syn-marker: #F0C14B;
+  --syn-plain: #E6E2F0;
+
+  --measure: 54ch;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  padding: 0 24px 96px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "CSSC Pixel", "Courier New", monospace;
+  font-size: 16px;
+  line-height: 32px;
+  -webkit-text-size-adjust: 100%;
+}
+
+.page {
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+
+/* ---------- header ---------- */
+
+.masthead {
+  padding: 96px 0 0;
+  text-align: center;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 48px;
+  line-height: 48px;
+  font-weight: 400;
+  color: var(--text-bright);
+  /* the font already carries a blank column on each side, so no tracking */
+  letter-spacing: 0;
+}
+
+.expansion {
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 32px;
+}
+
+.star {
+  display: block;
+  width: 160px;
+  height: 160px;
+  margin: 32px auto 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  margin: 48px 0 0;
+  text-align: center;
+}
+
+.toolbar ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toolbar li {
+  display: inline-block;
+  margin: 0 16px;
+}
+
+.toolbar a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.toolbar a:hover,
+.toolbar a:focus-visible {
+  color: var(--violet);
+  outline: none;
+}
+
+.toolbar a[aria-current="page"] {
+  color: var(--magenta);
+}
+
+.rule {
+  height: 2px;
+  margin: 16px 0 0;
+  border: 0;
+  background: var(--rule);
+}
+
+/* ---------- content ---------- */
+
+main {
+  padding: 64px 0 0;
+}
+
+section + section {
+  margin-top: 64px;
+}
+
+h2 {
+  margin: 0 0 32px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
+  color: var(--text-bright);
+}
+
+h2::before {
+  content: "// ";
+  color: var(--magenta);
+}
+
+h3 {
+  margin: 32px 0 16px;
+  font-size: 16px;
+  line-height: 32px;
+  font-weight: 400;
+  color: var(--violet);
+}
+
+p {
+  margin: 0 0 32px;
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+.lead {
+  color: var(--text-bright);
+}
+
+.aside {
+  color: var(--muted);
+}
+
+/* news entries */
+
+.entry-date {
+  margin: 0 0 8px;
+  color: var(--magenta);
+}
+
+.entry h2::before {
+  content: none;
+}
+
+strong {
+  font-weight: 400;
+  color: var(--text-bright);
+}
+
+a {
+  color: var(--violet);
+  text-underline-offset: 4px;
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--magenta);
+}
+
+ul.plain {
+  margin: 0 0 32px;
+  padding: 0 0 0 32px;
+  list-style: none;
+}
+
+ul.plain li {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+ul.plain li::before {
+  content: "-";
+  position: absolute;
+  left: -32px;
+  color: var(--magenta);
+}
+
+/* ---------- code ---------- */
+
+code {
+  color: var(--teal);
+}
+
+code.directive {
+  color: var(--syn-directive);
+}
+
+pre {
+  margin: 0 0 32px;
+  padding: 16px 24px;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  color: var(--syn-plain);
+  overflow-x: auto;
+}
+
+pre code {
+  color: inherit;
+}
+
+.tok-directive { color: var(--syn-directive); }
+.tok-keyword   { color: var(--syn-keyword); }
+.tok-type      { color: var(--syn-type); }
+.tok-func      { color: var(--syn-func); }
+.tok-ns        { color: var(--syn-type); }
+.tok-string    { color: var(--syn-string); }
+.tok-number    { color: var(--syn-number); }
+.tok-comment   { color: var(--syn-comment); }
+.tok-doc       { color: var(--syn-doc); }
+.tok-marker    { color: var(--syn-marker); }
+
+/* ---------- figures ---------- */
+
+figure {
+  margin: 0 0 32px;
+}
+
+/* Screenshots of the IDE are dense. Squeezed into the reading column they turn
+   into grey mush, so they break out of it and take whatever width the window
+   has, up to the point where the capture would start being upscaled. */
+figure.wide {
+  width: min(1600px, calc(100vw - 48px));
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Never scale a capture up. Past 1:1 the IDE's own pixel font goes soft, which
+   on this site of all sites would be the wrong thing to show. */
+figure img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 2px solid var(--panel-edge);
+}
+
+/* Two frames of the same file. Side by side only on a window wide enough to
+   carry both at close to their real size, otherwise stacked. Shrinking them to
+   fit would defeat the point, which is reading the lines. */
+.pair {
+  width: min(2100px, calc(100vw - 48px));
+  margin: 0 0 32px 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.pair figure {
+  margin: 0;
+}
+
+.pair figcaption {
+  max-width: var(--measure);
+}
+
+@media (max-width: 2147px) {
+  .pair {
+    grid-template-columns: 1fr;
+    gap: 48px;
+    justify-items: center;
+  }
+
+  .pair figcaption {
+    margin: 16px auto 0;
+  }
+}
+
+figure a:hover img,
+figure a:focus-visible img {
+  border-color: var(--magenta);
+}
+
+figcaption {
+  margin-top: 16px;
+  color: var(--muted);
+}
+
+figure.wide figcaption {
+  max-width: var(--measure);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---------- tables ---------- */
+
+.scroll {
+  margin: 0 0 32px;
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: 4px 24px 4px 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 400;
+  color: var(--muted);
+  border-bottom: 2px solid var(--panel-edge);
+}
+
+td.num {
+  text-align: right;
+  padding-right: 24px;
+}
+
+tbody td:first-child {
+  color: var(--text-bright);
+}
+
+/* ---------- download ---------- */
+
+.get {
+  display: inline-block;
+  margin: 0 0 32px;
+  padding: 8px 24px;
+  border: 2px solid var(--magenta);
+  color: var(--text-bright);
+  text-decoration: none;
+}
+
+.get:hover,
+.get:focus-visible {
+  background: var(--selection);
+  color: var(--text-bright);
+  outline: none;
+}
+
+/* ---------- footer ---------- */
+
+.foot {
+  margin-top: 96px;
+  padding-top: 32px;
+  border-top: 2px solid var(--panel-edge);
+  color: var(--muted);
+}
+
+.foot p {
+  margin: 0 0 16px;
+}
+
+.foot a {
+  color: var(--text-dim);
+}
+
+.foot a:hover,
+.foot a:focus-visible {
+  color: var(--violet);
+}
+
+/* ---------- small screens ----------
+   12px keeps one source pixel at 1.5 CSS px, which is still whole device
+   pixels on any 2x display, and that is every phone worth worrying about.
+   Below this the font stops being readable, so the line just gets narrower. */
+
+@media (max-width: 900px) {
+  body {
+    padding: 0 16px 64px;
+    font-size: 12px;
+    line-height: 24px;
+  }
+
+  .masthead {
+    padding-top: 64px;
+  }
+
+  .wordmark {
+    font-size: 36px;
+    line-height: 36px;
+  }
+
+  .expansion {
+    margin-top: 16px;
+    font-size: 12px;
+    line-height: 24px;
+  }
+
+  .star {
+    width: 100px;
+    height: 100px;
+    margin-top: 24px;
+  }
+
+  .toolbar {
+    margin-top: 32px;
+  }
+
+  .toolbar li {
+    margin: 0 8px;
+  }
+
+  main {
+    padding-top: 48px;
+  }
+
+  section + section {
+    margin-top: 48px;
+  }
+
+  h2 {
+    font-size: 18px;
+    line-height: 24px;
+    margin-bottom: 24px;
+  }
+
+  h3 {
+    font-size: 12px;
+    line-height: 24px;
+    margin: 24px 0 8px;
+  }
+
+  p {
+    margin-bottom: 24px;
+    line-height: 24px;
+  }
+
+  pre {
+    padding: 12px 16px;
+    margin-bottom: 24px;
+  }
+
+  ul.plain {
+    padding-left: 24px;
+    margin-bottom: 24px;
+  }
+
+  ul.plain li::before {
+    left: -24px;
+  }
+}

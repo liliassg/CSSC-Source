@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSC news</title>
+<meta name="description" content="Notes from building CSSC. What I am working on, what broke, and what I got wrong.">
+<link rel="icon" href="star.png" type="image/png">
+<link rel="stylesheet" href="font.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark">CSSC</h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="ide.html">ide</a></li>
+        <li><a href="news.html" aria-current="page">news</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main>
+
+    <section>
+      <h2>News</h2>
+
+      <p class="lead">Notes from building this. What I am working on, what
+      broke, what I got wrong and had to redo. Roughly every week or two,
+      whenever there is something worth telling.</p>
+
+      <p>Nothing here yet. The first entry goes up shortly.</p>
+    </section>
+
+<!-- ===========================================================
+     Adding an entry.
+
+     Copy the block below, put it directly under this comment so
+     the newest entry stays on top, and change the three parts:
+     the date, the title, and the text. Each paragraph gets its
+     own <p> ... </p>.
+
+     Code goes in a block like this, written as plain CSSC. It is
+     colored automatically, nothing to mark up:
+
+       <pre><code class="cssc">#stack[int, 32] x = 5;
+       #delete[x];</code></pre>
+
+     Write &lt; for < and &gt; for > inside a code block, otherwise
+     the browser reads it as markup. So vector&lt;int&gt;.
+
+     -----------------------------------------------------------
+    <section class="entry">
+      <p class="entry-date">2026-09-01</p>
+      <h2>Title of the entry</h2>
+
+      <p>First paragraph.</p>
+      <p>Second paragraph.</p>
+    </section>
+     =========================================================== -->
+
+  </main>
+
+  <footer class="foot">
+    <p>CSSC 7.4, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="cssc.js"></script>
+</body>
+</html>

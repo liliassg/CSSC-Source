@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSC</title>
+<meta name="description" content="CSSC, Control Specified Source Compiling. A small, strongly typed language for embedded work, with no garbage collector and exact control over where every byte goes.">
+<link rel="icon" href="star.png" type="image/png">
+<link rel="stylesheet" href="font.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark">CSSC</h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="index.html" aria-current="page">main</a></li>
+        <li><a href="ide.html">ide</a></li>
+        <li><a href="news.html">news</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main>
+
+    <section>
+      <h2>Why CSSC exists</h2>
+
+      <p class="lead">I built CSSC out of one specific frustration, and it's
+      worth being precise about which one.</p>
+
+      <p>I like Python. I like how it reads, and I like that its tooling thinks
+      about the developer and not only about the machine. Docstrings are the
+      example I keep coming back to. Somebody decided that documentation belongs
+      next to the thing it documents, and that the language itself should carry
+      it. CSSC has that too. You write <code>//d</code> lines under a
+      <code class="directive">#define()</code> and they're part of the function.
+      Comments and block comments can be colored with <code>\r()g()b()</code>,
+      and the IDE renders them live, because I got tired of looking up which hex
+      value a color was every ten seconds, or where a function was defined and
+      what it takes.</p>
+
+      <p>What Python doesn't give me is control.</p>
+
+      <p>In embedded work that becomes a wall you hit early, and you get two
+      options that both cost you something. You take MicroPython and accept that
+      anything with real scope won't build. Or you move to C, and let's be honest
+      with each other, that language takes your nerves. That was my situation. So
+      I looked for a third option, and there wasn't one.</p>
+
+      <p>So I built one.</p>
+    </section>
+
+    <section>
+      <h2>What it looks like</h2>
+
+      <p>Every value says where it lives and how much room it gets. Loops walk a
+      container with a cursor you move yourself. When you're done with something,
+      you delete it.</p>
+
+<pre><code class="cssc">#stack[vector&lt;int&gt;, 64] nums;
+nums.push_back(3);
+nums.push_back(5);
+nums.push_back(8);
+
+#stack[int, 32] total = 0;
+select (nums) ?n {
+    total = total + n;
+    jump;
+}
+cssc::outln(total);
+#delete[nums];</code></pre>
+
+      <p>The same file runs on the interpreter, compiles to a native executable
+      for your machine, and builds for Xtensa and AVR. No changes in between.</p>
+    </section>
+
+    <section>
+      <h2>How it thinks</h2>
+
+      <p>A handful of decisions shape almost everything else in the language.
+      These are the ones that will surprise you if you come from C.</p>
+
+      <h3>Every value has a region and a size</h3>
+
+<pre><code class="cssc">#stack[int, 32] count = 10;
+#heap[vector&lt;int&gt;, 1024] data = [1, 2, 3];
+#auto[string] name = "Ada";
+
+#delete[count];
+#delete[name];</code></pre>
+
+      <p>The number is a capacity in bits, and writing a value that doesn't fit
+      is a hard error, not a silent wraparound. <code
+      class="directive">#stack</code> and <code class="directive">#auto</code>
+      are yours to free. <code class="directive">#heap</code> is freed when the
+      program ends. Nothing else is cleaned up behind your back, and there is no
+      garbage collector.</p>
+
+      <h3>A function is a variable</h3>
+
+<pre><code class="cssc">#stack[int, 32] square;
+#define(square) {
+    #scanp(square, int, 0) n;
+    return n * n;
+}
+square(7) result;</code></pre>
+
+      <p>There is no separate function thing. You declare a slot, bind a body to
+      it, and calling the slot runs the body. That is why you can import a
+      function by name and call it through the alias, and why one slot can hold
+      both a value and behavior.</p>
+
+      <h3>Some blocks are walls, some are windows</h3>
+
+<pre><code class="cssc">#stack[int, 32] x = 50;
+
+if (x &lt; 100) {
+    cssc::outln(x);      // 50, an if sees the outer scope
+}
+
+{
+    #req[x] xr;          // a bare block does not
+    cssc::outln(xr);     // 50, imported across the wall
+}</code></pre>
+
+      <p>An <code>if</code>, <code>for</code>, <code>while</code> or <code
+      >select</code> body reads the enclosing scope directly. A <code
+      class="directive">#define</code> body, a bare block, an object and a sector
+      do not, and you bring names in with <code
+      class="directive">#req</code>. There is no silent fallback to a global, so
+      a function cannot quietly read or clobber some unrelated slot.</p>
+
+      <h3>The call site decides reference or copy</h3>
+
+<pre><code class="cssc">f(x);     // a live reference, the default
+f(&amp;x);    // an independent deep copy</code></pre>
+
+      <p>Whether an argument arrives as a reference or as a copy is decided where
+      you call, never in the signature, and the callee cannot override it. The
+      same rule governs storing into a container and importing with <code
+      class="directive">#req</code>. Once you know it, a whole class of surprises
+      goes away.</p>
+
+      <h3>select moves when you tell it to</h3>
+
+<pre><code class="cssc">select (bytecode) ?i {
+    if (i == 1) { jump++; }   // skip the next one
+    cssc::outln(i);
+    jump;                     // move on by one
+}</code></pre>
+
+      <p><code>select</code> puts a cursor on a container and you decide how far
+      it travels. <code>jump</code> is one forward, <code>jump++</code> is two,
+      <code>!jump</code> goes back. Leave it out and the cursor never moves,
+      which the analyzer catches for you.</p>
+
+      <h3>mirror hands back a value and keeps going</h3>
+
+<pre><code class="cssc">#define(f) {
+    #stack[int, 32] inner = 42;
+    mirror &amp;inner;      // set the result, keep running
+    #delete[inner];     // so the cleanup still happens
+}</code></pre>
+
+      <p><code>return</code> stops the body immediately, which means trailing
+      cleanup never runs. <code>mirror</code> sets the return value and lets the
+      rest of the body finish, so you can free what you allocated and still hand
+      something back. It exists because I kept needing both.</p>
+
+      <p class="aside">One more, since it catches people: objects have no access
+      control at all, every member and every label is reachable. Sectors do have
+      it, and <code>::</code> enforces it. That asymmetry is deliberate.</p>
+    </section>
+
+    <section>
+      <h2>It is written in itself</h2>
+
+      <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>component</th><th>lines of CSSC</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>the interpreter</td><td class="num">18,236</td></tr>
+          <tr><td>transembly, the compiler backend</td><td class="num">14,111</td></tr>
+          <tr><td>the IDE</td><td class="num">3,459</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>More than 35,000 lines where the language carries itself. That is also
+      the hardest test I have. Anything that does not hold up shows up here
+      first, long before anyone else would run into it.</p>
+    </section>
+
+    <section>
+      <h2>The tooling</h2>
+
+      <p>CSSC makes you say where memory goes, so the editor's job is to show you
+      what you said. Put the cursor on an allocation and both ends of its life
+      light up. Leave one without a matching free and the line turns orange. The
+      analyzer reads ownership too, and tells you things like this in place,
+      before anything runs.</p>
+
+      <figure class="wide">
+        <a href="img/analyzer_full.png">
+          <img src="img/analyzer.png" width="1685" height="413"
+            alt="A CSSC function in the IDE with an inline analyzer warning reading: select cursor is borrowed not copied and dies after the block, pass ampersand cursor to keep it.">
+        </a>
+        <figcaption>The analyzer catching a borrowed select cursor that would
+        have gone stale after the loop. Click for the whole window.</figcaption>
+      </figure>
+
+      <p>There is more of it than fits here: live values on hover while the
+      program runs, variable tracking, autocleanup that inserts the frees you
+      forgot, module introspection, a debugger that marks the line it is on.
+      <a href="ide.html">The IDE has its own page.</a></p>
+    </section>
+
+    <section>
+      <h2>On embedded</h2>
+
+      <p>This is what CSSC was built for. Here is a driver that runs an OLED over
+      I2C: an object with data members, labels, a <code>free { }</code> teardown
+      block, and a render loop that ticks every 20 milliseconds.</p>
+
+      <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>the ESP8266 video driver</th><th>size</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>source</td><td class="num">2,259 bytes</td></tr>
+          <tr><td>compiled for Xtensa</td><td class="num">22,656 bytes</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>Dead code is thrown away and the runtime is small, which is what makes
+      the output fit on a flash-constrained board. That is the entire reason the
+      language exists.</p>
+    </section>
+
+    <section>
+      <h2>Where it stands</h2>
+
+      <p>I would rather tell you what does not work than have you find out.</p>
+
+      <ul class="plain">
+        <li>Xtensa, so ESP32 and ESP8266, is tested and working.</li>
+        <li>The host backend runs on Windows and on Linux.</li>
+        <li>ARM is not supported yet.</li>
+        <li>Parts of the toolchain, the CLI among them, are still stage 0 and
+        run on Python. Stage 1 is replacing them.</li>
+      </ul>
+
+      <p>The numbers below are stage 1, which means the compiler doing the work
+      is the self-hosted one, written in CSSC. Measured on Windows 11 x86_64
+      against gcc 15.2.0 with -O2 and rustc 1.98 with -O, best of several runs,
+      times in milliseconds.</p>
+
+      <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>benchmark</th>
+            <th>C</th>
+            <th>Rust</th>
+            <th>CSSC</th>
+            <th>vs C</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>fib(38)</td><td class="num">62</td><td class="num">95</td><td class="num">83</td><td class="num">1.32x</td></tr>
+          <tr><td>lcg 5e8</td><td class="num">488</td><td class="num">103</td><td class="num">734</td><td class="num">1.50x</td></tr>
+          <tr><td>sieve 1e8</td><td class="num">1313</td><td class="num">1283</td><td class="num">1719</td><td class="num">1.31x</td></tr>
+          <tr><td>collatz 5e6</td><td class="num">722</td><td class="num">570</td><td class="num">1911</td><td class="num">2.65x</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>On three of the four it lands between 1.31x and 1.50x of gcc -O2, and on
+      fib it comes out ahead of rustc. On collatz it is 2.65x and I have not
+      chased that one down yet. On lcg, rustc does something to the loop that
+      neither C nor CSSC does, which is why that column looks strange.</p>
+
+      <p>Two more things that belong in the same breath. Where gcc
+      auto-vectorizes an independent multiply per iteration, CSSC is 8.6x slower,
+      because it does not vectorize yet. And the stage 1 interpreter is around
+      600x CPython on call-heavy code. It is a tree-walker built for correctness
+      and tooling, not for speed, and it is the next thing I am working on.</p>
+    </section>
+
+    <section>
+      <h2>What I want it to be</h2>
+
+      <p>I have been programming for many years and it is my favorite thing to
+      do. What I like most is making something that fills a real gap. CSSC fills
+      one I wish had already existed, and after three years of work, here it
+      is.</p>
+
+      <p>I spent a long time on the semantics and defined them down to the small
+      details, because I wanted a language that actually works rather than one
+      that was thrown together, and I didn't want a clone of anything else. CSSC
+      has its own identity, and I'd like to shape it together with you.</p>
+
+      <p>I know languages are hard to sell. I'm not selling anything. I want to
+      give you a way to write software that respects the machine it runs on, and
+      to offer something that doesn't really exist yet. My focus is embedded:
+      smaller flash, less RAM, and more freedom in the thing that made you want
+      to program in the first place.</p>
+    </section>
+
+    <section>
+      <h2>The person behind it</h2>
+
+      <p>A project is made by somebody, and I'd rather you know who.</p>
+
+      <p>I've been dealing with depression for three years now. Those are the
+      same three years I spent building this. It made a lot of things harder, and
+      for a long time I didn't dare to publish any of it, because I was afraid
+      the project wouldn't be accepted. My friends kept telling me that this was
+      the wrong question to be asking, and they were right. What would I be
+      ashamed of? Code that isn't perfect? The work? The idea? No.</p>
+
+      <p>So I'm putting it out. I want to be an honest and transparent developer,
+      I want this to be useful to you, and I want you to be part of it.</p>
+    </section>
+
+    <section>
+      <h2>On AI</h2>
+
+      <p>AI is getting everywhere now and I don't like most of what it's doing.
+      Not because AI is bad, but because people produce nonsense with it and then
+      flex about how good they are. Nobody is perfect. What actually worries me
+      is that people stop solving problems themselves and ask a model instead.</p>
+
+      <p>I use it too, and I'd be a poor developer if I wasn't honest about
+      where. I don't write C, I don't touch that. Audits, harnesses and negative
+      tests are easy to do with AI, so yes, I use it for those. The aliasing
+      model was another one. I could not work that out on my own and I needed
+      help with it.</p>
+
+      <p>What I don't do is sit here and claim I did all of it. I didn't. But I
+      know the concepts and I know what I'm doing.</p>
+
+      <p>And if you want to learn how to write a language yourself, I can
+      absolutely recommend
+      <a href="https://craftinginterpreters.com/">Crafting Interpreters</a>. It's
+      a masterpiece, it reads well, and it helped me a lot.</p>
+    </section>
+
+    <section>
+      <h2>Get it</h2>
+
+      <p>The installer is drawn by CSSC's own GUI stack, so the wizard you click
+      through is itself a CSSC program.</p>
+
+      <p><a class="get" href="https://github.com/liliassg/CSSC/releases/tag/v7">Download
+      CSSC 7.4</a></p>
+
+      <p>Two things to know before you run it. It is not code signed, because a
+      certificate costs around 400 euro a year and I cannot justify that for
+      this, so Windows SmartScreen will warn you and you will have to click
+      through it. And it ships with an embedded Python 3.12, because the stage 0
+      parts still need one. That is going away.</p>
+
+      <p>On Linux, extract the zip and run <code>./install.sh</code>. Then open a
+      new terminal and check with <code>cssc --version</code>.</p>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <p>CSSC 7.4, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="cssc.js"></script>
+</body>
+</html>
