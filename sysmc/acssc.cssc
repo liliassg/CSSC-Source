@@ -1,5 +1,0 @@
-// Authorized CSSC Runtime Source File
-
-// entry:
-#load["printf.cssc"] printf;
-#stack[int, 32] fprint = printf::printf;
