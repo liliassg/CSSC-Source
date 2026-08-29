@@ -59,9 +59,15 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* A bitmap font only stays sharp on whole pixels. Centering with auto margins
+   puts the left edge on a half pixel whenever the free space is odd, which is
+   every second window width, and then every glyph on the page gets
+   antialiased. Flooring the margin costs at most one pixel of asymmetry and
+   nobody can see that. Browsers without round() fall back to the line above. */
 .page {
   max-width: var(--measure);
   margin: 0 auto;
+  margin-left: round(down, calc((100% - min(var(--measure), 100%)) / 2), 1px);
 }
 
 /* ---------- header ---------- */
@@ -230,6 +236,18 @@ ul.plain li::before {
 
 /* ---------- code ---------- */
 
+/* The browser's own stylesheet gives code and pre the generic family
+   "monospace", and that switches them to the separate monospace default size,
+   around 13px, instead of the 16 they inherit. The glyphs then sit off the
+   pixel grid, and because the advances change, everything after an inline
+   code fragment gets pushed onto a half pixel too. Naming the family and the
+   size explicitly keeps the whole line on the grid. */
+code,
+pre {
+  font-family: "CSSC Pixel", "Courier New", monospace;
+  font-size: inherit;
+}
+
 code {
   color: var(--teal);
 }
@@ -270,11 +288,23 @@ figure {
 
 /* Screenshots of the IDE are dense. Squeezed into the reading column they turn
    into grey mush, so they break out of it and take whatever width the window
-   has, up to the point where the capture would start being upscaled. */
+   has, up to the point where the capture would start being upscaled.
+
+   The obvious way to do this is margin-left 50% plus a translateX(-50%), but a
+   transform rasterizes its whole subtree, half pixels and all, and the caption
+   underneath goes soft with it. A floored negative margin lands on a whole
+   pixel and needs no layer. */
 figure.wide {
   width: min(1600px, calc(100vw - 48px));
   margin-left: 50%;
   transform: translateX(-50%);
+}
+
+@supports (margin-left: round(down, 1.5px, 1px)) {
+  figure.wide {
+    margin-left: round(down, calc((100% - min(1600px, 100vw - 48px)) / 2), 1px);
+    transform: none;
+  }
 }
 
 /* Never scale a capture up. Past 1:1 the IDE's own pixel font goes soft, which
@@ -296,6 +326,7 @@ figure img {
   margin: 0 0 32px 50%;
   transform: translateX(-50%);
   display: grid;
+  /* see figure.wide above for why the transform gets replaced */
   grid-template-columns: 1fr 1fr;
   gap: 24px;
   align-items: start;
@@ -307,6 +338,13 @@ figure img {
 
 .pair figcaption {
   max-width: var(--measure);
+}
+
+@supports (margin-left: round(down, 1.5px, 1px)) {
+  .pair {
+    margin-left: round(down, calc((100% - min(2100px, 100vw - 48px)) / 2), 1px);
+    transform: none;
+  }
 }
 
 @media (max-width: 2147px) {
@@ -344,17 +382,27 @@ figure.wide figcaption {
   overflow-x: auto;
 }
 
+/* No width: 100% here on purpose. Stretching the table makes the browser
+   distribute the leftover width across the columns in fractions, every column
+   after the first then starts on a half pixel, and the header row in
+   particular turns to mush. Sized to its content, every column boundary is a
+   whole number of character cells. */
 table {
   border-collapse: collapse;
-  width: 100%;
   white-space: nowrap;
 }
 
 th,
 td {
-  padding: 4px 24px 4px 0;
+  /* two character cells between columns, so the gap sits on the grid too */
+  padding: 4px 32px 4px 0;
   text-align: left;
   vertical-align: top;
+}
+
+th:last-child,
+td:last-child {
+  padding-right: 0;
 }
 
 th {
@@ -363,9 +411,9 @@ th {
   border-bottom: 2px solid var(--panel-edge);
 }
 
-td.num {
+/* numbers right-align, and their heading goes with them */
+.num {
   text-align: right;
-  padding-right: 24px;
 }
 
 tbody td:first-child {
