@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sectors - CSSC</title>
+<meta name="description" content="A sector is CSSC&#x27;s named scope with real, enforced privacy. Unlike objects, which have no access control, a sector actually gates private: members: read one from outside through ::">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Sectors - CSSC">
+<meta property="og:description" content="A sector is CSSC&#x27;s named scope with real, enforced privacy. Unlike objects, which have no access control, a sector actually gates private: members: read one from outside through ::">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Sectors</h1>
+    <p>A <code>sector</code> is CSSC's named scope with real, enforced privacy. Unlike objects, which
+    have no access control, a sector actually gates <code>private:</code> members: read one from
+    outside through <code>::</code> and you get <code>0x0</code>. Sectors are also isolated. A sector body runs
+    in its own variable space and can't see top-level globals unless you inject them.</p>
+    <h2>Structure</h2>
+    <pre><code class="cssc">sector Engine {
+    private:
+        #stack[int, 32] Engine-&gt;fps = 60;
+    public:
+        #stack[string, 128] Engine-&gt;title = &quot;MyEngine&quot;;
+        #define(Engine-&gt;start) {
+            cssc::outln(&quot;Engine starting&quot;);
+        }
+    } free {
+        #delete[Engine-&gt;fps];
+        #delete[Engine-&gt;title];
+    };
+    </code></pre>
+    <p>The header grammar is:</p>
+    <pre><code class="cssc">sector NAME &lt;injection-list&gt;? ?reserveLabel? { private: … public: … } free { … }?
+    </code></pre>
+    <p><code>private:</code> and <code>public:</code> split the members, and the default is <code>private</code> if you
+    write members before any section label. Inside the sector you declare and reach
+    members with <code>-&gt;</code> (<code>Engine-&gt;fps</code>); from outside you reach them with <code>::</code>
+    (<code>Engine::title</code>, <code>Engine::start()</code>). The <code>free { }</code> block is optional (see below),
+    though you should still write it to release your members.</p>
+    <h2>Public and private</h2>
+    <p>External <code>Sector::member</code> access is checked. A <code>public:</code> member comes back with its
+    value; a <code>private:</code> member read comes back as <code>0x0</code>, not an error. But
+    <code>Sector-&gt;member</code> is not checked, so a private member is fully readable and writable
+    through <code>-&gt;</code>. That's the deliberate <code>::</code>/<code>-&gt;</code> asymmetry, covered in
+    <a href="10-access-operators.html">Access Operators</a>. A <code>Sector::member = v</code> write isn't
+    checked either, and in the interpreter it persists.</p>
+    <pre><code class="cssc">cssc::outln(Engine::title);   // public, so the value
+    cssc::outln(Engine::fps);     // private through ::, so 0x0
+    cssc::outln(Engine-&gt;fps);     // private through -&gt;, so 60, not gated
+    </code></pre>
+    <p>One note if you've read older material: an external <code>Sector::member = v</code> write does
+    persist in the interpreter. Some docs describe it as a silent no-op, but that's the
+    native compiler's model, not the interpreter's.</p>
+    <h2>Isolation</h2>
+    <p>A sector body runs in its own variable space, so:</p>
+    <ul>
+    <li>Top-level globals aren't visible inside the sector unless you inject them.</li>
+    <li>An unknown bare identifier inside a sector resolves to <code>0x0</code>. There's no silent
+      fallback to a same-named global.</li>
+    <li>Inside a sector method, a <code>ns::func(...)</code> call is only allowed when <code>ns</code> is <code>cssc</code>,
+      the sector itself, one of its members, or an injected dependency. Anything else is
+      a <code>Sector-Isolation</code> error.</li>
+    </ul>
+    <pre><code class="cssc">#stack[int, 32] globalX = 99;
+    
+    sector Iso {
+    public:
+        #define(Iso-&gt;show) {
+            cssc::outln(globalX);   // 0x0, because globalX isn't injected
+        }
+    } free {};
+    </code></pre>
+    <p>To use <code>globalX</code>, inject it, which is the next section.</p>
+    <h2>Dependency injection</h2>
+    <p>The <code>&lt;…&gt;</code> header list injects outer variables into the sector's scope. Each entry is
+    one of these:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Form</th>
+    <th>Meaning</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>&lt;name&gt;</code></td>
+    <td>inject outer variable <code>name</code> by reference (zero-copy, shared)</td>
+    </tr>
+    <tr>
+    <td><code>&lt;&amp;name&gt;</code></td>
+    <td>inject <code>name</code> as a deep-copy snapshot</td>
+    </tr>
+    <tr>
+    <td><code>&lt;outerVar: localName&gt;</code></td>
+    <td>inject <code>outerVar</code> under the local name <code>localName</code> (reference by default; <code>&amp;</code>/<code>*</code> modifiers allowed on either side)</td>
+    </tr>
+    <tr>
+    <td><code>&lt;*name&gt;</code></td>
+    <td>a deprecated reference spelling, the same as bare <code>&lt;name&gt;</code></td>
+    </tr>
+    </tbody>
+    </table></div>
+    <pre><code class="cssc">#stack[int, 32] globalConfig = 42;
+    
+    sector App&lt;globalConfig&gt; {          // injected by reference, shared
+        #define(App-&gt;run) {
+            cssc::outln(globalConfig);  // 42
+        }
+    } free {};
+    
+    sector Snapshot&lt;&amp;globalConfig&gt; { … } free {};    // an independent copy
+    sector Aliased&lt;globalConfig: cfg&gt; { … } free {}; // injected under the name 'cfg'
+    </code></pre>
+    <p>One thing to be clear about: for a sector, <code>&lt;A: B&gt;</code> means "inject outer variable <code>A</code>
+    under the local name <code>B</code>." It's not a typed constructor parameter. Typed constructor
+    parameters like <code>&lt;int: width&gt;</code> are an object feature, not a sector one. See
+    <a href="05-objects.html">Objects</a>.</p>
+    <h2>Deferred construction</h2>
+    <p>A sector marked with <code>?label</code> in its header isn't built where it's defined. It's set
+    aside and constructed later by <code>#reserve[label]</code>.</p>
+    <pre><code class="cssc">sector Config ?app {
+        #define(Config-&gt;run) { cssc::outln(&quot;running&quot;); }
+    } free {};
+    
+    #reserve[app];      // now the sector is constructed
+    app::run();
+    #free[app];
+    </code></pre>
+    <p>Use this when a sector needs to be built at a specific moment, after some setup,
+    rather than where it textually appears.</p>
+    <h2>Teardown</h2>
+    <p><code>#free[Sector]</code> runs the sector's <code>free { }</code> block and drops it. <code>#unload[alias]</code> is
+    the equivalent for a loaded module, and it cascades to that module's child sectors
+    (see <a href="07-modules.html">Modules</a>).</p>
+    <pre><code class="cssc">#free[Engine];
+    </code></pre>
+    <p>The <code>free { }</code> block is optional and unenforced. The parser accepts a sector with no
+    <code>free</code> block, an empty block does nothing, and nothing errors if you never <code>#free</code> a
+    sector, since there's no leak check. So "mandatory" is good practice, not a rule.
+    Write and call them anyway, because it matters for compiled builds.</p>
+    <h2>Nested and self-referencing sectors</h2>
+    <p>An inner sector can inject its enclosing sector to reach it:</p>
+    <pre><code class="cssc">sector Outer {
+        sector Inner&lt;Outer&gt; {          // Inner captures Outer by reference
+            // Inner can reach Outer's injected members
+        } free {};
+    } free {};
+    </code></pre>
+    <p>During construction a live placeholder for the parent shares the same variable
+    space, so an inner sector sees the parent as a real reference. (<code>&lt;*Outer&gt;</code> is the
+    deprecated spelling.)</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>Sectors are the real privacy tool. <code>::</code> reads enforce <code>private:</code>; objects enforce
+      nothing.</li>
+    <li><code>-&gt;</code> bypasses sector privacy for both reads and writes. Only <code>::</code> reads are gated.</li>
+    <li><code>Sector::member = v</code> persists in the interpreter; it's not a no-op.</li>
+    <li><code>&lt;A: B&gt;</code> on a sector injects a variable, not a typed parameter. Typed constructor
+      parameters are objects-only.</li>
+    <li>There's no global fallback inside a sector. Inject with <code>&lt;…&gt;</code> or the name is <code>0x0</code>.</li>
+    <li><code>free</code> and <code>#free</code> are optional and unenforced, with no leak error, but you should
+      still use them.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="10-access-operators.html">Access Operators</a> for the <code>::</code>/<code>-&gt;</code>/<code>.</code> rules and the
+      asymmetry.</li>
+    <li><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> for the sector body as a wall.</li>
+    <li><a href="07-modules.html">Modules</a> for modules versus sectors, <code>::</code> dispatch, and
+      <code>#free</code>/<code>#unload</code>.</li>
+    <li><a href="05-objects.html">Objects</a> for objects, which have typed constructor parameters and
+      no privacy.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="05-objects.html">&lt; Objects</a> <a href="07-modules.html">Modules &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

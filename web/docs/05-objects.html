@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Objects - CSSC</title>
+<meta name="description" content="An object bundles data members, which you reach with -&gt;, and labels, which are named sections of code you call with .. Objects are instantiated, can be cloned, support label overlo">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Objects - CSSC">
+<meta property="og:description" content="An object bundles data members, which you reach with -&gt;, and labels, which are named sections of code you call with .. Objects are instantiated, can be cloned, support label overlo">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Objects</h1>
+    <p>An <code>object</code> bundles data members, which you reach with <code>-&gt;</code>, and labels, which are
+    named sections of code you call with <code>.</code>. Objects are instantiated, can be cloned,
+    support label overloading, and carry a <code>free { }</code> teardown block.</p>
+    <p>The two access operators aren't interchangeable, and <a href="10-access-operators.html">Access Operators</a>
+    has the full rules. The short version: <code>obj-&gt;member</code> reads or writes a data member,
+    and <code>inst.label(args)</code> calls a label.</p>
+    <h2>Structure</h2>
+    <pre><code class="cssc">object Player {
+        #auto[int] Player-&gt;hp = 100;    // a data member, declared with -&gt;
+        Player-&gt;init();                 // top-level object code runs at instantiation
+    
+    init:                               // a label, a named section of code
+        cssc::outln(&quot;Player created&quot;);
+    
+    takeDamage&lt;int: dmg&gt;:               // a label with a typed parameter
+        Player-&gt;hp = Player-&gt;hp - dmg;
+        if (Player-&gt;hp &lt;= 0) {
+            call die;
+        }
+    
+    die:
+        cssc::outln(&quot;Player died&quot;);
+        destruct;                       // run free {}, mark dead, return to the caller
+    } free {
+        #delete[Player-&gt;hp];            // teardown
+    };
+    </code></pre>
+    <p>Data members are declared and reached as <code>Player-&gt;member</code>. Labels are <code>name:</code>
+    sections, and the object's top-level statements, the ones outside any label, run
+    once at instantiation. The <code>free { }</code> block runs on <code>#free[instance]</code> or on
+    <code>destruct</code>; it's where you release what the object allocated, and it's good practice
+    to release every member you own there. The object body is a wall (see
+    <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>); the members are the object's own scope.</p>
+    <h2>Instantiating and calling labels</h2>
+    <pre><code class="cssc">Player() myPlayer;          // run the object's top-level code and bind the instance
+    myPlayer.takeDamage(30);    // call a label with '.'
+    </code></pre>
+    <p><code>Type() name;</code> instantiates, with constructor arguments in the parentheses (below).
+    <code>instance.label(args)</code> calls a label. Labels are the object's callable surface.</p>
+    <h2>Data members with <code>-&gt;</code></h2>
+    <p>Member access uses <code>-&gt;</code>, and here's the important part: <code>-&gt;</code> does no access check. A
+    member reached with <code>-&gt;</code> is always reachable, even from outside the object, even if
+    you thought of it as private.</p>
+    <pre><code class="cssc">Player() p;
+    cssc::outln(p-&gt;hp);     // works from outside; -&gt; isn't gated
+    </code></pre>
+    <p>That's not an accident. Objects have no access control at all, so every member (via
+    <code>-&gt;</code>) and every label (via <code>.</code>) is always reachable. Access control is a sector
+    feature: sector members reached with <code>::</code> are gated by <code>public:</code> and <code>private:</code>. So
+    <code>::</code> on a sector enforces privacy and <code>-&gt;</code> never does. More on that below, and in
+    <a href="10-access-operators.html">Access Operators</a>.</p>
+    <h2>Constructor parameters and capture</h2>
+    <p>The <code>&lt;…&gt;</code> header on an object is its capture and injection list. Each entry is one
+    of these:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Form</th>
+    <th>Meaning</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>&lt;type: name&gt;</code></td>
+    <td>a constructor parameter, typed, supplied at instantiation</td>
+    </tr>
+    <tr>
+    <td><code>&lt;name&gt;</code></td>
+    <td>a zero-copy reference captured from the enclosing scope (the default)</td>
+    </tr>
+    <tr>
+    <td><code>&lt;&amp;name&gt;</code></td>
+    <td>a deep copy captured from the enclosing scope</td>
+    </tr>
+    <tr>
+    <td><code>&lt;*name&gt;</code></td>
+    <td>a deprecated reference spelling, the same as bare <code>&lt;name&gt;</code></td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>Constructor parameters:</p>
+    <pre><code class="cssc">object Widget&lt;int: width, int: height&gt; {
+        #stack[int, 32] Widget-&gt;w = width;
+        #stack[int, 32] Widget-&gt;h = height;
+    } free {
+        #delete[Widget-&gt;w];
+        #delete[Widget-&gt;h];
+    };
+    
+    Widget(800, 600) myWidget;
+    </code></pre>
+    <p>Capturing an outer variable is how CSSC does composition without a class-inheritance
+    keyword. Inject an outer object or sector into an object's header and it becomes a
+    member, live or copied:</p>
+    <pre><code class="cssc">#stack[int, 32] globalConfig = 42;
+    
+    object App&lt;globalConfig&gt; {          // captured by reference, the default
+        // globalConfig is available here as a zero-copy reference
+    } free {};
+    
+    object Snapshot&lt;&amp;array&lt;int&gt;: buf&gt; { // captured as an independent deep copy
+        // changing the original after construction isn't visible here
+    } free {};
+    </code></pre>
+    <p>The old <code>object Foo&lt;*a, *b&gt;</code> reference spelling is deprecated but still accepted.
+    Write <code>object Foo&lt;a, b&gt;</code> for references, or <code>object Foo&lt;auto: a, auto: b&gt;</code> for
+    constructor parameters. Bare capture is reference-by-default, matching <code>#req</code> and
+    argument passing.</p>
+    <h2>Labels: parameters, transfers, overloading</h2>
+    <pre><code class="cssc">object Handler {
+        process&lt;string: data&gt;:
+            cssc::outln(&quot;String: &quot; + data);
+        process&lt;int: data&gt;:                 // same name, a different parameter type
+            cssc::outln(&quot;Int: &quot; + data);
+    } free {};
+    
+    Handler() h;
+    h.process(&quot;hello&quot;);   // &quot;String: hello&quot;
+    h.process(42);        // &quot;Int: 42&quot;
+    </code></pre>
+    <p>A simple label is <code>name:</code>. Typed parameters go in the header, <code>name&lt;int: x, string:
+    msg&gt;:</code>. A transfer capture, <code>name&lt;outerVar&gt;:</code>, pulls an outer variable zero-copy into
+    the label (the default; <code>&lt;*outerVar&gt;</code> is the deprecated spelling). And labels
+    overload: several can share a name with different parameter lists, and CSSC picks
+    one at runtime by argument type, with an exact type match winning.</p>
+    <h2><code>call</code>, <code>mirror</code>, <code>return</code>, <code>destruct</code></h2>
+    <p>Inside an object, labels call each other with <code>call</code> and hand back values with
+    <code>mirror</code> or <code>return</code>, the same as in <a href="04-callables.html">Callables</a>.</p>
+    <pre><code class="cssc">object Calculator {
+        add&lt;int: a, int: b&gt;:
+            mirror a + b;       // return the value but keep running for cleanup
+    
+        snapshot&lt;data&gt;:
+            mirror &amp;data;       // an explicit deep-copy return
+    
+        shutdown:
+            destruct;           // run free {}, mark dead; the host keeps running
+    } free {};
+    
+    Calculator() calc;
+    call add&lt;3, 4&gt; result;      // call a label with transfer args and capture, giving 7
+    </code></pre>
+    <p><code>call label&lt;args&gt; capture;</code> calls a label and binds its result. <code>call label&lt;*name,
+    42&gt;;</code> uses the <code>*name</code> transfer form to force an explicit transfer reference instead
+    of the automatic scope pull. (Here <code>*</code> is a transfer override, not the deprecated
+    reference marker.) <code>destruct;</code> runs <code>free { }</code>, marks the instance dead, and returns
+    to the caller. It's not <code>exit()</code>, so the host script keeps going. A <code>break;</code> inside a
+    label but outside any loop acts as an early return from the label and doesn't
+    destroy the object; inside a <code>for</code> or <code>while</code> it's the normal loop break.</p>
+    <p>The full <code>mirror</code> reference-versus-snapshot rules are in <a href="04-callables.html">Callables</a>.</p>
+    <h2>Objects have no privacy: use a sector</h2>
+    <p>Objects don't have <code>public</code> or <code>private</code>. Access control is a sector feature, and
+    this is by design. Every object member (via <code>-&gt;</code>) and every label (via <code>.</code>) is
+    reachable from anywhere, and there's no modifier that turns privacy on.</p>
+    <p>When you need enforced privacy, put the state in a sector. <code>::</code> access honors
+    <code>public:</code> and <code>private:</code>, and a private read returns <code>0x0</code>:</p>
+    <pre><code class="cssc">sector Config {
+    private:
+        secret = &quot;internal only&quot;;
+    public:
+        show:
+            cssc::outln(Config::secret);   // an internal read, allowed
+    } free {};
+    
+    cssc::outln(Config::secret);   // an external read of a private member, giving 0x0
+    </code></pre>
+    <p>If you've seen a <code>secure !</code> object modifier or object <code>private:</code>/<code>public:</code> sections
+    in older material, they don't do anything on an object. Privacy lives in sectors.
+    See <a href="06-sectors.html">Sectors</a>.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>Objects have no privacy. Every member (<code>-&gt;</code>) and label (<code>.</code>) is reachable. <code>::</code> on
+      a sector is what enforces <code>public:</code>/<code>private:</code>.</li>
+    <li><code>.</code> calls a label; <code>-&gt;</code> reads or writes a data member. They aren't interchangeable
+      (see <a href="10-access-operators.html">Access Operators</a>).</li>
+    <li>Put teardown in <code>free { }</code> and release every member you allocated.</li>
+    <li><code>destruct</code> isn't exit. It tears down the instance and returns to the host.</li>
+    <li>Overloading resolves at runtime by argument type, and an exact match wins.</li>
+    <li>Captures are reference-by-default: <code>&lt;name&gt;</code> is a live reference, <code>&lt;&amp;name&gt;</code>
+      deep-copies, <code>&lt;*name&gt;</code> is deprecated.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="10-access-operators.html">Access Operators</a> for the <code>::</code> versus <code>-&gt;</code> versus <code>.</code>
+      rules.</li>
+    <li><a href="06-sectors.html">Sectors</a>, where <code>::</code> privacy is enforced.</li>
+    <li><a href="04-callables.html">Callables</a> for <code>mirror</code>/<code>return</code>/<code>destruct</code> and capture syntax.</li>
+    <li><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a> for <code>#free</code> teardown and the
+      member cascade.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="04-callables.html">&lt; Callables</a> <a href="06-sectors.html">Sectors &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

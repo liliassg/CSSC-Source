@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started - CSSC</title>
+<meta name="description" content="This takes you from a fresh install to a running program and the handful of ideas you need before the rest of the reference makes sense. Give it ten minutes.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Getting Started - CSSC">
+<meta property="og:description" content="This takes you from a fresh install to a running program and the handful of ideas you need before the rest of the reference makes sense. Give it ten minutes.">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Getting Started</h1>
+    <p>This takes you from a fresh install to a running program and the handful of ideas
+    you need before the rest of the reference makes sense. Give it ten minutes.</p>
+    <h2>Install</h2>
+    <p>On Windows, download the release zip, extract it, and run <code>CSSC-Setup.exe</code>. Accept
+    the license, click Install, and open a new terminal when it's done.</p>
+    <p>On Linux, extract the zip and run <code>./install.sh</code>, then open a new terminal.</p>
+    <p>Then check it worked:</p>
+    <pre><code class="cssc">cssc --version
+    </code></pre>
+    <p>You should see the version print. If the command isn't found, close the terminal
+    and open a fresh one. The installer puts <code>cssc</code> on your PATH, and only new
+    terminals pick that change up.</p>
+    <p>One thing to know up front: the first time you compile something, CSSC downloads
+    its LLVM backend. That's a one-time thing and it can take a few minutes. Everything
+    after that is quick.</p>
+    <h2>Your first program</h2>
+    <p>Put this in a file called <code>hello.cssc</code>:</p>
+    <pre><code class="cssc">cssc::outln(&quot;Hello from CSSC&quot;);
+    </code></pre>
+    <p>Run it on the interpreter:</p>
+    <pre><code class="cssc">cssc run hello.cssc
+    </code></pre>
+    <p><code>cssc::outln</code> prints a line. <code>cssc::</code> is the built-in namespace, always there, no
+    import needed.</p>
+    <p>Now compile the same file to a real executable:</p>
+    <pre><code class="cssc">cssc build hello.cssc -o hello
+    </code></pre>
+    <p>That gives you <code>hello</code> (or <code>hello.exe</code> on Windows) that runs on its own. Same
+    source, interpreted and compiled, no changes in between. That's the whole idea
+    behind CSSC: you write it once and it reaches a lot of places.</p>
+    <h2>Every variable has a type and a size</h2>
+    <p>You declare a variable with its type and how many bits it gets:</p>
+    <pre><code class="cssc">#stack[int, 32] count = 10;
+    #stack[int, 8]  small = 200;
+    #stack[float, 64] ratio = 1.5;
+    #stack[string, 64] name = &quot;Ada&quot;;
+    cssc::outln(count);
+    cssc::outln(name);
+    </code></pre>
+    <p><code>#stack[int, 32]</code> means a 32-bit integer that lives on the stack. The size is part
+    of the deal. You're telling the machine exactly how much room to set aside. Floats
+    are the one exception to picking a width: they're always 64-bit, and a narrower
+    float slot gets rejected.</p>
+    <p>The full story is in <a href="01-types-and-values.html">Types &amp; Values</a>.</p>
+    <h2>You free what you allocate</h2>
+    <p>CSSC doesn't tidy up after you. When you're done with something, delete it:</p>
+    <pre><code class="cssc">#stack[int, 32] x = 42;
+    cssc::outln(x);
+    #delete[x];
+    </code></pre>
+    <p>Stack values are cheap and short-lived. When you need memory that outlives the
+    current block, you reach for <code>#heap</code>, and heap memory sticks around until the
+    program ends unless you free it yourself.</p>
+    <p>This is strict, and it's meant to be. It's the reason CSSC can run with no garbage
+    collector on a chip that has almost no memory to spare. The rules for what lives
+    how long are in <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>, and it's the
+    chapter I'd read twice.</p>
+    <h2>Functions</h2>
+    <p>A function is a <code>#define</code>. It reads its arguments with <code>#scanp</code> and hands back a
+    result with <code>return</code>:</p>
+    <pre><code class="cssc">#stack[int, 32] square;
+    #define(square) {
+        #scanp(square, int, 0) n;
+        return n * n;
+    }
+    square(7) result;
+    cssc::outln(result);
+    </code></pre>
+    <p>Two things worth pointing out. You declare the name <code>square</code> as a normal variable
+    first, then define it as a function. In CSSC a function is a value that lives in a
+    slot, same as any other. And you call it with <code>square(7) result;</code>, which runs it
+    and captures the answer into <code>result</code>.</p>
+    <p>There's more on arguments and passing by reference or copy in
+    <a href="04-callables.html">Callables</a>.</p>
+    <h2>Loops and containers</h2>
+    <p>A <code>vector</code> grows as you push to it. To walk one, use <code>select</code> with a <code>jump</code>:</p>
+    <pre><code class="cssc">#stack[vector&lt;int&gt;, 64] nums;
+    nums.push_back(3);
+    nums.push_back(5);
+    nums.push_back(8);
+    
+    #stack[int, 32] total = 0;
+    select (nums) ?n {
+        total = total + n;
+        jump;
+    }
+    cssc::outln(total);
+    #delete[nums];
+    </code></pre>
+    <p>The <code>jump</code> is doing real work here. <code>select</code> puts a cursor on the container, and
+    <code>jump</code> moves it to the next element. Leave it out and the cursor never advances, so
+    you loop on the first element forever. It's a common slip, and the analyzer will
+    warn you about it.</p>
+    <p><a href="09-control-flow.html">Control Flow</a> covers <code>if</code>, <code>for</code>, <code>while</code>, and <code>select</code> in
+    full.</p>
+    <h2>Where to go next</h2>
+    <p>That's enough to write real programs. From here, follow whatever you're building:</p>
+    <ul>
+    <li>Structuring something bigger? <a href="05-objects.html">Objects</a> for data with behavior,
+      <a href="06-sectors.html">Sectors</a> for namespaces with real privacy.</li>
+    <li>Pulling in library code? <a href="07-modules.html">Modules</a>.</li>
+    <li>Hit a memory error, or something got freed too early?
+      <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a> and
+      <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>.</li>
+    <li>Tangled up in <code>::</code> versus <code>-&gt;</code> versus <code>.</code>? <a href="10-access-operators.html">Access Operators</a>.
+      This one catches everyone once.</li>
+    </ul>
+    <p>And if you'd rather work in an editor with a file tree, autocomplete, and a
+    built-in terminal, run <code>cssc workspace</code> for the CSSC IDE.</p>
+    <nav class="chapter-nav"><a href="index.html">&lt; the chapters</a> <a href="01-types-and-values.html">Types & Values &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

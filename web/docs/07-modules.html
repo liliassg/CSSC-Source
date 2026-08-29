@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modules - CSSC</title>
+<meta name="description" content="A module is a reusable scope you reach with ::. CSSC has three kinds:">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Modules - CSSC">
+<meta property="og:description" content="A module is a reusable scope you reach with ::. CSSC has three kinds:">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Modules</h1>
+    <p>A module is a reusable scope you reach with <code>::</code>. CSSC has three kinds:</p>
+    <ol>
+    <li>Built-in modules, loaded with <code>#include('name')</code> from a fixed in-runtime registry
+       (<code>video</code>, <code>def</code>, <code>sizes</code>, <code>os</code>, and so on).</li>
+    <li>Loaded CSSC files, where <code>#load["file.cssc"] alias;</code> runs another <code>.cssc</code> file as
+       a child runtime and exposes its globals.</li>
+    <li><code>.obj</code> packages, where <code>#depend["pkg.obj"] alias;</code> loads a prebuilt package.</li>
+    </ol>
+    <h2><code>#include</code> for built-in modules</h2>
+    <pre><code class="cssc">#include('video') vid;      // load 'video', alias it 'vid'
+    #include('os') os;
+    #include('def');            // no alias: the module name is the key
+    </code></pre>
+    <p><code>#include('name') alias;</code> loads a built-in module and binds the alias. Without an
+    alias, the module name itself is the storage key. An unknown module name is a runtime
+    error. The name can use single or double quotes.</p>
+    <p>You may have read that every <code>#include</code> needs a matching <code>#free[alias]</code>. For a
+    built-in module, <code>#free</code> does nothing at runtime (there's nothing to release), so
+    forgetting it in the interpreter is harmless. It's only <code>#load</code> and <code>#depend</code>
+    modules, and native or <code>.obj</code> builds, where teardown actually matters.</p>
+    <h2>A few built-in modules</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Module</th>
+    <th>What it provides</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>def</code></td>
+    <td>Extended callables: <code>#cdefine</code>, <code>#fvar</code>, <code>#param</code>, <code>#qvar</code>, <code>#scanp_opt</code> (see <a href="04-callables.html">Callables</a>)</td>
+    </tr>
+    <tr>
+    <td><code>sizes</code></td>
+    <td>Recommended bit-size constants like <code>sz::normal_int</code> (see <a href="01-types-and-values.html">Types &amp; Values</a>)</td>
+    </tr>
+    <tr>
+    <td><code>sys</code></td>
+    <td>CLI arguments: <code>sys::args</code>, <code>sys::argc</code>, <code>sys::arg(i)</code></td>
+    </tr>
+    <tr>
+    <td><code>stdio</code>, <code>cssc.io</code></td>
+    <td>File I/O</td>
+    </tr>
+    <tr>
+    <td><code>cssc.math</code></td>
+    <td>Math: trig, logs</td>
+    </tr>
+    <tr>
+    <td><code>console</code>, <code>sys.console</code></td>
+    <td>A native console window and sync</td>
+    </tr>
+    <tr>
+    <td><code>devdebug</code></td>
+    <td><code>#debug</code>, <code>#trace</code>, <code>dev::stdout</code></td>
+    </tr>
+    <tr>
+    <td><code>stdgrace</code></td>
+    <td>Graceful errors: <code>grace::catch</code>, <code>#catch</code></td>
+    </tr>
+    <tr>
+    <td><code>asyncthreads</code></td>
+    <td><code>#daemon</code>, <code>#killdaemon</code>, <code>#thread</code>, <code>#await</code></td>
+    </tr>
+    <tr>
+    <td><code>video</code> (plus <code>video.sprite</code>, <code>.tilemap</code>, <code>.font</code>)</td>
+    <td>Native windowing and 2-D graphics</td>
+    </tr>
+    <tr>
+    <td><code>keyboard</code>, <code>mouse</code>, <code>sound</code></td>
+    <td>Input and audio</td>
+    </tr>
+    <tr>
+    <td><code>gipeo</code></td>
+    <td>GPIO, I2C, SPI, UART, ADC, PWM, timers for embedded targets</td>
+    </tr>
+    <tr>
+    <td><code>tft</code></td>
+    <td>TFT and OLED displays</td>
+    </tr>
+    <tr>
+    <td><code>network.http</code></td>
+    <td>An HTTP/HTTPS client</td>
+    </tr>
+    <tr>
+    <td><code>matrix</code>, <code>serialcommunication</code>, <code>os</code></td>
+    <td>Pixel matrix, IPC, OS access</td>
+    </tr>
+    <tr>
+    <td><code>cssc</code></td>
+    <td>Toolchain access from a script: <code>csscmod::cli("build x.cssc")</code> runs a CSSC or shell command, streams the output live, and returns the exit code</td>
+    </tr>
+    <tr>
+    <td><code>colors</code></td>
+    <td>24-bit terminal output: <code>col::c_outln(text, 0xRRGGBB)</code></td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The registry is bigger than this; these are the common ones. Directives that a
+    module gates are listed per group in <a href="08-directives.html">Directives</a>.</p>
+    <p>Don't confuse the always-available <code>cssc::</code> builtins with the <code>cssc</code> module. The
+    <code>cssc::</code> scope (<code>cssc::outln</code>, <code>cssc::typeof</code>, <code>cssc::run("file.cssc")</code>, the bit and
+    float intrinsics) is the runtime core and needs no <code>#include</code>. <code>#include("cssc")
+    csscmod;</code> is a separate module whose <code>cli(...)</code> shells out to the toolchain.</p>
+    <h2><code>alias::member</code> dispatch</h2>
+    <p>How a missing member behaves depends on what the target is, and this catches people,
+    so here it is exactly (see also <a href="10-access-operators.html">Access Operators</a>):</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Target</th>
+    <th><code>alias::member</code> (read)</th>
+    <th><code>alias::method(args)</code> (call)</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td>built-in module</td>
+    <td>missing property gives <code>null</code></td>
+    <td>missing method is a runtime error, <code>"Module 'alias' has no function 'method'"</code></td>
+    </tr>
+    <tr>
+    <td>sector</td>
+    <td>private or missing gives <code>0x0</code></td>
+    <td>private or missing gives <code>0x0</code></td>
+    </tr>
+    <tr>
+    <td>loaded module / <code>.obj</code></td>
+    <td>missing gives <code>null</code></td>
+    <td>resolves against the file's public members</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The asymmetry to remember: calling a missing built-in-module function is a hard
+    error, but reaching a private sector member is a silent <code>null</code>. So don't lean on a
+    <code>null</code> to tell you a built-in-module call was mistyped; it throws instead.</p>
+    <p>A loaded CSSC file (<code>#load</code>) exposes all of its globals as public members. Loaded-file
+    modules have no private members.</p>
+    <h2><code>#load</code>, running another <code>.cssc</code> file</h2>
+    <pre><code class="cssc">#load[&quot;helpers.cssc&quot;] hlp;
+    hlp::doThing();
+    #unload[hlp];
+    </code></pre>
+    <p>This parses and runs <code>helpers.cssc</code> in a child runtime, wrapped as a module. Every
+    global in that file becomes a public member of <code>hlp</code>. Path resolution is below.</p>
+    <h2><code>#depend</code>, loading a <code>.obj</code> package</h2>
+    <p>A <code>.obj</code> is a self-contained, distributable CSSC package: a compiled DLL plus
+    optional source and assets. You build them with <code>cssc install</code>.</p>
+    <pre><code class="cssc">#depend['./math-helpers.obj'] mh;
+    #stack[int, 32] x = mh::mathlib::square(7);   // nested: alias::sector::func
+    cssc::outln(x);
+    #delete[x];
+    #free[mh];      // required for .obj; the loader holds the package open
+    </code></pre>
+    <p><code>#depend['path.obj'] alias;</code> loads the package and exposes its sectors as
+    <code>alias::sector::member</code>. Note that <code>#free[alias]</code> is required for a <code>.obj</code>: the
+    package stays open until you free it, and omitting it is a real leak in compiled
+    builds.</p>
+    <h2>Teardown: <code>#unload</code> versus <code>#free</code></h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>What it frees</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#unload[alias]</code></td>
+    <td>Unloads a loaded module (<code>#load</code> or <code>#depend</code>), running each child sector's <code>free { }</code> and then removing it. This is the main way to free a loaded module.</td>
+    </tr>
+    <tr>
+    <td><code>#free[alias]</code></td>
+    <td>Runs teardown on a sector, object, or loaded module, cascading to child sectors. For a built-in <code>#include</code> module it does nothing; on anything unexpected it errors.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The rule of thumb: <code>#unload</code> for <code>#load</code> and <code>#depend</code> modules, <code>#free</code> for sectors,
+    objects, and <code>.obj</code> aliases. For a built-in <code>#include</code> module, teardown is a no-op in
+    the interpreter, but keep <code>#free</code> for portability to native builds.</p>
+    <p>None of this is enforced. Nothing errors if you forget, the same as with sectors.
+    But forgetting <code>#free</code> on a <code>.obj</code> leaks in compiled builds.</p>
+    <h2><code>#REQUIRE</code> is not <code>#req</code></h2>
+    <p>Uppercase <code>#REQUIRE</code> has nothing to do with <code>#req</code>
+    (<a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>) or with modules by name. It loads an
+    external resource by path, detecting the kind from the extension (<code>.dll</code>, <code>.ini</code>,
+    <code>.csl</code>, <code>.cssl</code>).</p>
+    <pre><code class="cssc">#REQUIRE[&quot;plugin.dll&quot;] plug;
+    </code></pre>
+    <p>Keep the three straight: <code>#req</code> imports a variable across a wall, <code>#REQUIRE</code> loads a
+    resource file, and <code>#include</code>/<code>#load</code>/<code>#depend</code> load modules. There is no <code>#require</code>
+    directive at all.</p>
+    <h2>Where modules are found</h2>
+    <ul>
+    <li>Built-in <code>#include</code> modules come from a hard-coded in-runtime registry. They aren't
+      searched on the filesystem.</li>
+    <li><code>#load</code> and file paths resolve in order: absolute path, then relative to the running
+      script's directory, then each configured search path, then the active version's
+      installed-module directory (populated by <code>cssc module install</code>).</li>
+    <li><code>#depend</code> <code>.obj</code> files resolve in order: literal or absolute path, then the current
+      working directory, then the script directory, then the per-user installed-package
+      store under <code>%APPDATA%/CSSC/&lt;version&gt;/objects/</code>.</li>
+    </ul>
+    <p>A <code>cssc.cproject</code> file can set the module directory centrally, so <code>#depend['./x.obj']</code>
+    finds packages without hard-coded paths.</p>
+    <h2>Writing a module: <code>#MODULE;</code></h2>
+    <p>A <code>.cssc</code> file meant to be <code>#load</code>ed by others should declare itself a module with
+    <code>#MODULE;</code> on its first line:</p>
+    <pre><code class="cssc">#MODULE;
+    #auto[string] gGreeting = &quot;hello&quot;;     // a global the importer will use
+    
+    #define(greet) {
+        #req[gGreeting] *gGreeting;
+        cssc::outln(gGreeting);
+    }
+    </code></pre>
+    <p>Here's the golden rule for module globals: a module must never <code>#delete</code> (or <code>#free</code>,
+    or <code>#unload</code>) its own globals. They belong to whoever <code>#load</code>ed the file, and freeing
+    them here would destroy a value the importer still needs. The importer's
+    <code>#unload[alias]</code> frees all of the module's globals. That's exactly what <code>#unload</code> is
+    for.</p>
+    <p><code>#MODULE;</code> tells the tooling to respect that:</p>
+    <ul>
+    <li>The analyzer stops flagging the module's un-freed globals and un-freed
+      <code>#include</code>/<code>#load</code> imports, so you don't get leak warnings for file-scope
+      allocations. Leaks inside a <code>#define</code> are still reported, since a module shouldn't
+      leak its locals either.</li>
+    <li><code>cssc cleanup</code> and F10 autoclean never insert a global <code>#delete</code>, <code>#free</code>, or
+      <code>#unload</code> into a module. They only add the frees that belong inside function
+      bodies.</li>
+    </ul>
+    <p><code>#MODULE;</code> does nothing at runtime, in both the interpreter and the native compiler.
+    It exists purely so the analyzer and cleanup know the file's globals are the
+    importer's responsibility. It has to sit at the top level, conventionally the first
+    line.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>There's no <code>#require</code>. Use <code>#include</code>/<code>#load</code>/<code>#depend</code> for modules, <code>#req</code> for
+      variable imports, <code>#REQUIRE</code> for resource files.</li>
+    <li>A <code>#MODULE;</code> file never frees its own globals; the importer's <code>#unload</code> does. Add
+      <code>#MODULE;</code> so the analyzer stops asking you to.</li>
+    <li>Built-in <code>#free</code> does nothing, but <code>.obj</code> <code>#free</code> is required, since it holds the
+      package open.</li>
+    <li>A missing built-in-module call errors; a missing sector member is null. Don't
+      conflate them.</li>
+    <li><code>#load</code> files expose everything as public. No private members in a loaded-file
+      module.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="10-access-operators.html">Access Operators</a> for <code>::</code> dispatch and the missing-member
+      asymmetry.</li>
+    <li><a href="06-sectors.html">Sectors</a> for sectors versus modules and <code>#reserve</code>/<code>#free</code>.</li>
+    <li><a href="08-directives.html">Directives</a> for the full syntax of <code>#include</code>, <code>#load</code>,
+      <code>#depend</code>, <code>#unload</code>, and <code>#REQUIRE</code>.</li>
+    <li><a href="04-callables.html">Callables</a> for the <code>def</code> module directives.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="06-sectors.html">&lt; Sectors</a> <a href="08-directives.html">Directive Reference &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Callables - CSSC</title>
+<meta name="description" content="CSSC has an unusual model, but a consistent one: a function is a variable. There&#x27;s no separate &quot;function&quot; thing. You declare a slot, bind a body to it, and calling the slot runs th">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Callables - CSSC">
+<meta property="og:description" content="CSSC has an unusual model, but a consistent one: a function is a variable. There&#x27;s no separate &quot;function&quot; thing. You declare a slot, bind a body to it, and calling the slot runs th">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Callables</h1>
+    <p>CSSC has an unusual model, but a consistent one: a function is a variable. There's
+    no separate "function" thing. You declare a slot, bind a body to it, and calling the
+    slot runs the body.</p>
+    <h2>A variable that's also a function</h2>
+    <pre><code class="cssc">#stack[int, 32] add;      // declare a slot
+    #define(add) {            // bind a body to that slot
+        #req[a] a;
+        #req[b] b;
+        return a + b;
+    }
+    </code></pre>
+    <p>Behind the scenes the slot carries two facets: <code>add["value"]</code>, the last return value
+    (or <code>null</code> if it's never been called), and <code>add["address"]</code>, the address of the body.
+    Calling <code>add(…)</code> runs the body and stores the result in <code>add["value"]</code>. This duality
+    is why you can <code>#req</code> a function by name and then call it (see
+    <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>), and why one slot can hold both a value and
+    behavior.</p>
+    <p>The <code>#define</code> body is a wall. It doesn't see outer names, so you import them with
+    <code>#req</code>. See <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>.</p>
+    <h2><code>#define</code>, the core form</h2>
+    <pre><code class="cssc">#stack[int, 32] greet;
+    #define(greet) {
+        #req[name] who;                 // import an outer slot by reference
+        #stack[string, 64] m = &quot;Hi &quot; + who;
+        cssc::outln(m);
+        #delete[m];
+    }
+    </code></pre>
+    <p><code>#define(slot) { body }</code> binds the body to the slot. It's core, so it needs no
+    module. The body runs in its own isolated scope, and <code>return</code> exits it with a value.</p>
+    <h2><code>#cdefine</code>, named parameters</h2>
+    <p><code>#cdefine</code> lets you name parameters in the signature instead of reading them by
+    position.</p>
+    <pre><code class="cssc">#include('def');
+    
+    #stack[int, 64] multiply;
+    #cdefine(multiply, a, b) {
+        return a * b;
+    }
+    cssc::outln(multiply(3, 4));   // 12
+    </code></pre>
+    <p><code>#cdefine</code>, <code>#fvar</code>, <code>#param</code>, and <code>#qvar</code> live behind the <code>def</code> module, so put
+    <code>#include('def');</code> once at the top or you'll get a clear "missing module" error.
+    <code>#define</code> and <code>#redefine</code> are core and need nothing.</p>
+    <p>One wrinkle worth knowing: <code>#scanp</code> and <code>#scanp_opt</code> are described as part of the
+    <code>def</code> family, but the interpreter doesn't actually require the module for them, so
+    they work without <code>#include('def')</code> under <code>cssc run</code>. Keep the include anyway if you
+    use the rest of the family, so your code ports cleanly to the native path.</p>
+    <h2>Reading parameters with <code>#scanp</code></h2>
+    <pre><code class="cssc">#include('def');
+    
+    #stack[int, 32] sum;
+    #define(sum) {
+        #scanp(sum, int, 0) x;             // required argument at position 0
+        #scanp(sum, int, 1) y;             // required argument at position 1
+        #scanp_opt(sum, int, 2) bonus = 0; // optional, missing gives the default 0
+        return x + y + bonus;
+    }
+    
+    sum(10, 20)    a;   // 30
+    sum(10, 20, 5) b;   // 35
+    </code></pre>
+    <p><code>#scanp(source, type, pos) name;</code> reads the required argument at <code>pos</code>, where
+    <code>source</code> is the callable's own name. <code>#scanp_opt(source, type, pos) name;</code> is the
+    optional version: if there's no argument and no default, <code>name</code> resolves to <code>null</code>
+    instead of raising an error. Both take a default clause, so
+    <code>#scanp_opt(sum, int, 2) bonus = 100;</code> uses <code>100</code> when the argument is missing.
+    <code>#scanp_opt</code> gives you <code>null</code> only when neither an argument nor a default was
+    supplied, which is what makes it good for variadic-style trailing arguments.</p>
+    <p>Whether the parameter is a reference or a copy is decided by the call site, not by
+    the parameter. <code>#scanp(f, int, 0) name;</code> binds <code>name</code> as a live reference when the
+    caller passed <code>f(x)</code>, or as an independent copy when the caller passed <code>f(&amp;x)</code>. A <code>&amp;</code>
+    or <code>*</code> on the parameter name doesn't decide this: <code>#scanp(f, int, 0) &amp;name;</code> is only
+    a hint that the callee prefers a copy, and the runtime ignores it; <code>#scanp(f, int, 0)
+    *name;</code> is a deprecated reference spelling, the same as bare <code>name</code>.</p>
+    <h2><code>#fvar</code>, <code>#param</code>, <code>#qvar</code></h2>
+    <pre><code class="cssc">#fvar(int) counter;          // a typed function variable (a return-typed slot)
+    #param(string) inputStr;     // a typed parameter for the next #cdefine
+    #qvar(int, x + y) result;    // a quick typed local from an expression
+    </code></pre>
+    <p><code>#fvar(type) name;</code> declares a typed callable-variable up front. <code>#param(type)
+    name;</code> declares a typed parameter, written only through <code>#scanp</code>. <code>#qvar(type, expr)
+    name;</code> materializes an expression into a typed local in one line. All three need the
+    <code>def</code> module.</p>
+    <h2>Calling and capturing results</h2>
+    <p>A call can be a bare statement, an expression, or a capture that binds the result
+    into a new slot:</p>
+    <pre><code class="cssc">add(3, 4);                       // call and discard (result still lands in add[&quot;value&quot;])
+    #stack[int, 32] r = add(3, 4);   // capture through assignment
+    add(3, 4) r2;                    // capture form: bind the result into a new slot r2
+    </code></pre>
+    <p>The <code>f(args) name;</code> capture form is the idiomatic way to name a call's result.</p>
+    <h2>Reference or copy at the call site</h2>
+    <p>This is the same rule as the ownership chapter, from the calling side. The call site
+    decides whether an argument goes by reference or by copy, and the callee can't
+    override it.</p>
+    <pre><code class="cssc">#stack[int, 32] f;
+    #define(f) {
+        #scanp(f, int, 0) p;   // reference or copy, depending on how f was called
+        #delete[p];            // deletes p; if p was a reference, deletes the caller's slot too
+    }
+    
+    #stack[int, 32] x = 10;
+    f(x);                      // by reference, the default
+    cssc::outln(x);            // 0x0, p was a live link and #delete[p] took x with it
+    
+    #stack[int, 32] y = 10;
+    f(&amp;y);                     // a copy, with an explicit &amp;
+    cssc::outln(y);            // 10, p was independent and only the copy died
+    </code></pre>
+    <p><code>f(x)</code> passes a reference by default, so mutations and a <code>#delete</code> inside <code>f</code> reach
+    the caller's slot one level up. <code>f(&amp;x)</code> passes a deep copy, and the callee gets an
+    independent slot. <code>f(*x)</code> is a deprecated spelling of the reference form, the same as
+    <code>f(x)</code>.</p>
+    <p>And to say it once more, because it surprises people: a callee-side <code>&amp;param</code> hint
+    like <code>#scanp(f, int, 0) &amp;p;</code> is ignored. Only the call-site syntax matters.</p>
+    <h2><code>mirror</code>, <code>return</code>, and <code>destruct</code></h2>
+    <p>All three end or pause a body, but they differ in what happens afterward.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Form</th>
+    <th>What happens after</th>
+    <th>The return value</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>return value;</code></td>
+    <td>Hard stop. The body ends immediately, and trailing cleanup does not run.</td>
+    <td>value</td>
+    </tr>
+    <tr>
+    <td><code>mirror value;</code></td>
+    <td>The body keeps running, so trailing <code>#delete</code> and <code>#free</code> still execute. By default a live reference to the source slot.</td>
+    <td>value (live reference)</td>
+    </tr>
+    <tr>
+    <td><code>mirror &amp;value;</code></td>
+    <td>Like <code>mirror</code>, but a deep-copy snapshot taken at the <code>mirror</code> point, so later cleanup can't disturb it.</td>
+    <td>value (snapshot)</td>
+    </tr>
+    <tr>
+    <td><code>mirror *value;</code></td>
+    <td>A deprecated alias of <code>mirror value;</code>.</td>
+    <td>value (live reference)</td>
+    </tr>
+    <tr>
+    <td><code>destruct;</code></td>
+    <td>Objects only: runs the object's <code>free { }</code> block, marks it dead, and returns control to the caller. It's not <code>exit()</code>.</td>
+    <td>—</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p><code>mirror</code> exists because <code>return</code> can't both hand back a value and clean up
+    afterward. <code>mirror</code> can. It sets the return value but lets the rest of the body run,
+    so you can free copy parameters and transient allocations before the call actually
+    returns.</p>
+    <p>The catch is the live-reference default. If you <code>mirror</code> a slot and then delete that
+    slot, the outer capture is invalidated:</p>
+    <pre><code class="cssc">#stack[int, 32] f;
+    #define(f) {
+        #stack[int, 32] inner = 42;
+        mirror inner;          // a live reference to inner
+        #delete[inner];        // inner freed, so the outer capture is now 0x0
+    }
+    f() out;
+    cssc::outln(out);          // 0, not 42; the reference was invalidated
+    </code></pre>
+    <p>A snapshot fixes it:</p>
+    <pre><code class="cssc">#define(f) {
+        #stack[int, 32] inner = 42;
+        mirror &amp;inner;         // a snapshot copy
+        #delete[inner];        // inner freed, but the snapshot survives
+    }
+    f() out;
+    cssc::outln(out);          // 42
+    </code></pre>
+    <p>Mirroring an expression instead of a slot is automatically a snapshot, since there's
+    no slot for it to reference:</p>
+    <pre><code class="cssc">#define(f) {
+        #scanp(f, int, 0) n;
+        #scanp(f, int, 1) t;
+        mirror n + t;          // an expression, so an automatic snapshot
+        #delete[t];
+        #delete[n];
+    }
+    f(&amp;a, &amp;b) r;               // r holds the value safely
+    </code></pre>
+    <p>The rule of thumb: if the body cleans up the very thing it returns, use <code>mirror &amp;x;</code>.
+    If cleanup touches a different slot, plain <code>mirror x;</code> is fine. If there's nothing to
+    clean up, <code>return x;</code> is simplest.</p>
+    <p><code>destruct</code> and the object-label mechanics are covered in <a href="05-objects.html">Objects</a>.</p>
+    <h2><code>#redefine</code>, changing a body at runtime</h2>
+    <pre><code class="cssc">#redefine(myFunc) { cssc::outln(&quot;overwritten&quot;); }    // replace the whole body
+    #redefine(myFunc) +&lt;0&gt; { cssc::outln(&quot;prepended&quot;); } // inject at position 0
+    </code></pre>
+    <p>Without a position it replaces the entire body. With <code>+&lt;pos&gt;</code> it injects code at
+    statement position <code>pos</code>.</p>
+    <p><code>#redefine</code> is interpreter-only. The native compiler lowers function bodies
+    statically, so a runtime AST mutation has no effect there. For native builds, reach
+    for <code>if</code>/<code>select</code> branching or parameterize with <code>#cdefine</code>.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>A callee <code>&amp;param</code> hint does nothing. Reference versus copy is a call-site
+      decision: <code>f(x)</code> versus <code>f(&amp;x)</code>.</li>
+    <li><code>return</code> skips cleanup. If you have copy parameters or transient allocations to
+      free, use <code>mirror</code> so the trailing <code>#delete</code>s still run.</li>
+    <li><code>mirror slot;</code> is a live reference, so deleting that slot afterward zeroes the
+      caller's capture. Use <code>mirror &amp;slot;</code> to snapshot.</li>
+    <li><code>#cdefine</code>, <code>#fvar</code>, <code>#param</code>, <code>#qvar</code>, and <code>#scanp_opt</code> want <code>#include('def')</code>.
+      <code>#define</code>, <code>#redefine</code>, and <code>#scanp</code> are core.</li>
+    <li><code>#define</code> bodies can't see outer names. Import with <code>#req</code>.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>: the <code>#define</code> body is a wall, and <code>#req</code>
+      imports across it.</li>
+    <li><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>: call-site reference or copy, and
+      the delete cascade.</li>
+    <li><a href="05-objects.html">Objects</a>: labels, <code>call</code>, <code>destruct</code>, and label overloading.</li>
+    <li><a href="08-directives.html">Directives</a>: the exact syntax for every <code>#…</code> form.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="03-scopes-and-req.html">&lt; Scopes & `#req`</a> <a href="05-objects.html">Objects &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

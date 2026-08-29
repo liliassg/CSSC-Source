@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Directive Reference - CSSC</title>
+<meta name="description" content="This is the full list of #… directives, grouped by what they do. It&#x27;s the place to check a directive&#x27;s spelling and one-line meaning; the deeper behavior lives in the chapters each">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Directive Reference - CSSC">
+<meta property="og:description" content="This is the full list of #… directives, grouped by what they do. It&#x27;s the place to check a directive&#x27;s spelling and one-line meaning; the deeper behavior lives in the chapters each">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Directive Reference</h1>
+    <p>This is the full list of <code>#…</code> directives, grouped by what they do. It's the place to
+    check a directive's spelling and one-line meaning; the deeper behavior lives in the
+    chapters each row links to.</p>
+    <p>A few conventions. Most directives take arguments in brackets, <code>#name[…]</code>, or parens,
+    <code>#name(…)</code>. Under the hood the lexer captures both into one argument field, so the
+    bracket-versus-paren choice is mostly a documentation convention, and this reference
+    uses the conventional punctuation for each. (<code>#include(...)</code> is the one that's
+    genuinely special-cased.) A directive may also take a trailing name it declares or
+    targets, as in <code>#stack[int, 32] x = 5;</code>. A <code>&amp;</code> or <code>*</code> prefix on that trailing name
+    matters for <code>#req</code> and <code>#scanp</code> (reference, copy, or a deprecated spelling); see
+    <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> and <a href="04-callables.html">Callables</a>.</p>
+    <p>The "Gate" column is which <code>#include('…')</code> module has to be loaded first. The
+    "Backend" column notes interpreter-only or native-only where the runtime makes a
+    distinction; a dash means no special restriction.</p>
+    <h2>Memory</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    <th>Gate</th>
+    <th>Backend</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#stack</code></td>
+    <td><code>#stack[type, bits] name = init;</code></td>
+    <td>Fixed stack buffer. Default 256 bits. Overflow errors. A hex name goes in the hex-var store.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#heap</code></td>
+    <td><code>#heap[type, bits] name = init;</code></td>
+    <td>Heap buffer. Default 1024 bits. Freed at program end.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#auto</code></td>
+    <td><code>#auto[type] name = init;</code></td>
+    <td>Auto-sized buffer. At least 32 bytes, grows. Manual <code>#delete</code>.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#delete</code></td>
+    <td><code>#delete[name]</code> / <code>#delete[0xADDR]</code> / <code>#delete[Sec-&gt;m]</code></td>
+    <td>Free a slot, cascade over its members, and follow the reference chain up (up to 16 deep).</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#delmember</code></td>
+    <td><code>#delmember[c]</code> / <code>#delmember[c[i]]</code></td>
+    <td>Clear contents, keep size and capacity. Idempotent and null-safe.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#free</code></td>
+    <td><code>#free[sector]</code> / <code>#free[obj]</code> / <code>#free[alias]</code> / <code>#free[0xADDR]</code></td>
+    <td>Run <code>free { }</code>, then drop a sector, object, or loaded module. No-op for a built-in module.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#reallocate</code></td>
+    <td><code>#reallocate[var, type, stack\|heap, size?] newvar;</code></td>
+    <td>A real region move, type-strict, default grow of 32 bits.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#resize</code></td>
+    <td><code>#resize[var, ±bits];</code></td>
+    <td>Grow or shrink an existing alloc, following the reference chain.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#reserve</code></td>
+    <td><code>#reserve[label];</code> / <code>#reserve[mod.label];</code></td>
+    <td>Construct a deferred <code>sector … ?label</code>.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#set</code></td>
+    <td><code>#set[0xADDR, bits] = value;</code></td>
+    <td>Write a coerced value at a known address, bit-checked.</td>
+    <td>—</td>
+    <td>interpreter</td>
+    </tr>
+    <tr>
+    <td><code>#peekstack</code> / <code>#peekheap</code></td>
+    <td><code>#peekstack[src, type, index, amount] name;</code></td>
+    <td>Slice a collection into a new stack or heap var.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#cast</code></td>
+    <td><code>#cast[source, target] result;</code></td>
+    <td>Coerce <code>source</code> into an existing <code>#heap</code> target.</td>
+    <td>—</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#adress</code></td>
+    <td><code>#adress[var] name;</code> (get) · <code>#adress[var] = 0xABC;</code> (alias) · <code>#adress[var]</code> (expression)</td>
+    <td>Address introspection. Missing var gives <code>0x0</code>. One <code>d</code>.</td>
+    <td>—</td>
+    <td>alias form interpreter-only</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p><code>#address</code> and <code>#memory</code> aren't directives (<code>#memory</code> is explicitly rejected). The
+    only spelling is <code>#adress</code>.</p>
+    <h2>Callables</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    <th>Gate</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#define</code></td>
+    <td><code>#define(name) { … }</code></td>
+    <td>Bind a callback to a slot.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#cdefine</code></td>
+    <td><code>#cdefine(func, p1, p2) { … }</code></td>
+    <td>A callback with named parameters.</td>
+    <td>def</td>
+    </tr>
+    <tr>
+    <td><code>#redefine</code></td>
+    <td><code>#redefine(fn) { … }</code> · <code>#redefine(fn) +&lt;pos&gt; { … }</code></td>
+    <td>Overwrite or inject into a function body. Interpreter-only, since native lowers statically.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#fvar</code></td>
+    <td><code>#fvar(type) name;</code></td>
+    <td>Declare a typed function-variable, no init.</td>
+    <td>def</td>
+    </tr>
+    <tr>
+    <td><code>#param</code></td>
+    <td><code>#param(type) name;</code></td>
+    <td>Declare a typed parameter, filled by <code>#scanp</code>.</td>
+    <td>def</td>
+    </tr>
+    <tr>
+    <td><code>#scanp</code></td>
+    <td><code>#scanp(src, type, pos) name;</code> · <code>… &amp;name;</code> · <code>… name = default;</code></td>
+    <td>Read a positional call argument. Reference or copy is decided by the call site; missing gives null.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#scanp_opt</code></td>
+    <td><code>#scanp_opt(src, type, pos) name;</code></td>
+    <td>Like <code>#scanp</code>, but a missing arg silently gives null.</td>
+    <td>described as def, but the interpreter doesn't enforce it</td>
+    </tr>
+    <tr>
+    <td><code>#qvar</code></td>
+    <td><code>#qvar(type, expr) name;</code></td>
+    <td>Materialize <code>expr</code> into a typed local.</td>
+    <td>def</td>
+    </tr>
+    <tr>
+    <td><code>#daemon</code></td>
+    <td><code>#daemon[funcVar];</code></td>
+    <td>Run a <code>#define</code> func repeatedly on a background thread.</td>
+    <td>asyncthreads</td>
+    </tr>
+    <tr>
+    <td><code>#killdaemon</code></td>
+    <td><code>#killdaemon[funcVar];</code></td>
+    <td>Cooperatively stop a daemon.</td>
+    <td>asyncthreads</td>
+    </tr>
+    <tr>
+    <td><code>#thread</code></td>
+    <td><code>#thread[type, bits] name = init;</code></td>
+    <td>Declare a thread-callable var.</td>
+    <td>asyncthreads</td>
+    </tr>
+    <tr>
+    <td><code>#await</code></td>
+    <td><code>#await[handle] result;</code></td>
+    <td>Join a daemon and capture its result.</td>
+    <td>asyncthreads</td>
+    </tr>
+    <tr>
+    <td><code>#raii</code></td>
+    <td><code>#raii 0xADDR method(args);</code> · <code>#raii name method(args);</code></td>
+    <td>Call a method on a hex or named scope (no brackets on the directive).</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#interrupt</code></td>
+    <td><code>#interrupt(name) { … }</code></td>
+    <td>A hardware ISR. Native only; the interpreter registers it but never auto-invokes.</td>
+    <td>—</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p><code>call</code> is an object keyword (<code>call label&lt;args&gt; capture;</code>, see <a href="05-objects.html">Objects</a>),
+    not a directive. There is no <code>#call</code>.</p>
+    <h2>Scope and modules</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    <th>Backend</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#include</code></td>
+    <td><code>#include("mod")</code> / <code>#include("mod") alias;</code></td>
+    <td>Load a built-in module. Unknown errors.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#load</code></td>
+    <td><code>#load["path.cssc"] alias;</code></td>
+    <td>Load an external <code>.cssc</code> file as a child-runtime module (globals become public).</td>
+    <td>interpreter</td>
+    </tr>
+    <tr>
+    <td><code>#depend</code></td>
+    <td><code>#depend["path.obj"] alias;</code></td>
+    <td>Load an isolated <code>.obj</code> package; exposes <code>alias::sector::member</code>.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#unload</code></td>
+    <td><code>#unload[alias];</code></td>
+    <td>Unload a loaded module, running child sectors' <code>free { }</code>.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#req</code></td>
+    <td><code>#req[X] Y;</code> (reference) · <code>#req[X] &amp;Y;</code> (copy) · <code>#req[Sec-&gt;m] Y;</code></td>
+    <td>Import an outer or sector var into a wall. Reference by default; <code>&amp;</code> is a deep-copy snapshot.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#REQUIRE</code></td>
+    <td><code>#REQUIRE["path"] var;</code></td>
+    <td>Load a resource by extension (<code>.dll</code>, <code>.ini</code>, <code>.csl</code>, <code>.cssl</code>). Uppercase, and not <code>#req</code>.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#MODULE</code></td>
+    <td><code>#MODULE;</code> (top of file)</td>
+    <td>Marks this file as a module: its globals are freed by the importer's <code>#unload</code>, so the analyzer never adds a global <code>#delete</code> here. No-op at runtime. See <a href="07-modules.html">Modules</a>.</td>
+    <td>analyzer</td>
+    </tr>
+    <tr>
+    <td><code>#tlisten</code></td>
+    <td><code>#tlisten[var] { body }</code></td>
+    <td>Run <code>body</code> if the watched var is non-null.</td>
+    <td>interpreter</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>There's no <code>#require</code>. The real ones are <code>#req</code>, <code>#REQUIRE</code>, <code>#include</code>, <code>#load</code>,
+    <code>#depend</code>, and <code>#unload</code>.</p>
+    <h2>Introspection</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#size</code></td>
+    <td><code>#size[var] out;</code></td>
+    <td>Used size in bits.</td>
+    </tr>
+    <tr>
+    <td><code>#capacity</code></td>
+    <td><code>#capacity[var] out;</code></td>
+    <td>Allocated capacity in bits, following the reference chain.</td>
+    </tr>
+    <tr>
+    <td><code>#exists</code></td>
+    <td><code>#exists[0xADDR] out;</code></td>
+    <td>1 or 0: is this address a known allocation?</td>
+    </tr>
+    <tr>
+    <td><code>#reflect</code></td>
+    <td><code>#reflect[address] out;</code></td>
+    <td>Resolve an address back to its value.</td>
+    </tr>
+    <tr>
+    <td><code>#adress</code></td>
+    <td>(see Memory)</td>
+    <td>Address of a slot; <code>0x0</code> if unbound.</td>
+    </tr>
+    <tr>
+    <td><code>#iterator</code></td>
+    <td><code>#iterator[type, source] name;</code></td>
+    <td>Create an STL-style iterator over a container.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>IO and diagnostics</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    <th>Gate</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#stdout</code></td>
+    <td><code>#stdout(text)</code></td>
+    <td>Write to the stdout module and output buffer.</td>
+    <td>stdout</td>
+    </tr>
+    <tr>
+    <td><code>#debug</code></td>
+    <td><code>#debug(msg);</code></td>
+    <td>Always append to <code>dev::stdout</code>; print to stderr only with <code>--debug</code>.</td>
+    <td>devdebug</td>
+    </tr>
+    <tr>
+    <td><code>#trace</code></td>
+    <td><code>#trace(funcName);</code></td>
+    <td>Log each call of a function, only under <code>--debug</code>.</td>
+    <td>devdebug</td>
+    </tr>
+    <tr>
+    <td><code>#catch</code></td>
+    <td><code>#catch (callable) ?caller { body }</code></td>
+    <td>Catch a runtime error and bind the message to <code>?caller</code>.</td>
+    <td>stdgrace</td>
+    </tr>
+    <tr>
+    <td><code>#panic</code></td>
+    <td><code>#panic("message");</code></td>
+    <td>Raise a runtime error deliberately.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#sysarg</code></td>
+    <td><code>#sysarg[type, index] var;</code></td>
+    <td>A CLI argument into a stack var (needs <code>#delete</code>).</td>
+    <td>sys</td>
+    </tr>
+    <tr>
+    <td><code>#sysout</code></td>
+    <td><code>#sysout(expr);</code></td>
+    <td>Return a value to the <code>cssc.run()</code> host caller.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#clock</code></td>
+    <td><code>#clock[ms];</code></td>
+    <td>Sleep <code>ms</code> milliseconds.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#OUTPUT</code></td>
+    <td><code>#OUTPUT["path"]</code></td>
+    <td>Set the output path.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#EXIT</code></td>
+    <td><code>#EXIT[code]</code></td>
+    <td>Set the exit code and stop.</td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#DEFINE</code></td>
+    <td><code>#DEFINE name;</code> · <code>#DEFINE __main__ '__main__';</code> · <code>#DEFINE name &lt;expr&gt;;</code></td>
+    <td>A compiler/transpiler construct (entry point, passthrough, compile-time constant). No-op at runtime in the interpreter. Different from lowercase <code>#define</code>.</td>
+    <td>transpiler/native</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>Typed-declaration directives</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Gate</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#VARIABLE</code></td>
+    <td><code>#VARIABLE[type] name = value;</code></td>
+    <td>—</td>
+    </tr>
+    <tr>
+    <td><code>#string</code></td>
+    <td><code>#string[bits] name = init;</code></td>
+    <td>string</td>
+    </tr>
+    <tr>
+    <td><code>#int</code></td>
+    <td><code>#int[bits] name = init;</code></td>
+    <td>int</td>
+    </tr>
+    <tr>
+    <td><code>#array</code></td>
+    <td><code>#array[type, size] name = init;</code></td>
+    <td>array</td>
+    </tr>
+    <tr>
+    <td><code>#vector</code></td>
+    <td><code>#vector[type, bits] name = init;</code></td>
+    <td>vector</td>
+    </tr>
+    <tr>
+    <td><code>#map</code></td>
+    <td><code>#map[keytype, valtype, bits] name = init;</code></td>
+    <td>map</td>
+    </tr>
+    <tr>
+    <td><code>#matrix</code></td>
+    <td><code>#matrix[width, height] name = fill;</code></td>
+    <td>matrix</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>For containers, the second <code>#stack</code>/<code>#heap</code> argument is an element capacity, not a
+    scalar bit limit (see <a href="01-types-and-values.html">Types &amp; Values</a>).</p>
+    <p>One known issue: the <code>#array[type, size]</code> directive form passes two arguments to a
+    one-argument constructor and raises a <code>TypeError</code>. Use an <code>array&lt;T&gt;</code> typed
+    declaration or a <code>{…}</code> literal instead.</p>
+    <h2>Hardware and peripherals</h2>
+    <p>These are documented with <code>#include</code>, but the interpreter doesn't gate them (the
+    helpers construct directly). The toolchain docs cover target mapping.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Meaning</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#pin</code></td>
+    <td><code>#pin[N] var;</code></td>
+    <td>A GPIO line</td>
+    </tr>
+    <tr>
+    <td><code>#i2c</code></td>
+    <td><code>#i2c[bus, sda, scl] var;</code></td>
+    <td>An I2C master</td>
+    </tr>
+    <tr>
+    <td><code>#spi</code></td>
+    <td><code>#spi[bus, sck, miso, mosi] var;</code></td>
+    <td>An SPI master</td>
+    </tr>
+    <tr>
+    <td><code>#uart</code></td>
+    <td><code>#uart[bus, tx, rx] var;</code></td>
+    <td>A UART/serial port</td>
+    </tr>
+    <tr>
+    <td><code>#adc</code></td>
+    <td><code>#adc[pin] var;</code></td>
+    <td>An ADC input</td>
+    </tr>
+    <tr>
+    <td><code>#pwm</code></td>
+    <td><code>#pwm[pin, freq, bits] var;</code></td>
+    <td>A PWM output</td>
+    </tr>
+    <tr>
+    <td><code>#timer</code></td>
+    <td><code>#timer[slot, hz] var;</code></td>
+    <td>A periodic timer</td>
+    </tr>
+    <tr>
+    <td><code>#tft</code></td>
+    <td><code>#tft[ctrl, w, h] var;</code></td>
+    <td>A TFT/OLED panel</td>
+    </tr>
+    <tr>
+    <td><code>#oled</code></td>
+    <td><code>#oled[w, h] var;</code></td>
+    <td>Shorthand for <code>#tft[ssd1306, w, h]</code></td>
+    </tr>
+    <tr>
+    <td><code>#video</code></td>
+    <td><code>#video[w, h, fps] var;</code></td>
+    <td>A video context (gate: video)</td>
+    </tr>
+    <tr>
+    <td><code>#framebuffer</code></td>
+    <td><code>#framebuffer[w, h] var;</code></td>
+    <td>A pixel buffer (gate: video)</td>
+    </tr>
+    <tr>
+    <td><code>#console</code></td>
+    <td><code>#console[w, h] var;</code></td>
+    <td>A native console window</td>
+    </tr>
+    <tr>
+    <td><code>#get</code> / <code>#post</code> / <code>#send</code></td>
+    <td><code>#get[url] var;</code> · <code>#post[url] var = body;</code> · <code>#send[url] body;</code></td>
+    <td>HTTP (from <code>network.http</code>)</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>Directives that look real but aren't</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Looks plausible</th>
+    <th>Reality</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#require</code></td>
+    <td>Not a directive. Use <code>#req</code> (var import), <code>#include</code>/<code>#load</code>/<code>#depend</code> (modules), or <code>#REQUIRE</code> (resources).</td>
+    </tr>
+    <tr>
+    <td><code>#address</code></td>
+    <td>Not a directive. The spelling is <code>#adress</code>, one <code>d</code>.</td>
+    </tr>
+    <tr>
+    <td><code>#memory</code></td>
+    <td>Not a directive; it's explicitly rejected.</td>
+    </tr>
+    <tr>
+    <td><code>#call</code></td>
+    <td>Not a directive. <code>call</code> is an object keyword.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a> for the memory directives in depth.</li>
+    <li><a href="04-callables.html">Callables</a> for <code>#define</code>, <code>#scanp</code>, and <code>mirror</code>.</li>
+    <li><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> for <code>#req</code> and <code>#DEFINE</code>.</li>
+    <li><a href="07-modules.html">Modules</a> for <code>#include</code>, <code>#load</code>, <code>#depend</code>, <code>#unload</code>, and
+      <code>#REQUIRE</code>.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="07-modules.html">&lt; Modules</a> <a href="09-control-flow.html">Control Flow &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

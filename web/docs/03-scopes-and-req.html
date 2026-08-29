@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scopes &amp; `#req` - CSSC</title>
+<meta name="description" content="CSSC scoping isn&#x27;t C scoping, and there&#x27;s one rule that catches everyone at least once: some blocks are walls and some are windows. Inside a wall, your code can&#x27;t see outer names a">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Scopes &amp; `#req` - CSSC">
+<meta property="og:description" content="CSSC scoping isn&#x27;t C scoping, and there&#x27;s one rule that catches everyone at least once: some blocks are walls and some are windows. Inside a wall, your code can&#x27;t see outer names a">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Scopes &amp; <code>#req</code></h1>
+    <p>CSSC scoping isn't C scoping, and there's one rule that catches everyone at least
+    once: some blocks are walls and some are windows. Inside a wall, your code can't see
+    outer names at all, and it has to import what it needs with <code>#req</code>. Inside a window,
+    it sees the enclosing scope directly.</p>
+    <p>Get this backwards and you hit the classic "why is my variable <code>0x0</code> inside this
+    block?" bug. So here's the full list.</p>
+    <h2>The scope model</h2>
+    <p>The top level is one flat scope. Every top-level <code>#stack</code>, <code>#heap</code>, and <code>#auto</code>
+    declaration, and every top-level <code>#define</code>, lives together in it.</p>
+    <p>A wall (a barrier) installs a fresh frame when you enter and restores the previous
+    one when you leave. Names declared inside a wall don't leak out, and names outside
+    it aren't visible in, except through the resolution rules below.</p>
+    <p>A window doesn't install a frame. It reads and writes the enclosing scope directly.</p>
+    <h2>Walls and windows</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Construct</th>
+    <th>Wall?</th>
+    <th>Sees the enclosing scope?</th>
+    <th>Inner names gone after <code>}</code>?</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#define(f) { … }</code> body</td>
+    <td>wall</td>
+    <td>no, import with <code>#req</code></td>
+    <td>yes</td>
+    </tr>
+    <tr>
+    <td><code>#cdefine(f, …) { … }</code> body</td>
+    <td>wall</td>
+    <td>no, import with <code>#req</code></td>
+    <td>yes</td>
+    </tr>
+    <tr>
+    <td>bare <code>{ … }</code> block</td>
+    <td>wall</td>
+    <td>no, import with <code>#req</code></td>
+    <td>yes</td>
+    </tr>
+    <tr>
+    <td>object body</td>
+    <td>wall</td>
+    <td>no (it has its own members)</td>
+    <td>yes (members live until <code>#free</code>)</td>
+    </tr>
+    <tr>
+    <td>label body</td>
+    <td>wall</td>
+    <td>object members via implicit <code>this</code>, otherwise <code>#req</code></td>
+    <td>yes</td>
+    </tr>
+    <tr>
+    <td>sector body</td>
+    <td>wall</td>
+    <td>no (its own members plus <code>&lt;deps&gt;</code>)</td>
+    <td>members live until <code>#free</code></td>
+    </tr>
+    <tr>
+    <td><code>if</code> / <code>else</code> block</td>
+    <td>window</td>
+    <td>yes</td>
+    <td>its own locals released at <code>}</code></td>
+    </tr>
+    <tr>
+    <td><code>for ( … ) { … }</code></td>
+    <td>window</td>
+    <td>yes</td>
+    <td>loop var and locals released at <code>}</code></td>
+    </tr>
+    <tr>
+    <td><code>while ( … ) { … }</code></td>
+    <td>window</td>
+    <td>yes</td>
+    <td>its locals released at <code>}</code></td>
+    </tr>
+    <tr>
+    <td><code>select ( … ) ?n { … }</code></td>
+    <td>window</td>
+    <td>yes</td>
+    <td>the <code>?n</code> cursor released at <code>}</code></td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The way I remember it: <code>#define</code>, <code>{}</code>, object, label, and sector are walls; <code>if</code>,
+    <code>for</code>, <code>while</code>, <code>select</code>, and <code>else</code> are windows.</p>
+    <p>One thing to keep separate: this table is about whether a name is visible, not about
+    when the memory is freed. Only a bare <code>{}</code> block discards the <code>#heap</code> it made at its
+    <code>}</code>. A <code>#define</code> body restores its names but leaves <code>#stack</code> and <code>#auto</code> buffers for
+    you to <code>#delete</code>, and <code>#heap</code> lives until the program ends. See
+    <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>.</p>
+    <pre><code class="cssc">#stack[int, 32] x = 50;
+    
+    if (x &lt; 100) {
+        cssc::outln(x);      // 50, an 'if' is a window and sees the outer x
+    }
+    
+    {
+        cssc::outln(x);      // 0x0, a bare {} is a wall, so x is invisible here
+    }
+    
+    {
+        #req[x] xr;          // import x across the wall (a live reference by default)
+        cssc::outln(xr);     // 50
+    }
+    </code></pre>
+    <p>The trap is treating a bare <code>{ … }</code> like a C block. In C it sees the enclosing
+    scope; in CSSC it's a wall, and you bring names in with <code>#req</code>.</p>
+    <h2>How names resolve inside a wall</h2>
+    <p>Inside a wall, an unqualified identifier resolves in this order:</p>
+    <ol>
+    <li>declarations local to this frame,</li>
+    <li><code>#req</code> imports declared in this body,</li>
+    <li>parameters (<code>#scanp</code>, label params) and <code>&lt;deps&gt;</code> injected into a sector or object,</li>
+    <li><code>cssc::</code> built-ins,</li>
+    <li>the wall's own members (sector or object members, via <code>-&gt;</code> or implicitly).</li>
+    </ol>
+    <p>A bare name that matches none of these does not fall back to the global scope. In a
+    sector function, an unknown bare name resolves to <code>0x0</code>. There's no accidental global
+    read or write.</p>
+    <p>This is deliberate. Without an implicit outer-scope fallback, a function can't
+    silently read or clobber some unrelated top-level slot. If you need an outer name,
+    import it with <code>#req</code>, or for sectors and objects, inject it through <code>&lt;deps&gt;</code>.</p>
+    <h2><code>#req</code>: importing across a wall</h2>
+    <p><code>#req</code> is the only way to pull an outer name into a <code>#define</code> or <code>{}</code> body. It has
+    two forms.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Form</th>
+    <th>Meaning</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#req[X] Y;</code></td>
+    <td>A live reference, the default. <code>Y</code> reads and writes through to <code>X</code>, so <code>Y += 1</code> really increments <code>X</code>.</td>
+    </tr>
+    <tr>
+    <td><code>#req[X] &amp;Y;</code></td>
+    <td>A snapshot, a deep copy. <code>Y</code> is an independent frozen copy of <code>X</code> taken at import time, and writes to <code>Y</code> don't touch <code>X</code>. For a scalar this is indistinguishable from a reference; for a string, container, object, or sector it's a recursive deep copy.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>There's also <code>#req[X] *Y;</code>, a deprecated older spelling of the live-reference form
+    with identical meaning. New code leaves off the <code>*</code>.</p>
+    <pre><code class="cssc">#stack[int, 32] hits = 0;
+    
+    #define(beat) {
+        #req[hits] h;      // a live reference, so mutating h mutates hits
+        h += 1;
+    }
+    
+    beat();
+    cssc::outln(hits);     // 1, the write went through the reference
+    </code></pre>
+    <p>The snapshot form:</p>
+    <pre><code class="cssc">#stack[int, 32] cfg = 10;
+    
+    #define(readonly) {
+        #req[cfg] &amp;c;      // a snapshot: c is a private copy
+        c = 999;           // doesn't touch cfg
+    }
+    
+    readonly();
+    cssc::outln(cfg);      // 10
+    </code></pre>
+    <p><code>#req</code> is reference-by-default, which matches the argument-passing default where
+    <code>f(x)</code> is a reference (see <a href="04-callables.html">Callables</a>). The write-back is real, so
+    <code>#delete[Y]</code> inside the body invalidates the outer <code>X</code> too.</p>
+    <p>If you're porting older code, note that this flipped at some point. It used to be
+    that <code>#req[X] Y;</code> meant snapshot and <code>#req[X] *Y;</code> meant reference. Now bare <code>Y</code> is
+    the reference, <code>&amp;Y</code> is the snapshot, and <code>*Y</code> is a deprecated alias of the
+    reference. If you relied on <code>#req[X] Y;</code> being a copy, change it to <code>#req[X] &amp;Y;</code>.</p>
+    <h2>Importing other functions</h2>
+    <p>Top-level <code>#define</code> functions are just variables in the flat top scope, so you
+    import them the same way and call through the alias.</p>
+    <pre><code class="cssc">#stack[int, 32] helper;
+    #define(helper) { return 7; }
+    
+    #stack[int, 32] caller;
+    #define(caller) {
+        #req[helper] h;          // import the function
+        #stack[int, 32] r = h(); // call it, giving 7
+        return r;
+    }
+    </code></pre>
+    <h2><code>#DEFINE</code> is not <code>#define</code></h2>
+    <p>Uppercase <code>#DEFINE</code> is a different thing from lowercase <code>#define</code>. Lowercase
+    <code>#define</code> declares a callable (see <a href="04-callables.html">Callables</a>). Uppercase <code>#DEFINE</code>
+    is a compiler and transpiler directive with three uses:</p>
+    <pre><code class="cssc">#DEFINE __main__ '__main__';   // opt in as the entry point
+    #DEFINE somename;              // foreign-scope passthrough
+    #DEFINE MAX &lt;expr&gt;;            // a compile-time constant (native/transpiler path)
+    </code></pre>
+    <p>In the interpreter, <code>#DEFINE</code> does nothing at runtime. It doesn't create a constant
+    you can read while running. Its compile-time-constant meaning is for the native and
+    transpiler paths, not <code>cssc run</code>. So don't count on <code>#DEFINE NAME value;</code> expanding
+    inside interpreted code; use a real <code>#stack</code> or <code>#heap</code> slot for a runtime value.</p>
+    <p>Case is the whole difference: <code>#DEFINE</code> is a compiler construct, <code>#define</code> is a
+    function. Both are in <a href="08-directives.html">Directives</a>, along with <code>#redefine</code>, which
+    mutates a function body and is interpreter-only.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>A bare <code>{}</code> is a wall, not a window. Code inside can't see outer names; import
+      them with <code>#req</code>.</li>
+    <li><code>if</code>, <code>for</code>, <code>while</code>, and <code>select</code> are windows. They see the enclosing scope, and
+      you don't need <code>#req</code> inside them.</li>
+    <li>There's no global fallback across a wall. An unknown bare name in a sector
+      function is <code>0x0</code>, not the top-level variable with the same name.</li>
+    <li><code>#req</code> defaults to a live reference, not a copy. Use <code>&amp;</code> for a snapshot. This is
+      the reverse of the old semantics.</li>
+    <li><code>#DEFINE</code> and <code>#define</code> are different. Uppercase is a constant, lowercase is a
+      function.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a> for aliasing, the delete cascade,
+      and how a bare block discards its heap.</li>
+    <li><a href="04-callables.html">Callables</a> for <code>#define</code>, parameters, and call-site reference or
+      copy.</li>
+    <li><a href="06-sectors.html">Sectors</a> for sector bodies as walls and <code>&lt;deps&gt;</code> injection.</li>
+    <li><a href="05-objects.html">Objects</a> for object and label bodies as walls.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="02-memory-and-ownership.html">&lt; Memory & Ownership</a> <a href="04-callables.html">Callables &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

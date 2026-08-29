@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSC Language Reference</title>
+<meta name="description" content="CSSC stands for Control Specified Source Compiling. It&#x27;s a small, strongly typed language I&#x27;ve been building for a couple of years, aimed at people who want to know exactly what th">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="CSSC Language Reference">
+<meta property="og:description" content="CSSC stands for Control Specified Source Compiling. It&#x27;s a small, strongly typed language I&#x27;ve been building for a couple of years, aimed at people who want to know exactly what th">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>CSSC Language Reference</h1>
+    <p>CSSC stands for Control Specified Source Compiling. It's a small, strongly typed
+    language I've been building for a couple of years, aimed at people who want to know
+    exactly what their code does to the machine underneath.</p>
+    <p>I started it because I was frustrated. I wanted to write software for the ESP32 and
+    ESP8266, and MicroPython kept letting me down. Heap fragmentation ruined several
+    projects I actually cared about. C was the obvious answer, but it felt awkward for
+    the way I wanted to write embedded code. So I started making my own language:
+    something with roughly the readability of Python, but with small binaries and much
+    tighter control over where every byte goes. That's still the core of what CSSC is
+    for. It also has an x86_64 backend now, so you can write ordinary host programs
+    with it too.</p>
+    <p>It's honest work-in-progress. The Xtensa target (ESP32, ESP8266) is tested and
+    working. The host backend runs on Windows. Linux isn't tested yet and ARM isn't
+    supported yet. I'll say so in the chapters wherever it matters, rather than pretend
+    everything is finished.</p>
+    <p>This is the reference. Each chapter covers one area and stands on its own, so you
+    can read it front to back or jump straight to what you need.</p>
+    <p>If you're new, start with <a href="00-getting-started.html">Getting Started</a>. It installs
+    CSSC, gets a program running, and sends you to the chapters that matter for what
+    you're building.</p>
+    <h2>Chapters</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>#</th>
+    <th>Chapter</th>
+    <th>What's in it</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td>00</td>
+    <td><a href="00-getting-started.html">Getting Started</a></td>
+    <td>Install, write and run your first program, and the few ideas you need up front.</td>
+    </tr>
+    <tr>
+    <td>01</td>
+    <td><a href="01-types-and-values.html">Types &amp; Values</a></td>
+    <td>The primitive types and their sizes, <code>null</code> and <code>0x0</code>, literals, and the container types.</td>
+    </tr>
+    <tr>
+    <td>02</td>
+    <td><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a></td>
+    <td><code>#stack</code>, <code>#heap</code>, <code>#auto</code>, when things get freed, <code>#delete</code> and <code>#free</code>, and how aliasing works. Read this one slowly.</td>
+    </tr>
+    <tr>
+    <td>03</td>
+    <td><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a></td>
+    <td>Which constructs hide outer names and which don't, how names resolve, and importing with <code>#req</code>.</td>
+    </tr>
+    <tr>
+    <td>04</td>
+    <td><a href="04-callables.html">Callables</a></td>
+    <td><code>#define</code>, parameters, passing by reference or by copy, <code>mirror</code> versus <code>return</code>, and how a variable can also be a function.</td>
+    </tr>
+    <tr>
+    <td>05</td>
+    <td><a href="05-objects.html">Objects</a></td>
+    <td><code>object</code> layout, members with <code>-&gt;</code>, labels with <code>.</code>, overloading, and constructor parameters.</td>
+    </tr>
+    <tr>
+    <td>06</td>
+    <td><a href="06-sectors.html">Sectors</a></td>
+    <td><code>sector</code> namespaces, real <code>public</code>/<code>private</code> enforcement, isolation, and dependency injection.</td>
+    </tr>
+    <tr>
+    <td>07</td>
+    <td><a href="07-modules.html">Modules</a></td>
+    <td><code>#include</code>, <code>#load</code>, <code>#depend</code>, <code>#unload</code>, and where CSSC looks for modules.</td>
+    </tr>
+    <tr>
+    <td>08</td>
+    <td><a href="08-directives.html">Directives</a></td>
+    <td>The full <code>#…</code> directive reference, grouped by what they do.</td>
+    </tr>
+    <tr>
+    <td>09</td>
+    <td><a href="09-control-flow.html">Control Flow</a></td>
+    <td><code>if</code>, <code>for</code>, <code>while</code>, and <code>select</code> with <code>jump</code> for walking containers.</td>
+    </tr>
+    <tr>
+    <td>10</td>
+    <td><a href="10-access-operators.html">Access Operators</a></td>
+    <td>When to use <code>::</code>, <code>-&gt;</code>, or <code>.</code>. They aren't interchangeable, and mixing them up is the first thing that trips everyone up.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>What I built it around</h2>
+    <p>A few goals shaped almost every decision in the language.</p>
+    <p>I wanted it to be fast, and I mean measured fast, not assumed fast. Hot paths
+    compile to native code and the compiler throws away anything you don't use. When
+    speed matters, I benchmark it rather than guess.</p>
+    <p>I wanted it to be raw. There's no garbage collector and nothing gets cleaned up
+    behind your back, apart from <code>#heap</code> memory at the end of the program. You decide
+    where each value lives and when it goes away. On a chip with a few kilobytes of
+    RAM, that kind of control is the entire reason the language exists.</p>
+    <p>I wanted the binaries to stay small. Dead-code elimination and a minimal runtime
+    keep the output tight, which is what makes it usable on flash-constrained boards.</p>
+    <p>And I wanted one source to reach many places. The same <code>.cssc</code> file runs on the
+    interpreter, compiles to native code for your machine, and builds for the Xtensa
+    and AVR chips.</p>
+    <p>The tradeoff is real and I won't hide it: CSSC does exactly what you wrote,
+    including leaking memory you forgot to free. The rules in these chapters are the
+    contract that makes that tradeoff pay off.</p>
+    <h2>The toolchain</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Command</th>
+    <th>What it does</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>cssc run &lt;file&gt;</code></td>
+    <td>Runs the file on the interpreter. This is the reference behavior. When something is ambiguous, whatever <code>cssc run</code> does is what CSSC means.</td>
+    </tr>
+    <tr>
+    <td><code>cssc build &lt;file&gt; [-o out]</code></td>
+    <td>Compiles to a native executable. Host builds use LLVM. Embedded targets: <code>--esp32</code>, <code>--esp8266</code>, <code>--arduino</code>.</td>
+    </tr>
+    <tr>
+    <td><code>cssc workspace</code></td>
+    <td>Opens the native CSSC IDE.</td>
+    </tr>
+    <tr>
+    <td><code>cssc analyze &lt;file&gt;</code></td>
+    <td>Static analysis: diagnostics and lints, without running anything.</td>
+    </tr>
+    <tr>
+    <td><code>cssc module install …</code></td>
+    <td>Builds and installs distributable modules.</td>
+    </tr>
+    <tr>
+    <td><code>cssc uninstall</code></td>
+    <td>Removes CSSC from your machine.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The interpreter, the native compiler, and the analyzer are supposed to agree on
+    everything written here. Where a feature only works on one of them, the chapter
+    says so.</p>
+    <h2>The things people get wrong first</h2>
+    <p>A short list, each linked to the chapter that explains it properly.</p>
+    <ul>
+    <li>Plain <code>b = a</code> doesn't always create a live link. Scalars and strings are copied
+      by value; only containers share their storage. To link two slots, use <code>#req</code> or
+      pass through a function argument. See <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>.</li>
+    <li><code>#heap</code> is freed at the end of the program, not when a block ends. The one
+      exception is a bare <code>{ }</code> block, which drops the heap it made when it closes. See
+      <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>.</li>
+    <li>The call site decides reference or copy: <code>f(x)</code> passes a reference, <code>f(&amp;x)</code>
+      passes a copy. See <a href="04-callables.html">Callables</a>.</li>
+    <li><code>::</code>, <code>-&gt;</code>, and <code>.</code> mean different things and can't be swapped. See
+      <a href="10-access-operators.html">Access Operators</a>.</li>
+    <li><code>select</code> needs a <code>jump</code>. Without it the cursor never moves and you loop on the
+      first element forever. See <a href="09-control-flow.html">Control Flow</a>.</li>
+    <li><code>float</code> is always 64-bit. A narrower float slot is rejected outright. See
+      <a href="01-types-and-values.html">Types &amp; Values</a>.</li>
+    </ul>
+    <h2>One note on precedence</h2>
+    <p>These docs describe how CSSC actually runs. If the text and the language ever
+    disagree, trust the language and let me know about the doc bug so I can fix it.</p>
+    <nav class="chapter-nav"><a href="00-getting-started.html">Getting Started &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

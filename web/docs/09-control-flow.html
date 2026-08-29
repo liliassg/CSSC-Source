@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control Flow - CSSC</title>
+<meta name="description" content="if, for, and while are what you&#x27;d expect. select isn&#x27;t. It&#x27;s a cursor loop driven by explicit jump statements, and it&#x27;s the one construct people misuse, so most of this chapter is ">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Control Flow - CSSC">
+<meta property="og:description" content="if, for, and while are what you&#x27;d expect. select isn&#x27;t. It&#x27;s a cursor loop driven by explicit jump statements, and it&#x27;s the one construct people misuse, so most of this chapter is ">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Control Flow</h1>
+    <p><code>if</code>, <code>for</code>, and <code>while</code> are what you'd expect. <code>select</code> isn't. It's a cursor loop
+    driven by explicit <code>jump</code> statements, and it's the one construct people misuse, so
+    most of this chapter is about it.</p>
+    <p>A quick scope reminder: <code>if</code>, <code>else</code>, <code>for</code>, <code>while</code>, and <code>select</code> bodies are
+    windows, not walls. They see the enclosing scope directly, so you don't need <code>#req</code>
+    inside them. Only <code>#define</code>, <code>{}</code>, object, label, and sector bodies are walls (see
+    <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>).</p>
+    <h2><code>if</code>, <code>else if</code>, <code>else</code></h2>
+    <pre><code class="cssc">if (x &gt; 10) {
+        cssc::outln(&quot;big&quot;);
+    } else if (x &gt; 5) {
+        cssc::outln(&quot;medium&quot;);
+    } else {
+        cssc::outln(&quot;small&quot;);
+    }
+    </code></pre>
+    <p>The condition is truthy or falsy in the usual way. Remember that <code>0</code>, <code>0x0</code>, and
+    <code>null</code> all compare equal (see <a href="01-types-and-values.html">Types &amp; Values</a>).</p>
+    <h2><code>for</code></h2>
+    <p>There are three forms:</p>
+    <pre><code class="cssc">// C-style
+    for (int i = 0; i &lt; 10; i = i + 1) {
+        cssc::outln(i);
+    }
+    
+    // for-in over values
+    for (val in myList) {
+        cssc::outln(val);
+    }
+    
+    // for-in with an index
+    for (i, val in myList) {
+        cssc::outln(i + &quot;: &quot; + val);
+    }
+    </code></pre>
+    <p>The loop variable is local to the loop and released at the closing <code>}</code>. The body
+    still sees the enclosing scope, since it isn't a wall.</p>
+    <h2><code>while</code></h2>
+    <pre><code class="cssc">while (running) {
+        cssc::outln(&quot;tick&quot;);
+    }
+    </code></pre>
+    <h2><code>break</code> and <code>continue</code></h2>
+    <p><code>break;</code> exits the nearest <code>for</code> or <code>while</code> loop, and <code>continue;</code> skips to the next
+    iteration of it. There's one special case in object labels: a <code>break;</code> in a label
+    body but outside any loop acts as an early return from the label (see
+    <a href="05-objects.html">Objects</a>).</p>
+    <h2><code>select</code>, cursor iteration</h2>
+    <p><code>select</code> walks an iterable with an explicit cursor. Each pass binds the current
+    element to <code>?name</code>, and then you decide how far to move the cursor with a <code>jump</code>. If
+    you never <code>jump</code>, the cursor never advances, so the body runs at most once and the
+    loop ends. That's almost always a bug, and the analyzer flags it
+    (<code>SELECT_WITHOUT_JUMP</code>).</p>
+    <pre><code class="cssc">#stack[array&lt;int&gt;, 1024] bytecode = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0x0};
+    
+    select (bytecode) ?i {
+        if (i == 0x0) {          // sentinel, so stop
+            cssc::outln(&quot;end&quot;);
+            return;              // 'return' exits the whole function, not just select
+        }
+        if (i == 1) {
+            jump++;              // skip the next element (cursor +2)
+        }
+        cssc::outln(i);
+        jump;                    // advance to the next element (cursor +1)
+    }
+    </code></pre>
+    <p>The cursor controls:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Statement</th>
+    <th>Cursor move</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>jump;</code></td>
+    <td>+1, the next element</td>
+    </tr>
+    <tr>
+    <td><code>jump++;</code></td>
+    <td>+2, skip one</td>
+    </tr>
+    <tr>
+    <td><code>!jump;</code></td>
+    <td>-1, back one</td>
+    </tr>
+    <tr>
+    <td><code>!jump++;</code></td>
+    <td>-2, back two</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>If a path has no <code>jump</code>, the cursor doesn't move on that path, and when control
+    reaches the end of the body without a jump, the loop ends. The loop also ends when
+    the cursor goes out of bounds. And <code>return;</code> inside a <code>select</code> exits the enclosing
+    function or label, not just the loop; to leave only the loop, arrange your jumps so
+    the cursor runs out, or use a sentinel like <code>0x0</code>.</p>
+    <p>The backward form is <code>!jump</code> (and <code>!jump++</code>). There's no <code>jump_back</code> keyword. <code>jump</code>
+    is the only cursor keyword; the leading <code>!</code> flips the direction and <code>++</code> doubles the
+    step.</p>
+    <h3><code>?i</code> is a reference; copy it with <code>&amp;</code> to keep it</h3>
+    <p>The cursor <code>?i</code> is a borrowed reference into the container you're iterating. CSSC
+    binds by reference by default, and cursors are no exception. It's valid only during
+    the current pass: the next <code>jump</code> rebinds it to the next element, and when the
+    <code>select</code> exits it goes dead. Storing the bare cursor somewhere that outlives the loop
+    leaves a stale reference that reads <code>0x0</code>:</p>
+    <pre><code class="cssc">#heap[vector&lt;int&gt;, 1024] kept = [];
+    select (nums) ?i {
+        kept.push(i);      // wrong: stores a borrowed reference, dead after the loop
+        jump;
+    }
+    // kept[0] now reads 0x0; the cursor it pointed at is gone
+    </code></pre>
+    <p>Hand over a copy with <code>&amp;</code> so the value outlives the cursor:</p>
+    <pre><code class="cssc">select (nums) ?i {
+        kept.push(&amp;i);     // right: &amp;i is an independent copy that survives the loop
+        jump;
+    }
+    </code></pre>
+    <p>This is the same rule as deleting a reference versus a copy
+    (<a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>): by default you hold the real
+    thing, not a copy, so anything you want to keep past the cursor's lifetime has to be
+    copied with <code>&amp;</code>. The analyzer flags the bare-reference case as
+    <code>SELECT_ALIAS_BORROW_NO_COPY</code>, and it flags <code>#delete[?i]</code> or <code>#free[?i]</code> (freeing the
+    borrowed cursor) as <code>DELETE_SELECT_ALIAS</code>.</p>
+    <h3><code>?label.pos()</code>, the current index</h3>
+    <p>Inside the body, <code>?label.pos()</code> gives the current 0-based cursor position.</p>
+    <pre><code class="cssc">#stack[list, 256] n = [10, 20, 30];
+    select (n) ?i {
+        cssc::out(&quot;pos=&quot;);
+        cssc::out(i.pos());     // 0, 1, 2
+        cssc::out(&quot; val=&quot;);
+        cssc::outln(i);
+        jump;
+    }
+    </code></pre>
+    <p>One backend note: the native compiler currently lowers <code>select</code> only for
+    <code>vector&lt;int&gt;</code> and <code>array&lt;bind&gt;</code>. For embedded builds, prefer those container kinds;
+    other iterables (<code>array&lt;float&gt;</code>, <code>map</code>, <code>bind</code>) are interpreter-only for now. The
+    semantics are identical across backends where both support it.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>A <code>select</code> with no <code>jump</code> runs once and stops. Every path that should keep
+      iterating has to end in a <code>jump</code> (or <code>jump++</code>, <code>!jump</code>). The analyzer catches the
+      missing-jump case as <code>SELECT_WITHOUT_JUMP</code>.</li>
+    <li><code>return;</code> in a <code>select</code> exits the function, not just the loop. Use a sentinel or
+      let the cursor run out to end only the loop.</li>
+    <li><code>if</code>, <code>for</code>, <code>while</code>, and <code>select</code> are windows, not walls. They read and write the
+      enclosing scope, so don't wrap outer names in <code>#req</code> inside them.</li>
+    <li>Backward jump is <code>!jump</code>, not <code>jump_back</code>.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> for why these blocks are transparent.</li>
+    <li><a href="01-types-and-values.html">Types &amp; Values</a> for the <code>0x0</code>/<code>null</code> truthiness used in
+      conditions.</li>
+    <li><a href="05-objects.html">Objects</a> for <code>break</code> as a label early-return.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="08-directives.html">&lt; Directive Reference</a> <a href="10-access-operators.html">Access Operators: `::`, `->`, and `.` &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

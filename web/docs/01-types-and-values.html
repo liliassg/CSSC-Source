@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Types &amp; Values - CSSC</title>
+<meta name="description" content="CSSC is strict about types when you declare something, raw about them at runtime, and predictable about sizes. This chapter is the reference for what the primitive types are, how b">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Types &amp; Values - CSSC">
+<meta property="og:description" content="CSSC is strict about types when you declare something, raw about them at runtime, and predictable about sizes. This chapter is the reference for what the primitive types are, how b">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Types &amp; Values</h1>
+    <p>CSSC is strict about types when you declare something, raw about them at runtime,
+    and predictable about sizes. This chapter is the reference for what the primitive
+    types are, how big they are, what <code>null</code> means, and how the containers behave.</p>
+    <h2>Primitive types</h2>
+    <p>There are four primitives, plus the untyped escape hatch.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Type</th>
+    <th>What it is</th>
+    <th>Size</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>int</code></td>
+    <td>a signed integer, arbitrary precision</td>
+    <td>as many bytes as the value needs (minimal signed little-endian)</td>
+    </tr>
+    <tr>
+    <td><code>float</code></td>
+    <td>an IEEE-754 double</td>
+    <td>always 64-bit, 8 bytes</td>
+    </tr>
+    <tr>
+    <td><code>string</code></td>
+    <td>UTF-8 text</td>
+    <td>the byte length of the encoding</td>
+    </tr>
+    <tr>
+    <td><code>bool</code></td>
+    <td>true or false</td>
+    <td>1 byte</td>
+    </tr>
+    <tr>
+    <td><code>auto</code> / <code>var</code> / <code>void</code></td>
+    <td>untyped</td>
+    <td>whatever the initializer produced; <code>null</code> if none</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <pre><code class="cssc">#stack[int, 32]    n = 42;      // also 0xFF, 0b1010
+    #stack[float, 64]  f = 3.14;    // must be at least 64 bits, see below
+    #stack[string, 128] s = &quot;hi&quot;;   // double or 'single' quotes
+    #stack[bool, 8]    b = true;    // true / false
+    </code></pre>
+    <h2>Floats are always 64-bit</h2>
+    <p>A float always encodes to 8 bytes. If you write <code>#stack[float, N]</code> with <code>N</code> below
+    64, CSSC doesn't quietly round it up. It rejects the declaration with an overflow
+    error, even for a plain <code>0.0</code>.</p>
+    <pre><code class="cssc">#stack[float, 64] ok  = 3.14;   // fine, this is the minimum
+    #stack[float, 32] bad = 1.0;    // error: 64 bits won't fit in 32
+    </code></pre>
+    <p>I did this on purpose. A silent float32-to-float64 mismatch is exactly the kind of
+    bug that costs you an afternoon, so the language refuses it instead of hiding it.
+    The smallest valid float slot is <code>#stack[float, 64]</code>.</p>
+    <p>Watch out for the <code>sizes</code> module here: <code>sizes::small_float</code> is 32, so using it for
+    a float slot triggers the same rejection. Use <code>sizes::normal_float</code> (64) or larger.</p>
+    <h2>Only a few names are real types</h2>
+    <p><code>int</code>, <code>float</code>, <code>string</code>, <code>bool</code>, the containers, and <code>auto</code>/<code>var</code>/<code>void</code> are the
+    real types. Anything else you might type out of habit, like <code>char</code>, <code>byte</code>, <code>i32</code>,
+    <code>i64</code>, <code>f32</code>, <code>f64</code>, or <code>double</code>, is not one of them. CSSC accepts the name but
+    treats the slot as untyped:</p>
+    <ul>
+    <li>no coercion, so the value keeps whatever type its initializer gave it,</li>
+    <li>no default, so it starts as <code>null</code>,</li>
+    <li>no type checking, so it accepts anything.</li>
+    </ul>
+    <pre><code class="cssc">#stack[i32, 32] x = 5;    // 'i32' is not int; x is just an untyped slot holding 5
+    #stack[char, 8] c = &quot;A&quot;;  // 'char' is not a type; c is just the string &quot;A&quot;
+    </code></pre>
+    <p>If you reach for <code>i32</code> or <code>char</code> expecting C semantics, you'll get an untyped slot
+    instead of a sized integer or a character type. Use <code>int</code>, and control the width
+    with the bit capacity.</p>
+    <h2><code>null</code> and <code>0x0</code></h2>
+    <p>They're the same thing. <code>null</code> (and its alias <code>none</code>) is the null value, <code>0x0</code> is
+    the integer zero, and CSSC treats <code>null</code>, <code>0x0</code>, and <code>0</code> as equal under <code>==</code> and
+    <code>!=</code>. A deleted or dangling slot reads back as <code>0x0</code>.</p>
+    <pre><code class="cssc">if (maybe == 0x0)  { /* maybe is null, unbound, or zero */ }
+    if (maybe == null) { /* the exact same test */ }
+    </code></pre>
+    <p><code>0x0</code> is the idiomatic "is this here?" check. You'll also see it with <code>#adress</code>,
+    covered in <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>.</p>
+    <h2>Literals</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Kind</th>
+    <th>How you write it</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td>int</td>
+    <td><code>42</code>, <code>0xFF</code>, <code>0b1010</code></td>
+    </tr>
+    <tr>
+    <td>float</td>
+    <td><code>3.14</code>, <code>2.0</code></td>
+    </tr>
+    <tr>
+    <td>string</td>
+    <td><code>"hello"</code>, <code>'world'</code></td>
+    </tr>
+    <tr>
+    <td>bool</td>
+    <td><code>true</code>, <code>false</code></td>
+    </tr>
+    <tr>
+    <td>null</td>
+    <td><code>null</code>, <code>none</code>, <code>0x0</code></td>
+    </tr>
+    <tr>
+    <td>array</td>
+    <td><code>{1, 2, 3}</code> or <code>[1, 2, 3]</code></td>
+    </tr>
+    <tr>
+    <td>map</td>
+    <td><code>{}</code>, <code>{key: value}</code>, <code>{key = value}</code></td>
+    </tr>
+    <tr>
+    <td>bind</td>
+    <td><code>{a, b; c, d}</code> (note the <code>;</code>)</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>Capacities and the <code>sizes</code> module</h2>
+    <p>The number after the type in <code>#stack[type, bits]</code> is a capacity in bits. When you
+    leave it off, you get a default:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Region</th>
+    <th>Default</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#stack[type]</code></td>
+    <td>256 bits</td>
+    </tr>
+    <tr>
+    <td><code>#heap[type]</code></td>
+    <td>1024 bits</td>
+    </tr>
+    <tr>
+    <td><code>#auto[type]</code></td>
+    <td>at least 32 bytes (256 bits), grows as needed</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>For containers, that second number is an element capacity, not a scalar bit limit.</p>
+    <p>Rather than sprinkle raw bit counts through your code, you can use the <code>sizes</code>
+    module, which gives them readable names:</p>
+    <pre><code class="cssc">#include(&quot;sizes&quot;) sz;
+    #stack[string, sz::normal_string] name = &quot;Ada&quot;;   // 256 bits
+    #stack[int, sz::large_int] big = 0;                // 64 bits
+    </code></pre>
+    <p>The full set, in bits:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>group</th>
+    <th><code>small_</code></th>
+    <th><code>normal_</code></th>
+    <th><code>large_</code></th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>int</code></td>
+    <td>16</td>
+    <td>32</td>
+    <td>64</td>
+    </tr>
+    <tr>
+    <td><code>float</code></td>
+    <td>32</td>
+    <td>64</td>
+    <td>128</td>
+    </tr>
+    <tr>
+    <td><code>string</code></td>
+    <td>128</td>
+    <td>256</td>
+    <td>1024</td>
+    </tr>
+    <tr>
+    <td><code>bool</code></td>
+    <td>8</td>
+    <td>8</td>
+    <td>8</td>
+    </tr>
+    <tr>
+    <td><code>array</code> / <code>vector</code> / <code>list</code></td>
+    <td>256</td>
+    <td>1024</td>
+    <td>4096</td>
+    </tr>
+    <tr>
+    <td><code>map</code> / <code>dict</code></td>
+    <td>512</td>
+    <td>2048</td>
+    <td>8192</td>
+    </tr>
+    <tr>
+    <td><code>auto</code> / <code>var</code></td>
+    <td>64</td>
+    <td>256</td>
+    <td>1024</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>Containers</h2>
+    <p>CSSC has four container shapes. One thing to get straight early: the literal you
+    write and the runtime type you get aren't always the same class you'd expect.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>You write</th>
+    <th>It's a</th>
+    <th>At runtime</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>{1, 2, 3}</code> (no <code>;</code>, no <code>:</code>/<code>=</code>)</td>
+    <td>array literal</td>
+    <td>a plain list</td>
+    </tr>
+    <tr>
+    <td><code>[1, 2, 3]</code></td>
+    <td>array literal</td>
+    <td>a plain list</td>
+    </tr>
+    <tr>
+    <td><code>{k: v}</code> or <code>{k = v}</code> or <code>{}</code></td>
+    <td>map literal</td>
+    <td>a plain dict</td>
+    </tr>
+    <tr>
+    <td><code>{a, b; c, d}</code> (has a <code>;</code>)</td>
+    <td>bind literal</td>
+    <td>a bind</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>Both <code>{…}</code> and <code>[…]</code> give you a plain list. The brace-versus-bracket choice doesn't
+    change the type. The richer container classes, with their fuller method sets, show
+    up when a value lands in a typed slot (<code>array&lt;T&gt;</code>, <code>vector&lt;T&gt;</code>, <code>map&lt;K,V&gt;</code>), goes
+    through coercion, or is built by the <code>#array</code>/<code>#vector</code>/<code>#map</code> directives. So it's
+    the slot type that decides what you get, not the bracket.</p>
+    <p>The methods you have follow from that:</p>
+    <ul>
+    <li><code>array&lt;T&gt;</code>: <code>push_back</code>, <code>pop_back</code>, <code>push_front</code>, <code>pop_front</code>, <code>size</code>, <code>length</code>,
+      <code>at</code>, <code>get</code>, <code>set</code>, <code>contains</code>, <code>indexOf</code>, <code>insert</code>, <code>erase</code>, <code>slice</code>, <code>join</code>,
+      <code>sort</code>, <code>reverse</code>, <code>unique</code>, <code>first</code>, <code>last</code>, <code>front</code>, <code>back</code>, <code>clear</code>, <code>resize</code>,
+      <code>capacity</code>, and more. A typed <code>array&lt;T&gt;</code> adds <code>map</code>, <code>filter</code>, <code>reduce</code>, <code>sortBy</code>,
+      and friends.</li>
+    <li><code>vector&lt;T&gt;</code>, which is the same as <code>list</code>: the full STL-flavored surface, including
+      <code>push_back</code>, <code>pop_back</code>, <code>front</code>, <code>back</code>, <code>at</code>, <code>insert_at</code>, <code>erase</code>, <code>resize</code>,
+      <code>reserve</code>, <code>capacity</code>, <code>map</code>, <code>filter</code>, <code>reduce</code>, <code>slice</code>, and <code>sort_inplace</code>.</li>
+    <li><code>map&lt;K,V&gt;</code>: <code>get</code>, <code>set</code>, <code>has</code>, <code>contains</code>, <code>keys</code>, <code>values</code>, <code>items</code>, <code>remove</code>,
+      <code>size</code>, <code>length</code>, <code>clear</code>, <code>merge</code>, <code>update</code>, <code>at</code>. A typed <code>map&lt;K,V&gt;</code> adds
+      <code>emplace</code>, <code>get_or_default</code>, <code>lower_bound</code>, and so on.</li>
+    </ul>
+    <p>How assignment works with containers (they alias, scalars copy) is in
+    <a href="02-memory-and-ownership.html">Memory &amp; Ownership</a>.</p>
+    <h2><code>bind</code>, the structured key/cell type</h2>
+    <p>A <code>bind</code> holds a flat list of cells plus a <code>pair_width</code> that says how many cells
+    make one row. That lets you read the same data flat with <code>b[i]</code> or two-dimensional
+    with <code>b[r][c]</code>.</p>
+    <ul>
+    <li>A structured literal <code>{a, b; c, d}</code> sets <code>pair_width</code> to the number of cells in
+      the first row: <code>{a, b; c, d}</code> gives width 2, <code>{a, b, c; d, e, f}</code> gives width 3.
+      Every row has to have the same cell count.</li>
+    <li>A flat <code>{a, b, c}</code> is an array literal, not a bind. It only becomes a bind when
+      you assign or coerce it into a bind slot, and that coercion pairs adjacent cells,
+      giving <code>pair_width</code> 2. A leftover unpaired cell becomes <code>(cell, null)</code>.</li>
+    <li><code>pair_width</code> is 0 only for an empty or default bind.</li>
+    </ul>
+    <p>Access and size:</p>
+    <ul>
+    <li><code>b[i]</code> reads the i-th cell, flat.</li>
+    <li><code>b[r][c]</code> is the structured read, equal to <code>b[r * pair_width + c]</code>.</li>
+    <li><code>b.size()</code> and <code>b.length()</code> count rows, not cells.</li>
+    <li><code>b.addmap(m)</code> appends a map's, pair's, or list's entries as rows. The list
+      methods (<code>push_back</code>, <code>pop_back</code>, <code>at</code>, and the rest) work too, since a bind is a
+      list underneath.</li>
+    </ul>
+    <pre><code class="cssc">#heap[bind, 328] frame = {yPos, text; durationMs, 0x0};  // pair_width = 2
+    cssc::outln(frame[0]);       // yPos        (flat cell 0)
+    cssc::outln(frame[2]);       // durationMs  (flat cell 2)
+    cssc::outln(frame[1][0]);    // durationMs  (row 1, col 0)
+    cssc::outln(frame.size());   // 2           (rows, not cells)
+    </code></pre>
+    <h2>Strings</h2>
+    <p><code>string</code> is UTF-8, and it has a big method surface:</p>
+    <p><code>length</code>, <code>size</code>, <code>append(x)</code>, <code>upper</code>, <code>lower</code>, <code>trim</code>, <code>split(sep=' ')</code>,
+    <code>replace(old, new)</code>, <code>contains</code>, <code>startsWith</code>, <code>endsWith</code>, <code>indexOf</code>, <code>charAt</code>,
+    <code>substr(start, len=-1)</code>, <code>substring(start, end=-1)</code>, <code>reverse</code>, <code>repeat</code>,
+    <code>padStart(n, ch)</code>, <code>padEnd(n, ch)</code>, <code>isEmpty</code>, <code>isDigit</code>, <code>isAlpha</code>, <code>toInt</code>,
+    <code>toFloat</code>, <code>front</code>, <code>back</code>, <code>data</code>, <code>capacity</code>, <code>exists</code>.</p>
+    <p>Indexing and single-character writes:</p>
+    <pre><code class="cssc">#stack[string, 128] s = &quot;Hello&quot;;
+    cssc::outln(s[1]);        // &quot;e&quot;, a one-character string, not a code point
+    s[0] = &quot;h&quot;;               // in-place single-char write, now &quot;hello&quot;
+    cssc::outln(s.length());  // 5
+    </code></pre>
+    <ul>
+    <li><code>s[i]</code> gives you a one-character string. Out of range gives <code>""</code>.</li>
+    <li><code>s[i] = "x"</code> rebuilds the string (strings are immutable underneath). Writing past
+      the end zero-pads with <code>\x00</code>. The target has to be a named variable.</li>
+    <li><code>indexOf</code> returns <code>-1</code> when it finds nothing; <code>toInt</code> and <code>toFloat</code> return <code>0</code>
+      and <code>0.0</code> on input that isn't a number.</li>
+    </ul>
+    <h3>The in-place string methods</h3>
+    <p>Some of the whole-string transforms behave differently depending on where you use
+    them, and this catches people, so it's worth being clear.</p>
+    <p>Used as a statement, <code>s.reverse();</code> or <code>s.append(x);</code> rewrites <code>s</code> in place. The
+    method changes the variable's own slot. This is how you grow or transform a string,
+    because <code>str += x</code> re-evaluates a heap literal in expression position, which the
+    analyzer rejects as E020 inside a <code>select</code> or another barrier.</p>
+    <p>Used as an expression, <code>x = s.upper()</code> or <code>outln(s.replace(a, b))</code> is a pure
+    transform. It returns the new string and leaves <code>s</code> alone. So chaining or repeating
+    the expression form is safe: two <code>s.replace(…)</code> calls in a row both work on the
+    original <code>s</code>.</p>
+    <p>The methods that behave this way are <code>append(x)</code>, <code>reverse</code>, <code>upper</code>, <code>lower</code>,
+    <code>trim</code>, and <code>replace(old, new)</code>. The interpreter adds a few more (<code>repeat</code>,
+    <code>padStart</code>, <code>padEnd</code>, <code>capitalize</code>, <code>title</code>); the native compiler covers the first
+    six.</p>
+    <pre><code class="cssc">#stack[string, 64] path = &quot;myproject&quot;;
+    path.reverse();                 // statement: path is now &quot;tcejorpym&quot;
+    #stack[string, 16] slash = &quot;/&quot;;
+    path.append(slash);             // statement: path is now &quot;tcejorpym/&quot;
+    #delete[slash];                 // the argument is only read, so free it yourself
+    path.upper();                   // statement: path is now &quot;TCEJORPYM/&quot;
+    cssc::outln(path);
+    
+    #stack[string, 64] name = &quot;Ada&quot;;
+    #auto[string] shout = name.upper();   // expression: shout is &quot;ADA&quot;, name stays &quot;Ada&quot;
+    cssc::outln(name);                    // &quot;Ada&quot;, unchanged
+    </code></pre>
+    <p>A couple of details:</p>
+    <ul>
+    <li><code>append(x)</code> reads <code>x</code>'s bytes and tacks them onto the receiver. It borrows <code>x</code>,
+      it doesn't consume it, so you still <code>#delete</code> <code>x</code> yourself.</li>
+    <li>The in-place (statement) form only works when the receiver is a named string
+      variable, because there has to be a slot to write back into. On an rvalue like
+      <code>(a + b).reverse();</code> the transform runs but the result goes nowhere.</li>
+    <li>The methods that read or extract a different value (<code>length</code>, <code>size</code>, <code>at</code>,
+      <code>indexOf</code>, <code>contains</code>, <code>charAt</code>, <code>startsWith</code>, <code>substr</code>, <code>split</code>, <code>toInt</code>) never
+      change the receiver, wherever you use them.</li>
+    </ul>
+    <h2>Introspection: <code>declared()</code> and <code>cssc::typeof</code></h2>
+    <p>Two things work on a variable of any type.</p>
+    <p><code>x.declared()</code> gives you an owned string holding the variable's source-code name,
+    the identifier exactly as you wrote it. The name is resolved at compile time, so it
+    works for everything: scalars, strings, containers, objects, sectors. A receiver
+    that isn't an identifier gives <code>""</code>. You own the returned string, so <code>#delete</code> it.</p>
+    <pre><code class="cssc">#stack[int, 32] local = 5;
+    cssc::outln(local.declared());     // &quot;local&quot;
+    
+    local.declared() nm;               // capture the owned name
+    cssc::outln(nm);                   // &quot;local&quot;
+    #delete[nm];
+    #delete[local];
+    </code></pre>
+    <p>One catch: <code>declared()</code> gives you the name of the receiver expression, not of
+    whatever produced its value. Inside <code>select (arr) ?el { … el.declared() … }</code> the
+    receiver is the cursor, so you get <code>"el"</code>, never the name of the element's original
+    variable. Once a value is inside a container, its source name is gone.</p>
+    <p><code>cssc::typeof(x)</code> gives you a lowercase string naming the runtime type: <code>"int"</code>,
+    <code>"float"</code>, <code>"string"</code>, <code>"bool"</code>, <code>"array"</code>, <code>"map"</code>, <code>"bind"</code>, <code>"object"</code>,
+    <code>"sector"</code>, and so on. It's handy for <code>auto</code> parameters that accept more than one
+    shape. To compare two kinds, compare their <code>typeof</code>:</p>
+    <pre><code class="cssc">#define(dump) {
+        #scanp(dump, auto, 0) value;
+        #stack[string, 8] probe;                       // a known string to compare against
+        if (cssc::typeof(value) == cssc::typeof(probe)) {
+            cssc::outln(&quot;got a string: &quot;, value);
+        } else if (cssc::typeof(value) == &quot;array&quot;) {
+            cssc::outln(&quot;got an array of &quot;, value.size());
+        }
+        #delete[probe];
+    }
+    </code></pre>
+    <h2>The short version</h2>
+    <ul>
+    <li>A float under 64 bits is an error, not a rounding. The minimum is <code>#stack[float, 64]</code>.</li>
+    <li><code>i32</code>, <code>char</code>, <code>byte</code>, and <code>double</code> aren't real types; they become untyped slots.
+      Use <code>int</code> or <code>float</code> with a bit capacity.</li>
+    <li><code>0x0</code>, <code>null</code>, and <code>0</code> all compare equal. <code>0x0</code> is the standard "is it there?"
+      guard.</li>
+    <li><code>{…}</code> and <code>[…]</code> are both lists at runtime. The typed slot decides whether you get
+      the richer container class.</li>
+    <li>A flat bind has <code>pair_width</code> 2, and a flat <code>{a, b, c}</code> is an array until you
+      coerce it into a bind slot.</li>
+    <li><code>s[i]</code> is a one-character string, not an integer character code.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="02-memory-and-ownership.html">Memory &amp; Ownership</a> for capacities, container
+      aliasing, and the <code>0x0</code> guard.</li>
+    <li><a href="08-directives.html">Directives</a> for the <code>#string</code>, <code>#int</code>, <code>#array</code>, <code>#vector</code>,
+      and <code>#map</code> typed-declaration directives.</li>
+    <li><a href="07-modules.html">Modules</a> for <code>#include("sizes")</code> and the rest.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="00-getting-started.html">&lt; Getting Started</a> <a href="02-memory-and-ownership.html">Memory & Ownership &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

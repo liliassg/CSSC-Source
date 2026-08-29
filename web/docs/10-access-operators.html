@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access Operators: `::`, `-&gt;`, and `.` - CSSC</title>
+<meta name="description" content="This is the thing that trips people up more than any other. The three access operators aren&#x27;t interchangeable, and they each have exactly one job.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Access Operators: `::`, `-&gt;`, and `.` - CSSC">
+<meta property="og:description" content="This is the thing that trips people up more than any other. The three access operators aren&#x27;t interchangeable, and they each have exactly one job.">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Access Operators: <code>::</code>, <code>-&gt;</code>, and <code>.</code></h1>
+    <p>This is the thing that trips people up more than any other. The three access
+    operators aren't interchangeable, and they each have exactly one job.</p>
+    <p>If you remember one line: <code>::</code> is sector or module access with privacy enforced,
+    <code>-&gt;</code> is a data member on objects and sectors with privacy not enforced, and <code>.</code> is an
+    object label or method call.</p>
+    <h2>The decision table</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Operator</th>
+    <th>Use it for</th>
+    <th>Access-controlled?</th>
+    <th>A private member</th>
+    <th>A missing member</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>::</code></td>
+    <td>a sector or module member: <code>alias::member</code>, <code>alias::func(args)</code></td>
+    <td>yes, on reads</td>
+    <td>a read gives <code>0x0</code>; a <code>::</code> write bypasses the check and persists</td>
+    <td>sector gives <code>null</code>; a built-in-module method call errors; a module property read gives <code>null</code></td>
+    </tr>
+    <tr>
+    <td><code>-&gt;</code></td>
+    <td>an object or sector data member: <code>obj-&gt;field</code>, <code>Sector-&gt;field</code></td>
+    <td>no</td>
+    <td>fully readable and writable</td>
+    <td>a read gives <code>null</code></td>
+    </tr>
+    <tr>
+    <td><code>.</code></td>
+    <td>an object label or method call: <code>instance.label(args)</code></td>
+    <td>no (objects have no privacy)</td>
+    <td>reachable and callable</td>
+    <td>a method call errors; a property read (no parens) gives <code>null</code></td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2><code>::</code>, sector and module access</h2>
+    <p>Use <code>::</code> to reach a public member of a sector, or a member of a loaded module.</p>
+    <pre><code class="cssc">App::run();                 // call a public sector function
+    cssc::outln(App::title);    // read a public sector member
+    mh::mathlib::square(7);     // reach into a #depend'd .obj (nested sectors/modules)
+    </code></pre>
+    <p><code>::</code> enforces public and private on reads: reading a <code>private:</code> sector member through
+    <code>::</code> gives <code>0x0</code>, not an error.</p>
+    <p>Here's the asymmetry to keep in mind, though: a <code>::</code> write to a sector member is not
+    checked, and in the interpreter it persists. <code>App::secret = 5;</code> actually stores. Only
+    the read side of <code>::</code> is gated.</p>
+    <p>Missing-member behavior depends on the target, which is the module-versus-sector
+    asymmetry from <a href="07-modules.html">Modules</a>: a missing or private sector member gives
+    <code>null</code>; a missing method call on a built-in module errors with <code>"Module 'mod' has no
+    function 'nope'"</code>; and a missing property read on a module gives <code>null</code>.</p>
+    <h2><code>-&gt;</code>, data members, not access-checked</h2>
+    <p>Use <code>-&gt;</code> to read or write a data member of an object or a sector.</p>
+    <pre><code class="cssc">object Player {
+        #auto[int] Player-&gt;hp = 100;    // declare a member with -&gt;
+    } free {};
+    
+    Player() p;
+    cssc::outln(p-&gt;hp);     // read a member
+    p-&gt;hp = 50;             // write a member
+    </code></pre>
+    <p><code>-&gt;</code> does no access check. That's the deliberate asymmetry with <code>::</code>: a sector's
+    <code>private:</code> member is hidden from a <code>::</code> read but is fully reachable, and writable,
+    through <code>-&gt;</code>.</p>
+    <pre><code class="cssc">sector Vault {
+    private:
+        #stack[int, 32] Vault-&gt;secret = 42;
+    public:
+        #stack[int, 32] Vault-&gt;label = 1;
+    } free {};
+    
+    cssc::outln(Vault::secret);   // 0x0, the :: read is gated
+    cssc::outln(Vault-&gt;secret);   // 42, -&gt; is not gated, so the real value
+    Vault-&gt;secret = 0;            // allowed, the -&gt; write isn't gated either
+    </code></pre>
+    <p>So don't assume <code>private:</code> protects a member from <code>-&gt;</code>. If you need enforced privacy,
+    keep secrets reachable only through <code>::</code> and never expose a <code>-&gt;</code> path to them.</p>
+    <h2><code>.</code>, object label and method call</h2>
+    <p>Use <code>.</code> to call a label (a method) on an object instance.</p>
+    <pre><code class="cssc">Handler() h;
+    h.process(&quot;hello&quot;);     // call the 'process' label
+    h.process(42);          // overload resolved at runtime by argument type
+    </code></pre>
+    <p>With parentheses, <code>.</code> is a method call, and calling a label that doesn't exist raises
+    a runtime error (<code>"No method '…'"</code>). Without parentheses, it's a property read, and a
+    missing one gives <code>null</code>. Object-level access control (private labels, <code>secure !</code>)
+    isn't enforced, so every label is callable (see <a href="05-objects.html">Objects</a>).</p>
+    <h2>Wrong and right</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Wrong</th>
+    <th>Right</th>
+    <th>Why</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>p.hp</code> to read a member</td>
+    <td><code>p-&gt;hp</code></td>
+    <td><code>.</code> is for label calls; data members use <code>-&gt;</code>.</td>
+    </tr>
+    <tr>
+    <td><code>p-&gt;takeDamage(30)</code> to call a label</td>
+    <td><code>p.takeDamage(30)</code></td>
+    <td>Labels and methods are called with <code>.</code>, not <code>-&gt;</code>.</td>
+    </tr>
+    <tr>
+    <td><code>obj::field</code> on an object</td>
+    <td><code>obj-&gt;field</code></td>
+    <td><code>::</code> is for sector and module scopes, not object instances.</td>
+    </tr>
+    <tr>
+    <td>relying on <code>Vault-&gt;secret</code> being blocked</td>
+    <td>read secrets only via <code>Vault::secret</code></td>
+    <td><code>-&gt;</code> is never access-checked; the <code>::</code> read is.</td>
+    </tr>
+    <tr>
+    <td><code>Sector.func()</code></td>
+    <td><code>Sector::func()</code></td>
+    <td>Sector and module calls use <code>::</code>.</td>
+    </tr>
+    <tr>
+    <td>expecting <code>Vault::secret</code> to error</td>
+    <td>it returns <code>0x0</code></td>
+    <td>A private <code>::</code> read is a null, not an error.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>The mental model</h2>
+    <pre><code class="cssc">alias::member      -&gt;  sector/module scope        (public/private enforced on read)
+    entity-&gt;member     -&gt;  object/sector data field   (no access check, read and write)
+    instance.label()   -&gt;  object label / method       (a call; overloaded by arg type)
+    </code></pre>
+    <h2>The short version</h2>
+    <ul>
+    <li>They aren't interchangeable. <code>::</code>, <code>-&gt;</code>, and <code>.</code> each have one job.</li>
+    <li><code>-&gt;</code> ignores privacy. A private sector member is readable and writable through it.
+      Only <code>::</code> reads are gated.</li>
+    <li>A <code>::</code> write to a sector member persists; it's not a no-op.</li>
+    <li>A missing member behaves differently by target: null for sectors and properties,
+      but a hard error for a missing built-in-module method call or a missing object
+      method call.</li>
+    <li>Object privacy isn't enforced. Use a sector for real privacy.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="06-sectors.html">Sectors</a> for <code>::</code> public/private enforcement and isolation.</li>
+    <li><a href="05-objects.html">Objects</a> for <code>-&gt;</code> members and <code>.</code> labels.</li>
+    <li><a href="07-modules.html">Modules</a> for module <code>::</code> dispatch and the missing-member asymmetry.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="09-control-flow.html">&lt; Control Flow</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

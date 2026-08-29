@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory &amp; Ownership - CSSC</title>
+<meta name="description" content="This is the chapter I&#x27;d ask you to read slowly. Most of the &quot;CSSC did something I didn&#x27;t expect&quot; moments come down to misreading one of the rules here, so it&#x27;s worth the time.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CSSC">
+<meta property="og:title" content="Memory &amp; Ownership - CSSC">
+<meta property="og:description" content="This is the chapter I&#x27;d ask you to read slowly. Most of the &quot;CSSC did something I didn&#x27;t expect&quot; moments come down to misreading one of the rules here, so it&#x27;s worth the time.">
+<meta property="og:image" content="https://cssclang.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../star.png" type="image/png">
+<link rel="stylesheet" href="../font.css">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark"><a href="../index.html">CSSC</a></h1>
+    <p class="expansion">Control Specified Source Compiling</p>
+    <img class="star" src="../star.png" alt="" width="160" height="160">
+
+    <nav class="toolbar" aria-label="Sections">
+      <ul>
+        <li><a href="../index.html">main</a></li>
+        <li><a href="../ide.html">ide</a></li>
+        <li><a href="../news.html">news</a></li>
+        <li><a href="index.html" aria-current="page">docs</a></li>
+        <li><a href="https://github.com/liliassg/CSSC-Source">github</a></li>
+      </ul>
+    </nav>
+    <hr class="rule">
+  </header>
+
+  <main class="doc">
+    <h1>Memory &amp; Ownership</h1>
+    <p>This is the chapter I'd ask you to read slowly. Most of the "CSSC did something I
+    didn't expect" moments come down to misreading one of the rules here, so it's worth
+    the time.</p>
+    <p>CSSC has no garbage collector and makes no copies behind your back. You allocate,
+    and you free. The only thing that gets cleaned up automatically is <code>#heap</code> memory
+    at the end of the program (plus one scoped-block case, below). Everything else
+    leaks until you <code>#delete</code> or <code>#free</code> it. That's deliberate. The whole point of the
+    language is that nothing happens to your memory that you didn't write.</p>
+    <p>Here's the one rule everything else grows out of: <strong>a value lives only while a slot
+    owns it.</strong> A value with no owner is transient. That means a bare heap literal like
+    <code>"hi"</code> or <code>[1, 2, 3]</code>, a throwaway call argument, or a borrowed <code>select</code> cursor
+    (<code>?i</code>) exists for the current call or expression and is freed the moment it
+    returns. Bare literals are perfectly fine as transient arguments, which is why
+    <code>cssc::outln("hi")</code> just works. But if you want to keep such a value, you have to
+    copy it into a slot that owns it, with <code>&amp;</code>. Give it an owner or it dies. This one
+    rule is why references are the default (you're holding the real thing), why
+    <code>#delete</code> on a reference frees the referent, and why a <code>select</code> cursor has to be
+    copied to survive its loop.</p>
+    <h2>The three regions</h2>
+    <p>Every variable lives in exactly one region, chosen by the directive that declared
+    it.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Directive</th>
+    <th>Syntax</th>
+    <th>Default capacity</th>
+    <th>Freed when</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#stack</code></td>
+    <td><code>#stack[type, bits] name = init;</code></td>
+    <td>256 bits</td>
+    <td>only by <code>#delete[name]</code>. Leaks otherwise.</td>
+    </tr>
+    <tr>
+    <td><code>#heap</code></td>
+    <td><code>#heap[type, bits] name = init;</code></td>
+    <td>1024 bits</td>
+    <td>at program end, or earlier with <code>#delete</code>, or at a bare block's <code>}</code> if declared inside one (see below).</td>
+    </tr>
+    <tr>
+    <td><code>#auto</code></td>
+    <td><code>#auto[type] name = init;</code></td>
+    <td>at least 32 bytes, grows as needed</td>
+    <td>only by <code>#delete[name]</code>. Leaks otherwise.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>The <code>bits</code> number is a capacity in bits, not bytes and not an element count.
+    <code>#stack[int, 32] x = 5;</code> reserves 32 bits, and writing a value that doesn't fit is a
+    hard runtime error, not a silent wraparound.</p>
+    <pre><code class="cssc">#stack[string, 256] name = &quot;Hello&quot;;          // 256-bit buffer, you must #delete it
+    #heap[vector&lt;int&gt;, 1024] data = [1, 2, 3];   // freed at program end
+    #auto[int] counter = 0;                      // grows as needed, you must #delete it
+    
+    #delete[name];
+    #delete[counter];
+    </code></pre>
+    <p>Floats are the exception to picking a width: <code>#stack[float, N]</code> with <code>N</code> below 64 is
+    rejected, because a float is always 64-bit. The minimum is <code>#stack[float, 64]</code>. See
+    <a href="01-types-and-values.html">Types &amp; Values</a>.</p>
+    <p>Choosing between them is usually simple. Use <code>#stack</code> for locals and members whose
+    lifetime you'll manage yourself. Use <code>#heap</code> for large or long-lived data that
+    should survive ordinary scope exit and is guaranteed gone at program end even if you
+    forget. Use <code>#auto</code> when you don't want to think about the bit count, keeping in
+    mind you still have to <code>#delete</code> it.</p>
+    <h2>When things actually get freed</h2>
+    <p>This is the part people misread most, so let me be exact about it.</p>
+    <p><code>#heap</code> is not freed when a block ends. It's freed at the end of the program.
+    Ordinary control-flow blocks, <code>if</code>, <code>else</code>, <code>for</code>, <code>while</code>, and <code>select</code>, do not
+    free heap allocations you declare inside them.</p>
+    <p>There are two separate ideas here that are easy to confuse: whether a name is still
+    visible, and whether the buffer is still alive. A barrier scopes the first; the
+    region rule governs the second. Concretely:</p>
+    <ul>
+    <li>A bare <code>{ … }</code> block is a scoped heap arena. It sets up a fresh heap store for its
+      body and throws it away at the closing <code>}</code>. <code>#heap</code> allocations declared directly
+      inside a bare block die at that <code>}</code>.</li>
+    <li>A <code>#define</code>, <code>#cdefine</code>, or label body restores name bindings at <code>}</code>, so its
+      locals stop being visible, but it does not free the underlying <code>#stack</code>, <code>#heap</code>,
+      or <code>#auto</code> buffers on return. Those follow the normal region rule: stack and auto
+      have to be deleted or they leak, and heap lives until the program ends. That's
+      exactly why every <code>#define</code> that allocates a local also deletes it.</li>
+    <li>Object and sector members get handed to the object or sector and are released by
+      <code>#free</code>. See <a href="05-objects.html">Objects</a> and <a href="06-sectors.html">Sectors</a>.</li>
+    </ul>
+    <pre><code class="cssc">#heap[vector&lt;int&gt;, 1024] g = [];   // top level: lives until program end
+    
+    if (cond) {
+        #heap[vector&lt;int&gt;, 1024] a = []; // 'if' is not a barrier, so 'a' survives the
+    }                                    // block and is freed only at program end
+    
+    {
+        #heap[vector&lt;int&gt;, 1024] b = []; // a bare {} is a scoped heap arena,
+    }                                    // so 'b' is thrown away right here, at the }
+    </code></pre>
+    <p>So the mental model is: a bare <code>{}</code> block discards the heap it made, everything else
+    follows its region rule (stack and auto manual, heap at program end), and a
+    barrier's <code>}</code> only takes away name visibility.</p>
+    <p>The trap is thinking heap frees at the end of a block the way a scoped C++ object
+    does. Only the bare <code>{}</code> arena behaves that way. An <code>if</code> or <code>for</code> body doesn't free
+    its heap, and a <code>#define</code> body doesn't free its stack or auto buffers on return.
+    <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> has the full list of which constructs are
+    barriers.</p>
+    <h2>Hex-keyed variables</h2>
+    <p>A variable name is usually an identifier, but it can also be a hex literal, which
+    puts the variable in a global hex-keyed store (a uint64 key lookup instead of a
+    string one). It's a small performance convenience, handy on embedded targets.</p>
+    <pre><code class="cssc">#stack[int, 32] 0x0AA = 42;
+    cssc::outln(0x0AA);     // 42, resolved as a variable lookup
+    #delete[0x0AA];
+    </code></pre>
+    <p>The same hex literal used in arithmetic stays an ordinary integer constant as long
+    as no variable with that key exists. And hex-keyed variables are checked before raw
+    memory addresses, so <code>#delete[0x0AA]</code> deletes the variable, not "address 0x0AA".</p>
+    <h2><code>#delete</code></h2>
+    <pre><code class="cssc">#delete[name];
+    </code></pre>
+    <p>This frees the slot and runs a teardown cascade over its contents. Releasing a
+    container walks its members and drops a reference on each, and when a referenced
+    heap object hits zero references, its own teardown runs (for an object, that's its
+    <code>free { }</code> block). You don't have to track references by hand; the cascade does it.
+    Your job is to put <code>#delete</code> where a slot needs to die before its default
+    end-of-life.</p>
+    <h3>Deleting a reference frees the whole chain</h3>
+    <p>When you delete a slot that's a live reference to a caller's slot, whether it's a
+    parameter bound by <code>f(x)</code> or a <code>#req</code> reference import, the delete travels up the
+    entire chain of links, not just one level. It'll follow a chain up to 16 deep.</p>
+    <pre><code class="cssc">#stack[int, 32] f;
+    #define(f) {
+        #scanp(f, int, 0) p;   // p is a live reference to the caller's argument slot
+        #delete[p];            // frees p and every source slot p links to
+    }
+    
+    #stack[int, 32] x = 10;
+    f(x);                      // passed by reference, which is the default
+    cssc::outln(x);            // 0x0, because x was released through the cascade
+    </code></pre>
+    <p>If <code>p</code> refers to <code>q</code> which refers to <code>y</code>, then <code>#delete[p]</code> releases <code>p</code>, <code>q</code>, and
+    <code>y</code>.</p>
+    <p>A copy, on the other hand, is yours alone. If the call site passes a copy with
+    <code>h(&amp;y)</code>, the parameter is an independent slot, so <code>#delete[p]</code> frees only that copy
+    and leaves the original alone:</p>
+    <pre><code class="cssc">#stack[int, 32] h;
+    #define(h) {
+        #scanp(h, int, 0) p;   // a parameter, but bound to a copy at the call site below
+        #delete[p];
+    }
+    
+    #stack[int, 32] y = 10;
+    h(&amp;y);                     // pass a copy
+    cssc::outln(y);            // 10, y survives; only the copy was freed
+    </code></pre>
+    <p>In one line: deleting a reference frees the referent and its whole chain; deleting a
+    copy frees only the copy. Since CSSC binds by reference by default (parameters,
+    <code>#req</code>, <code>select</code> cursors), reach for <code>&amp;</code> whenever you want an independent lifetime.
+    It's the same reason a <code>select</code> cursor has to be copied to outlive its loop, in
+    <a href="09-control-flow.html">Control Flow</a>.</p>
+    <p>There's a related behavior worth separating out. When you assign to a reference
+    parameter and the function returns, the new value is written back to the immediate
+    caller's slot only, one level up. So the two behaviors differ in depth: deleting a
+    reference walks the full chain, while a parameter's mutation on return writes back
+    just one level.</p>
+    <h3>Guarding a maybe-freed slot</h3>
+    <p><code>#adress[var]</code> as an expression gives you the variable's address as an int, or <code>0x0</code>
+    when it isn't bound. That's the guard to use before a possibly redundant delete
+    (more on <code>#adress</code> below).</p>
+    <h2><code>#delmember</code>: empty a container, keep it</h2>
+    <p>Use <code>#delmember</code> when you want to clear a container's contents without freeing the
+    container itself. A render buffer you reuse every frame is the classic case.</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Form</th>
+    <th>What it does</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#delmember[container];</code></td>
+    <td>walk every entry and release its heap content. Size and capacity stay the same.</td>
+    </tr>
+    <tr>
+    <td><code>#delmember[container[idx]];</code></td>
+    <td>wipe only entry <code>idx</code>. Its slot stays in the container as <code>0x0</code>; the others are untouched.</td>
+    </tr>
+    <tr>
+    <td><code>#delmember[container[i][j]];</code></td>
+    <td>wipe only cell <code>j</code> inside nested element <code>i</code>. Everything else stays; that one cell becomes <code>0x0</code>.</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p>What "wipe" means per container:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Container</th>
+    <th><code>#delmember[c[i]]</code></th>
+    <th><code>#delmember[c]</code></th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>vector</code>/<code>array</code> of <code>int</code> or <code>float</code></td>
+    <td><code>c[i] = 0</code></td>
+    <td>all slots to 0</td>
+    </tr>
+    <tr>
+    <td><code>map&lt;string, int&gt;</code></td>
+    <td>that bucket: key released, value to 0</td>
+    <td>all buckets wiped</td>
+    </tr>
+    <tr>
+    <td><code>bind&lt;string, string&gt;</code></td>
+    <td>that pair: both strings released</td>
+    <td>all pairs wiped</td>
+    </tr>
+    <tr>
+    <td><code>array&lt;bind&gt;</code> or nested arrays</td>
+    <td>that entry: heap content released, entry to <code>0x0</code></td>
+    <td>all entries wiped</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <p><code>#delmember</code> is idempotent (wiping an already-wiped slot does nothing) and safe on
+    null or empty containers (it just returns).</p>
+    <pre><code class="cssc">#stack[array&lt;bind&gt;, 1024] Buffer;
+    tick:
+        Buffer.push_back({0, 19, &quot;hello&quot;});
+        render(Buffer);
+        #delmember[Buffer];        // clear the contents, keep the allocation
+    </code></pre>
+    <p><code>#delete[c]</code> already releases the members through its cascade, so
+    <code>#delmember[c]; #delete[c];</code> is redundant. Just <code>#delete[c]</code>.</p>
+    <h3>A worked example with references</h3>
+    <p><code>#delmember</code> wipes the slot inside the container, not whatever the slot points at.
+    If the wiped slot held a reference, the thing it referred to is untouched; only the
+    container's copy of the reference goes to <code>0x0</code>. A copy element (stored with <code>&amp;</code>) is
+    simply zeroed. Here's the whole picture in one program. If you can trace it, you
+    understand CSSC's value, reference, and lifetime model:</p>
+    <pre><code class="cssc">#stack[int, 32] x = 3;
+    #stack[array&lt;int&gt;, 1028] f = {&amp;x, *x};  // f[0] = &amp;x (frozen copy = 3), f[1] = *x (live ref)
+    x = 32;
+    cssc::outln(f);                          // {3, 32}: copy frozen at 3, ref followed to 32
+    x = 100;                                 // f[1] (the ref) now reads 100
+    
+    #stack[array&lt;int&gt;, 2048] n = {&amp;f, *f};  // n[0] = &amp;f (deep copy of f right now = {3, 100}, frozen)
+                                             // n[1] = *f (live ref to the whole f container)
+    f.push_back(&amp;x);                         // f gains a third cell: &amp;x = frozen copy = 100
+    x = 500;                                 // f[1] (the ref to x) now reads 500
+    cssc::outln(n);                          // {{3, 100}, {3, 500, 100}}
+                                             // n[0] is the frozen snapshot; n[1] tracks live f
+    
+    #delete[x];                              // every live reference to x now dangles to 0x0
+    cssc::outln(n);                          // {{3, 100}, {3, 0x0, 100}}
+                                             // n[1][1] was *x, now 0x0; the &amp;-copies survive
+    
+    #delmember[n[0]];                        // wipe n's first element to 0x0 (n stays size 2)
+    cssc::outln(n);                          // {0x0, {3, 0x0, 100}}
+    
+    #delmember[n[1][0]];                     // wipe cell 0 inside n[1] to 0x0
+    cssc::outln(n);                          // {0x0, {0x0, 0x0, 100}}
+    
+    #delete[f];
+    #delete[n];
+    </code></pre>
+    <p>Two things to take from it. <code>&amp;</code> freezes at the moment you write it, so <code>&amp;f</code> captured
+    <code>{3, 100}</code>, the value <code>f</code> had then, not its earlier <code>{3, 32}</code>. And <code>#delmember</code>
+    edits the container in place, one cell or the whole thing, while <code>#delete</code> on a
+    referent is what makes the references to it read <code>0x0</code>.</p>
+    <h2><code>#free</code>: objects, sectors, module aliases</h2>
+    <p><code>#free[X]</code> runs <code>X</code>'s <code>free { }</code> teardown and then tears the entity down. It's the
+    right teardown for objects, sectors, and loaded module or <code>.obj</code> aliases, not
+    <code>#delete</code>.</p>
+    <pre><code class="cssc">#free[Engine];   // runs Engine's free { } then destroys the sector
+    #free[mh];       // releases a #depend'd .obj alias (see Modules)
+    </code></pre>
+    <p>The three teardown operators side by side:</p>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <th>Operation</th>
+    <th>The container/entity</th>
+    <th>Its contents</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td><code>#delete[c]</code></td>
+    <td>freed</td>
+    <td>freed (cascade)</td>
+    </tr>
+    <tr>
+    <td><code>#free[c]</code></td>
+    <td>freed (object/sector/module)</td>
+    <td>freed (<code>free {}</code> block plus cascade)</td>
+    </tr>
+    <tr>
+    <td><code>#delmember[c]</code></td>
+    <td>kept</td>
+    <td>freed</td>
+    </tr>
+    </tbody>
+    </table></div>
+    <h2>References and copies: what points at what</h2>
+    <p>This is the section people most often mis-remember, so here's the whole thing.
+    There are two separate ideas, and keeping them apart is what makes this click.</p>
+    <p>First, what a plain <code>b = a</code> does depends on the type of <code>a</code>. Second, a live
+    cross-slot reference, where writing <code>a</code> is seen through <code>b</code> even for a scalar, comes
+    only from a small set of explicit places, never from a plain <code>b = a</code>. And wherever
+    you genuinely want an independent clone, <code>&amp;a</code> gives you a deep copy.</p>
+    <h3>Plain assignment <code>b = a</code></h3>
+    <ul>
+    <li>A scalar (<code>int</code>, <code>float</code>, <code>bool</code>) is value-copied. <code>b</code> is its own slot, and a
+      later change to <code>a</code> doesn't touch <code>b</code>.</li>
+    <li>A string is value-copied. Independent.</li>
+    <li>A container (<code>array</code>, <code>vector</code>, <code>map</code>, <code>bind</code>, object, sector) is aliased. <code>b</code> and
+      <code>a</code> refer to the same underlying container, and a change through either name shows
+      up through the other.</li>
+    </ul>
+    <pre><code class="cssc">#stack[int, 32] a = 42;
+    #stack[int, 32] b = a;     // scalar, so a value copy
+    a = 100;
+    cssc::outln(b);            // 42, b never moved
+    
+    #stack[vector&lt;int&gt;, 256] xs = {1, 2, 3};
+    #stack[vector&lt;int&gt;, 256] ys = xs;   // container, so an alias
+    xs.push_back(4);
+    cssc::outln(ys.size());    // 4, it's the same container
+    </code></pre>
+    <p>The asymmetry is on purpose. A scalar or string is its value, so copying it is cheap
+    and almost always what you meant. A container is a heap object you reach through a
+    handle, and copying the whole thing on every <code>=</code> would be both surprising and
+    expensive, so a plain assignment shares the handle. When you want the other
+    behavior, say so: <code>&amp;xs</code> deep-copies a container, and the reference sites below give
+    you a live link to a scalar.</p>
+    <h3>Deep copy with <code>&amp;a</code></h3>
+    <p><code>&amp;a</code> is a recursive deep copy. It makes <code>b</code> fully independent, even for containers.
+    For a scalar, <code>&amp;a</code> reads the same as <code>a</code>, since a scalar is already a value.</p>
+    <pre><code class="cssc">#stack[vector&lt;int&gt;, 256] xs = {1, 2, 3};
+    #stack[vector&lt;int&gt;, 256] ys = &amp;xs;   // an independent clone
+    xs.push_back(4);
+    cssc::outln(ys.size());              // 3, ys never saw the push
+    </code></pre>
+    <h3>Where live references actually come from</h3>
+    <p>A live cross-slot reference, where a write through one name is seen through the
+    other for every type including scalars, comes only from these four places. A plain
+    scalar declaration like <code>#stack[int] b = a;</code> is not one of them; that's the value
+    copy above.</p>
+    <ol>
+    <li><strong>Argument passing.</strong> <code>f(x)</code> passes a live reference, so the callee can write back
+       to your slot; <code>f(&amp;x)</code> passes a deep copy. The call site decides. A callee
+       <code>&amp;param</code> hint is only an analyzer note, never an override. See
+       <a href="04-callables.html">Callables</a>.</li>
+    <li><strong>Storing into a container.</strong> <code>c.push_back(x)</code> stores a live reference to <code>x</code>;
+       <code>c.push_back(&amp;x)</code> stores a frozen copy. Every store method follows this
+       (<code>push_back</code>, <code>push_front</code>, <code>insert</code>, <code>append</code>, <code>set</code>, the <code>emplace_*</code> family,
+       <code>push</code>, <code>pushafter</code>).</li>
+    <li><strong><code>#req</code> import.</strong> <code>#req[X] Y;</code> binds <code>Y</code> as a live reference to <code>X</code>; <code>#req[X] &amp;Y;</code>
+       is a deep-copy snapshot. See <a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a>.</li>
+    <li><strong>An explicit <code>*x</code>.</strong> Writing <code>*x</code> as an argument or a container element takes a
+       reference on purpose, spelled out. <code>{&amp;x, *x}</code> stores a frozen copy of <code>x</code> and a
+       live reference to <code>x</code>, side by side.</li>
+    </ol>
+    <pre><code class="cssc">#stack[array&lt;int&gt;, 64] live = {};
+    #stack[array&lt;int&gt;, 64] frozen = {};
+    #stack[int, 32] x = 3;
+    live.push_back(x);      // bare, so a live reference
+    frozen.push_back(&amp;x);   // &amp;x, so a frozen copy
+    x = 500;
+    cssc::outln({live});    // {500}, it followed x
+    cssc::outln({frozen});  // {3}, independent
+    </code></pre>
+    <p>Because bare means reference, a loop like <code>while (i &lt; n) { c.push_back(i); i++; }</code>
+    stores <code>n</code> references to the same <code>i</code>, and every element ends up equal to <code>i</code>'s
+    final value. To collect distinct values, store copies with <code>c.push_back(&amp;i)</code>. The
+    analyzer flags the related dangling case too: a bare or <code>*x</code> store into a container
+    that's never freed, followed by <code>#delete[x]</code>, leaves the stored reference reading
+    <code>0x0</code>. Fix it with a copy, or free the container before the referent.</p>
+    <h3>Indexing <code>list[i]</code></h3>
+    <p>Indexing in place is a live view: <code>list[i] = v</code> writes through, and
+    <code>list[i].method()</code> mutates the real element. But binding <code>list[i]</code> into a new scalar
+    value-copies it, like any scalar assignment:</p>
+    <pre><code class="cssc">#stack[vector&lt;int&gt;, 256] list = {10, 20, 30};
+    list[1] = 99;                     // in place, list is now {10, 99, 30}
+    
+    #stack[int, 32] elem = list[1];   // a copy of 99, its own slot
+    list[1] = 50;
+    cssc::outln(elem);                // 99, unchanged
+    </code></pre>
+    <h3>Containers keep your values alive</h3>
+    <p>When you add a variable to a container, the container holds a reference to that
+    value. Deleting your local slot drops one reference, but the value survives as long
+    as the container still holds it.</p>
+    <pre><code class="cssc">#heap[array&lt;auto&gt;, 1024] queue;
+    {
+        #stack[int, 32] a = 5;
+        queue.add(a);      // queue now references a's value
+    }                      // a's local slot is gone (bare {} barrier)
+    cssc::outln(queue[0]); // 5, the value lives on through queue
+    #delete[queue];        // the cascade releases queue[0]'s reference, freeing it
+    </code></pre>
+    <h2>Addresses: <code>#adress</code> and <code>#reflect</code></h2>
+    <pre><code class="cssc">#adress[var] addr;              // read the real memory address into addr
+    #reflect[addr] var;             // resolve an address back to its value
+    
+    if (#adress[maybe] != 0x0) {    // guard: 0x0 means not bound
+        #delete[maybe];
+    }
+    </code></pre>
+    <p>As a statement, <code>#adress[var] a;</code> stores the address. As an expression,
+    <code>#adress[var]</code> is the address as an int, or <code>0x0</code> if unbound. <code>null</code> and <code>0x0</code> are
+    the same null sentinel, as in <a href="01-types-and-values.html">Types &amp; Values</a>.</p>
+    <p>One spelling note: the directive is <code>#adress</code>, with one <code>d</code>. <code>#address</code> doesn't
+    exist, and neither does <code>#memory</code> (the parser rejects it as a removed name). Don't
+    "correct" the spelling.</p>
+    <h2>Reshaping allocations</h2>
+    <pre><code class="cssc">#reallocate[var, type, stack, 512] newvar;   // move var into a new region/size
+    #resize[buf, 64];                             // grow the existing alloc by 64 bits
+    #resize[buf, -32];                            // shrink it by 32 bits
+    </code></pre>
+    <ul>
+    <li><code>#reallocate[var, type, stack|heap, size?] newvar;</code> is a real region move into a
+      fresh stack or heap buffer. It's type-strict, so the <code>type</code> has to match, with no
+      coercion. Leave <code>size</code> off and it grows by the default 32 bits.</li>
+    <li><code>#resize[var, ±bits];</code> grows or shrinks an existing allocation in place, following
+      the reference chain to the real buffer.</li>
+    <li><code>#cast[source, target] result;</code> is an explicit coercion into an existing <code>#heap</code>
+      target.</li>
+    <li><code>#set[0xADDR, bits] = value;</code> writes a coerced value at a known address, with the
+      bit limit checked.</li>
+    </ul>
+    <p>These are all manual, deliberate operations. No hidden copies beyond what you ask
+    for, and no automatic growth for <code>#stack</code> or <code>#heap</code> (only <code>#auto</code> grows on its
+    own). The full syntax for each is in <a href="08-directives.html">Directives</a>.</p>
+    <h2>The short version</h2>
+    <ul>
+    <li>Heap frees at the end of the program, not the end of a block. Only a bare <code>{}</code>
+      block frees its heap early. <code>if</code>, <code>for</code>, <code>while</code>, and <code>select</code> don't.</li>
+    <li><code>b = a</code> makes <code>b</code> track <code>a</code> only for containers, which alias. Scalars and strings
+      are value-copied. A live reference to a scalar comes only from argument passing, a
+      container store, <code>#req</code>, or an explicit <code>*x</code>, never from a plain <code>b = a</code>.</li>
+    <li><code>#delete</code> on a reference cascades up the entire chain and frees every source slot
+      the reference links to. If you meant to keep the caller's slot, pass a copy with
+      <code>f(&amp;x)</code>, or don't delete.</li>
+    <li><code>#stack</code> and <code>#auto</code> never clean themselves up. You <code>#delete</code> them, or they leak.
+      Only <code>#heap</code> self-cleans, at program end.</li>
+    <li><code>#delmember</code> keeps the container and clears its contents; <code>#delete</code> frees the
+      container too.</li>
+    <li>Objects, sectors, and modules use <code>#free</code>, not <code>#delete</code>, so their <code>free { }</code> block
+      runs.</li>
+    </ul>
+    <h2>See also</h2>
+    <ul>
+    <li><a href="03-scopes-and-req.html">Scopes &amp; <code>#req</code></a> for isolation barriers and <code>#req</code> reference
+      versus snapshot.</li>
+    <li><a href="04-callables.html">Callables</a> for call-site reference or copy, and <code>mirror</code> versus
+      <code>return</code>.</li>
+    <li><a href="01-types-and-values.html">Types &amp; Values</a> for what scalar versus container means,
+      and <code>null</code>/<code>0x0</code>.</li>
+    <li><a href="08-directives.html">Directives</a> for the exact syntax of every <code>#…</code> directive.</li>
+    </ul>
+    <nav class="chapter-nav"><a href="01-types-and-values.html">&lt; Types & Values</a> <a href="03-scopes-and-req.html">Scopes & `#req` &gt;</a></nav>
+  </main>
+
+  <footer class="foot">
+    <p>CSSC, by lilias hatterscheidt.</p>
+    <p>Write to me at
+      <span class="mail" data-user="hatterscheidt.lilias" data-host="gmail.com"
+        >hatterscheidt.lilias (at) gmail (dot) com</span>, or find me on
+      <a href="https://github.com/liliassg">github</a>.</p>
+  </footer>
+
+</div>
+
+<script src="../cssc.js"></script>
+</body>
+</html>

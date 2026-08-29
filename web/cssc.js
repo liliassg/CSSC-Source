@@ -95,6 +95,33 @@
     blocks[i].innerHTML = highlight(blocks[i].textContent);
   }
 
+  /* Inline code in the reference is written as plain markdown, so it all
+     arrives in one color. Give the fragments the same colors the editor uses,
+     so `#delete` reads as a directive here too. Anything that isn't a
+     directive, keyword or type keeps the default. */
+  var inline = document.querySelectorAll("code:not(.cssc)");
+  for (var k = 0; k < inline.length; k++) {
+    var el = inline[k];
+    if (el.parentNode && el.parentNode.tagName === "PRE") continue;
+    if (el.className) continue;
+
+    var word = el.textContent.trim();
+    if (/^#[A-Za-z_]/.test(word)) {
+      el.className = "tok-directive";
+    } else if (KEYWORDS.indexOf(word) !== -1) {
+      el.className = "tok-keyword";
+    } else if (TYPES.indexOf(word) !== -1) {
+      el.className = "tok-type";
+    }
+  }
+
+  /* The 404 page quotes the address you actually asked for, the way the
+     analyzer quotes the file it just read. */
+  var requested = document.getElementById("requested-path");
+  if (requested) {
+    requested.textContent = location.pathname + location.search;
+  }
+
   var mails = document.querySelectorAll(".mail");
   for (var j = 0; j < mails.length; j++) {
     var el = mails[j];

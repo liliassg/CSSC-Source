@@ -23,6 +23,10 @@
   --rose: #F0A0C0;
   --rule: #E6E2F0;
 
+  /* the orange the IDE paints an allocation that never gets freed */
+  --error: #E0704A;
+  --error-bg: #2E1F1E;
+
   /* syntax, sampled pixel for pixel out of the IDE screenshots */
   --syn-directive: #E060C0;
   --syn-keyword: #C77DFF;
@@ -538,5 +542,118 @@ tbody td:first-child {
 
   ul.plain li::before {
     left: -24px;
+  }
+}
+
+/* ---------- documentation ---------- */
+
+/* On the doc pages the wordmark doubles as the way home. */
+.wordmark a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.doc h1 {
+  margin: 0 0 32px;
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 400;
+  color: var(--text-bright);
+}
+
+.doc h2 {
+  margin: 64px 0 24px;
+}
+
+.doc h3 {
+  margin: 40px 0 16px;
+}
+
+.doc ul,
+.doc ol {
+  margin: 0 0 32px;
+  padding-left: 32px;
+}
+
+.doc li {
+  margin-bottom: 8px;
+}
+
+.doc li::marker {
+  color: var(--magenta);
+}
+
+.doc blockquote {
+  margin: 0 0 32px;
+  padding-left: 24px;
+  border-left: 2px solid var(--panel-edge);
+  color: var(--muted);
+}
+
+/* Reference tables carry sentences, not numbers, so they wrap. Fixed layout
+   keeps the column edges on whole pixels for the two, three and four column
+   tables, which is nearly all of them. */
+.doc table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.doc th,
+.doc td {
+  white-space: normal;
+  padding-right: 24px;
+}
+
+.doc hr {
+  height: 2px;
+  margin: 64px 0;
+  border: 0;
+  background: var(--panel-edge);
+}
+
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+  margin-top: 64px;
+  padding-top: 32px;
+  border-top: 2px solid var(--panel-edge);
+}
+
+.chapter-nav a:only-child:last-child {
+  margin-left: auto;
+}
+
+/* ---------- not found ---------- */
+
+.notfound {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error);
+}
+
+.tok-error {
+  color: var(--error);
+}
+
+@media (max-width: 900px) {
+  .doc h1 {
+    font-size: 24px;
+    line-height: 32px;
+    margin-bottom: 24px;
+  }
+
+  .doc h2 {
+    margin: 48px 0 16px;
+  }
+
+  .doc h3 {
+    margin: 32px 0 8px;
+  }
+
+  .chapter-nav {
+    margin-top: 48px;
+    padding-top: 24px;
+    gap: 16px;
   }
 }
