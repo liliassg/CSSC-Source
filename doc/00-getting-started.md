@@ -5,10 +5,9 @@ you need before the rest of the reference makes sense. Give it ten minutes.
 
 ## Install
 
-On Windows, download the release zip, extract it, and run `CSSC-Setup.exe`. Accept
-the license, click Install, and open a new terminal when it's done.
-
-On Linux, extract the zip and run `./install.sh`, then open a new terminal.
+Download the release zip and extract it. Windows and Linux both get a visual
+installer, so it's the same on either one: run it, accept the license, click
+Install, and open a new terminal when it's done.
 
 Then check it worked:
 
