@@ -25,7 +25,6 @@ decide where each value lives and when it goes away.
 | `modules/`, `user/` | Built-in modules and example programs. |
 | `doc/` | The language reference. Start at [`doc/00-getting-started.md`](doc/00-getting-started.md). |
 | `web/` | The source of cssclang.com. |
-| `webtools/` | Build scripts for the site. |
 
 ## The toolchain
 
